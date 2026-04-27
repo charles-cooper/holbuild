@@ -22,6 +22,7 @@ This prototype is intentionally small:
 - schedules build actions serially by default or in DAG-ready parallel order with `-jN`
 - executes simple theory-script builds into project `.hol/` without Holmake
 - records local action metadata and skips unchanged actions
+- publishes/restores simple theory semantic artifacts through the global cache
 - includes the explicit HOL base state/toolchain in prototype action keys
 - saves successor-ready local `final_context.save` checkpoints for theory actions
 - exports explicit project heap targets from `[[heap]]` entries using local SaveState
@@ -132,10 +133,12 @@ boundaries, and successor-ready final context, stored locally under
 logical objects, load the generated theory modules, and save the requested heap
 with PolyML SaveState.
 
-The optional global cache is not used by builds yet, but `holbuild cache gc`
-already implements the intended cleanup surface. It removes stale temporary
-entries, stale action manifests, and old unreferenced blobs after 7 days by
-default.
+The optional global cache stores simple theory semantic artifacts by action key:
+`Theory.sig`, a path-rebased `Theory.sml` template, and `Theory.dat`. On a cache
+hit, holbuild materializes those artifacts into local `.hol/`, writes local load
+manifests, and recreates local checkpoints from the generated theory module.
+`holbuild cache gc` removes stale temporary entries, stale action manifests, and
+old unreferenced blobs after 7 days by default.
 
 `holbuild run` and `holbuild repl` generate `.hol/holbuild-run-context.sml`
 in the project root before loading `[run].loads` and user-supplied arguments.

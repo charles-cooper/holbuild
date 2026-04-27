@@ -154,6 +154,12 @@ fun final_context_path project node = checkpoint_base project node ^ ".final_con
 fun remove_tree path =
   ignore (OS.Process.system ("rm -rf " ^ HolbuildToolchain.quote path))
 
+fun file_exists path = FS.access(path, [FS.A_READ]) handle OS.SysErr _ => false
+
+fun file_hash path = SHA1_ML.sha1_file {filename = path}
+
+fun current_metadata path = SOME (read_text path) handle IO.Io _ => NONE
+
 fun run_hol_files tc stage holstate files error_message =
   let
     val status =
@@ -163,6 +169,145 @@ fun run_hol_files tc stage holstate files error_message =
     if HolbuildToolchain.success status then ()
     else raise Error error_message
   end
+
+val cache_sml_token = "__HOLBUILD_THEORY_DAT_LOAD__"
+
+fun warn msg = TextIO.output(TextIO.stdErr, "holbuild: warning: " ^ msg ^ "\n")
+
+fun cache_root () = HolbuildCache.cache_root ()
+
+fun cache_blob root path =
+  let
+    val hash = file_hash path
+    val blob = HolbuildCache.blob_path root hash
+  in
+    if file_exists blob then () else copy_binary path blob;
+    hash
+  end
+
+fun cache_manifest_text {input_key, sig_hash, sml_hash, dat_hash} =
+  String.concatWith "\n"
+    ["holbuild-cache-action-v1",
+     "input_key=" ^ input_key,
+     "kind=theory",
+     "blob sig " ^ sig_hash,
+     "blob sml-template " ^ sml_hash,
+     "blob dat " ^ dat_hash] ^ "\n"
+
+fun publish_theory_cache input_key staged_dat_ref staged_sig staged_sml staged_dat =
+  let
+    val root = cache_root ()
+    val _ = HolbuildCache.ensure_layout root
+    val template = FS.tmpName ()
+    val _ = write_text template (replace_all staged_dat_ref cache_sml_token (read_text staged_sml))
+    val sig_hash = cache_blob root staged_sig
+    val sml_hash = cache_blob root template
+    val dat_hash = cache_blob root staged_dat
+    val manifest = cache_manifest_text {input_key = input_key, sig_hash = sig_hash,
+                                        sml_hash = sml_hash, dat_hash = dat_hash}
+    val manifest_path = HolbuildCache.action_manifest root input_key
+    val existing = current_metadata manifest_path
+  in
+    case existing of
+        SOME old => if old = manifest then ()
+                    else warn ("cache entry already exists with different outputs: " ^ input_key)
+      | NONE => (ensure_parent manifest_path; write_text manifest_path manifest);
+    FS.remove template handle OS.SysErr _ => ()
+  end
+  handle e => warn ("could not publish cache entry: " ^ General.exnMessage e)
+
+fun blob_line role line =
+  case String.tokens Char.isSpace line of
+      ["blob", role', hash] => if role = role' then SOME hash else NONE
+    | _ => NONE
+
+fun first_some f values =
+  case values of
+      [] => NONE
+    | x :: xs =>
+        case f x of
+            SOME y => SOME y
+          | NONE => first_some f xs
+
+fun required_blob role lines =
+  case first_some (blob_line role) lines of
+      SOME hash => hash
+    | NONE => raise Error ("cache manifest missing blob role: " ^ role)
+
+fun cache_manifest_blobs root input_key =
+  let
+    val manifest = HolbuildCache.action_manifest root input_key
+    val lines = String.tokens (fn c => c = #"\n") (read_text manifest)
+    val _ =
+      if List.exists (fn line => line = "input_key=" ^ input_key) lines then ()
+      else raise Error "cache manifest input key mismatch"
+  in
+    {sig_hash = required_blob "sig" lines,
+     sml_hash = required_blob "sml-template" lines,
+     dat_hash = required_blob "dat" lines}
+  end
+
+fun copy_blob root hash dst =
+  let val blob = HolbuildCache.blob_path root hash
+  in
+    if file_exists blob then copy_binary blob dst
+    else raise Error ("cache blob missing: " ^ hash)
+  end
+
+fun write_local_theory_manifests plan node =
+  let
+    val {sig_path, sml_path, script_uo, theory_ui, theory_uo, ...} = theory_outputs node
+    val deps = HolbuildBuildPlan.direct_project_deps plan node
+  in
+    write_manifest theory_ui [sig_path];
+    write_manifest theory_uo (map dependency_sml deps @ [sml_path]);
+    write_manifest script_uo [source_file node]
+  end
+
+fun save_cached_theory_checkpoints tc project plan input_key node =
+  let
+    val stage = stage_dir project input_key
+    val preload = Path.concat(stage, "holbuild-cache-preload.sml")
+    val final_loader = Path.concat(stage, "holbuild-cache-save-final-context.sml")
+    val deps_loaded = deps_loaded_path project node
+    val final_context = final_context_path project node
+    val {sig_path, sml_path, ...} = theory_outputs node
+  in
+    ensure_dir stage;
+    ensure_parent deps_loaded;
+    ensure_parent final_context;
+    write_preload plan node deps_loaded preload;
+    write_final_context_loader {sig_path = sig_path, sml_path = sml_path,
+                                output = final_context, path = final_loader};
+    run_hol_files tc stage (HolbuildToolchain.base_state tc) [preload, final_loader]
+      "hol run failed while saving cached theory checkpoints";
+    remove_tree stage
+  end
+
+fun materialize_theory_cache tc project plan input_key node =
+  let
+    val root = cache_root ()
+    val manifest = HolbuildCache.action_manifest root input_key
+    val _ = if file_exists manifest then () else raise Error "cache entry not found"
+    val _ = FS.setTime (manifest, NONE) handle OS.SysErr _ => ()
+    val {sig_hash, sml_hash, dat_hash} = cache_manifest_blobs root input_key
+    val {sig_path, sml_path, data_path, ...} = theory_outputs node
+    val load_data_path = data_path ^ ".load"
+    val template = FS.tmpName ()
+  in
+    copy_blob root dat_hash data_path;
+    copy_blob root dat_hash load_data_path;
+    copy_blob root sig_hash sig_path;
+    copy_blob root sml_hash template;
+    write_text sml_path (replace_all cache_sml_token load_data_path (read_text template));
+    FS.remove template handle OS.SysErr _ => ();
+    write_local_theory_manifests plan node;
+    save_cached_theory_checkpoints tc project plan input_key node;
+    print (logical_name node ^ " restored from cache\n");
+    true
+  end
+  handle Error "cache entry not found" => false
+       | e => (warn ("cache entry unusable for " ^ logical_name node ^ ": " ^ General.exnMessage e); false)
 
 fun build_theory tc project plan keys node =
   let
@@ -195,11 +340,9 @@ fun build_theory tc project plan keys node =
     val _ = copy_rewriting_path {src = staged_sml, dst = sml_path,
                                  old_path = staged_dat_reference stage node,
                                  new_path = load_data_path}
-    val deps = HolbuildBuildPlan.direct_project_deps plan node
+    val _ = publish_theory_cache input_key (staged_dat_reference stage node) staged_sig staged_sml staged_dat
   in
-    write_manifest theory_ui [sig_path];
-    write_manifest theory_uo (map dependency_sml deps @ [sml_path]);
-    write_manifest script_uo [source_file node];
+    write_local_theory_manifests plan node;
     remove_tree stage
   end
 
@@ -218,8 +361,6 @@ fun metadata_path (project : HolbuildProject.t) node =
     Path.concat(base, #relative_path source ^ ".key")
   end
 
-fun file_exists path = FS.access(path, [FS.A_READ]) handle OS.SysErr _ => false
-
 fun output_paths project node =
   let val artifacts = source_artifacts node
       val base = #generated artifacts @ #objects artifacts @ #theory_data artifacts
@@ -230,10 +371,6 @@ fun output_paths project node =
           (one_with_suffix ".dat" (#theory_data artifacts) ^ ".load") :: base
       | _ => base
   end
-
-fun current_metadata path = SOME (read_text path) handle IO.Io _ => NONE
-
-fun file_hash path = SHA1_ML.sha1_file {filename = path}
 
 fun output_hash_line path = "output-sha1=" ^ path ^ " " ^ file_hash path
 
@@ -276,7 +413,9 @@ fun build_node tc project plan keys toolchain_key node =
       print (HolbuildBuildPlan.logical_name node ^ " is up to date\n")
     else
       (case #kind (HolbuildBuildPlan.source_of node) of
-           HolbuildSourceIndex.TheoryScript => build_theory tc project plan keys node
+           HolbuildSourceIndex.TheoryScript =>
+             if materialize_theory_cache tc project plan input_key node then ()
+             else build_theory tc project plan keys node
          | HolbuildSourceIndex.Sml => build_sml_like node ".uo"
          | HolbuildSourceIndex.Sig => build_sml_like node ".ui";
        write_metadata project input_key toolchain_key node)

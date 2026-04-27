@@ -30,8 +30,8 @@ use "sml/source_index.sml";
 use "sml/dependencies.sml";
 use "sml/build_plan.sml";
 use "sml/toolchain.sml";
-use "sml/build_exec.sml";
 use "sml/cache.sml";
+use "sml/build_exec.sml";
 use "sml/commands.sml";
 
 fun main () = HolbuildCommands.main (CommandLine.arguments())

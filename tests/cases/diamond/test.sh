@@ -10,6 +10,7 @@ source "$SCRIPT_DIR/../../lib.sh"
 tmpdir=$(make_temp_dir)
 cleanup() { rm -rf "$tmpdir"; }
 trap cleanup EXIT
+export HOLBUILD_CACHE="$tmpdir/cache"
 
 project=$tmpdir/project
 mkdir -p "$project/src"

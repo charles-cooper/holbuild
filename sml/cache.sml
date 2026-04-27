@@ -32,6 +32,16 @@ fun cache_root () =
               SOME home => Path.concat(Path.concat(home, ".cache"), "holbuild")
             | NONE => raise Error "set HOME, XDG_CACHE_HOME, or HOLBUILD_CACHE"
 
+fun actions_dir root = Path.concat(root, "actions")
+fun blobs_dir root = Path.concat(root, "blobs")
+fun tmp_dir root = Path.concat(root, "tmp")
+fun action_dir root key = Path.concat(actions_dir root, key)
+fun action_manifest root key = Path.concat(action_dir root key, "manifest")
+fun blob_path root hash = Path.concat(blobs_dir root, hash)
+
+fun ensure_layout root =
+  (ensure_dir (actions_dir root); ensure_dir (blobs_dir root); ensure_dir (tmp_dir root))
+
 fun children dir =
   if not (path_exists dir) then []
   else
