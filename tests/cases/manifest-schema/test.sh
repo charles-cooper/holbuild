@@ -72,6 +72,16 @@ member = ["src"]
 TOML
 expect_context_failure typo_build "unknown field in build: member"
 
+make_project no_paths_includes
+cat > "$tmpdir/no_paths_includes/holproject.toml" <<'TOML'
+[project]
+name = "no_paths_includes"
+
+[paths]
+includes = ["src"]
+TOML
+expect_context_failure no_paths_includes "unknown field in holproject.toml: paths"
+
 make_project bad_type
 cat > "$tmpdir/bad_type/holproject.toml" <<'TOML'
 [project]

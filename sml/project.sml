@@ -30,7 +30,6 @@ type t =
     name : string option,
     version : string option,
     members : string list,
-    includes : string list,
     dependencies : dependency list,
     overrides : override list,
     run_heap : string option,
@@ -180,13 +179,11 @@ fun validate_dependency_table (name, table) =
 fun validate_manifest_table table =
   let
     val _ = require_known_fields "holproject.toml"
-              ["holbuild", "project", "build", "paths", "dependencies", "run", "heap"] table
+              ["holbuild", "project", "build", "dependencies", "run", "heap"] table
     val _ = Option.app (require_known_fields "project" ["name", "version"])
               (table_field table ["project"])
     val _ = Option.app (require_known_fields "build" ["members"])
               (table_field table ["build"])
-    val _ = Option.app (require_known_fields "paths" ["includes"])
-              (table_field table ["paths"])
     val _ = Option.app (require_known_fields "run" ["heap", "loads"])
               (table_field table ["run"])
     val _ = List.app validate_dependency_table (named_table_entries table ["dependencies"])
@@ -242,7 +239,6 @@ fun parse_at {manifest, root, overrides} =
     val _ = validate_manifest_table table
     val project = table_field table ["project"]
     val build = table_field table ["build"]
-    val paths = table_field table ["paths"]
     val run = table_field table ["run"]
     fun from opt f default = case opt of NONE => default | SOME t => f t
   in
@@ -251,7 +247,6 @@ fun parse_at {manifest, root, overrides} =
       name = Option.mapPartial (fn t => string_field t "name") project,
       version = Option.mapPartial (fn t => string_field t "version") project,
       members = from build (fn t => string_array_field t "members") ["."],
-      includes = from paths (fn t => string_array_field t "includes") [],
       dependencies = dependencies_at table,
       overrides = overrides,
       run_heap = Option.mapPartial (fn t => string_field t "heap") run,
@@ -276,7 +271,6 @@ fun abs_under root path =
   if Path.isAbsolute path then path else Path.concat(root, path)
 
 fun abs_member ({root, ...} : t) member = abs_under root member
-fun abs_include ({root, ...} : t) include_path = abs_under root include_path
 fun abs_run_heap ({root, run_heap, ...} : t) = Option.map (abs_under root) run_heap
 
 fun override_path overrides name =
@@ -395,7 +389,7 @@ fun packages (project : t) =
 
 fun describe (project : t) =
   let
-    val {root, manifest, name, version, members, includes, dependencies,
+    val {root, manifest, name, version, members, dependencies,
          overrides, run_heap, run_loads, heaps} = project
     fun opt label value =
       case value of NONE => () | SOME s => print (label ^ s ^ "\n")
@@ -405,7 +399,6 @@ fun describe (project : t) =
     opt "name: " name;
     opt "version: " version;
     print ("members: " ^ String.concatWith ", " members ^ "\n");
-    print ("includes: " ^ String.concatWith ", " includes ^ "\n");
     List.app (fn dep => print ("dependency: " ^ dependency_to_string project dep ^ "\n")) dependencies;
     List.app (fn override => print ("override: " ^ override_to_string override ^ "\n")) overrides;
     opt "run.heap: " run_heap;
