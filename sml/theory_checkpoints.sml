@@ -1,9 +1,11 @@
 structure HolbuildTheoryCheckpoints =
 struct
 
-type boundary = {name : string, safe_name : string, boundary : int, prefix_hash : string}
-type checkpoint = {name : string, safe_name : string, boundary : int,
-                   prefix_hash : string, path : string}
+type boundary = {name : string, safe_name : string, call_start : int,
+                 boundary : int, prefix_hash : string}
+type checkpoint = {name : string, safe_name : string, call_start : int,
+                   boundary : int, prefix_hash : string,
+                   context_path : string, end_of_proof_path : string}
 
 fun is_ident c = Char.isAlphaNum c orelse c = #"_" orelse c = #"'"
 
@@ -91,7 +93,9 @@ fun identifier_at text i ident =
   let
     val n = size text
     val m = size ident
-    val before_ok = i = 0 orelse not (is_ident (String.sub(text, i - 1)))
+    val before_ok = i = 0 orelse
+                    (not (is_ident (String.sub(text, i - 1))) andalso
+                     String.sub(text, i - 1) <> #".")
     val after_ok = i + m >= n orelse not (is_ident (String.sub(text, i + m)))
   in
     before_ok andalso after_ok andalso starts_with text i ident
@@ -110,7 +114,8 @@ fun parse_store_thm text i =
         | SOME (name, _) =>
             case matching_rparen text open_i of
                 NONE => NONE
-              | SOME close_i => SOME {name = name, boundary = statement_boundary text close_i}
+              | SOME close_i => SOME {name = name, call_start = i,
+                                       boundary = statement_boundary text close_i}
   end
 
 fun safe_name name =
@@ -136,9 +141,9 @@ fun discover text : boundary list =
           | _ =>
               if identifier_at text i "store_thm" then
                 case parse_store_thm text i of
-                    SOME {name, boundary} =>
+                    SOME {name, call_start, boundary} =>
                       scan boundary ({name = name, safe_name = safe_name name,
-                                      boundary = boundary,
+                                      call_start = call_start, boundary = boundary,
                                       prefix_hash = prefix_hash text boundary} :: acc)
                   | NONE => scan (i + 1) acc
               else scan (i + 1) acc
@@ -151,18 +156,49 @@ fun save_line output =
   HolbuildToolchain.sml_string output ^
   ", length (PolyML.SaveState.showHierarchy()));\n"
 
+fun checkpoint_pair {name, end_of_proof_path, ...} =
+  "(" ^ HolbuildToolchain.sml_string name ^ ", " ^
+  HolbuildToolchain.sml_string end_of_proof_path ^ ")"
+
+fun end_of_proof_prelude checkpoints =
+  if null checkpoints then ""
+  else
+    String.concat
+      ["val holbuild_end_of_proof_checkpoints = [",
+       String.concatWith ", " (map checkpoint_pair checkpoints),
+       "];\n",
+       "fun holbuild_save_end_of_proof name =\n",
+       "  case List.find (fn (n, _) => n = name) holbuild_end_of_proof_checkpoints of\n",
+       "      SOME (_, path) => PolyML.SaveState.saveChild(path, length (PolyML.SaveState.showHierarchy()))\n",
+       "    | NONE => ();\n",
+       "fun holbuild_store_thm (name, tm, tac) =\n",
+       "  let\n",
+       "    val th = Tactical.prove(tm, tac)\n",
+       "    val _ = holbuild_save_end_of_proof name\n",
+       "  in\n",
+       "    boolLib.save_thm(name, th)\n",
+       "  end;\n"]
+
 fun instrument ({source, start_offset, checkpoints} :
                 {source : string, start_offset : int, checkpoints : checkpoint list}) =
   let
     val n = size source
+    val store_thm_len = size "store_thm"
     fun slice i j = String.substring(source, i, j - i)
     fun loop pos entries acc =
       case entries of
           [] => String.concat (rev (slice pos n :: acc))
-        | ({boundary, path, ...} : checkpoint) :: rest =>
+        | ({call_start, boundary, context_path, ...} : checkpoint) :: rest =>
             if boundary <= start_offset then loop pos rest acc
-            else loop boundary rest (save_line path :: slice pos boundary :: acc)
+            else
+              loop boundary rest
+                (save_line context_path ::
+                 slice (call_start + store_thm_len) boundary ::
+                 "holbuild_store_thm" ::
+                 slice pos call_start ::
+                 acc)
   in
+    end_of_proof_prelude (List.filter (fn {boundary, ...} => boundary > start_offset) checkpoints) ^
     loop start_offset checkpoints []
   end
 

@@ -382,11 +382,15 @@ fun metadata_path (project : HolbuildProject.t) node =
 fun theorem_context_path project node safe_name =
   checkpoint_base project node ^ "." ^ safe_name ^ "_context.save"
 
+fun theorem_end_of_proof_path project node safe_name =
+  checkpoint_base project node ^ "." ^ safe_name ^ "_end_of_proof.save"
+
 fun theorem_checkpoint_specs project node source_text =
-  map (fn {name, safe_name, boundary, prefix_hash} =>
-          {name = name, safe_name = safe_name, boundary = boundary,
-           prefix_hash = prefix_hash,
-           path = theorem_context_path project node safe_name})
+  map (fn {name, safe_name, call_start, boundary, prefix_hash} =>
+          {name = name, safe_name = safe_name, call_start = call_start,
+           boundary = boundary, prefix_hash = prefix_hash,
+           context_path = theorem_context_path project node safe_name,
+           end_of_proof_path = theorem_end_of_proof_path project node safe_name})
       (HolbuildTheoryCheckpoints.discover source_text)
 
 fun dependency_context_key toolchain_key plan keys node =
@@ -419,7 +423,11 @@ fun metadata_value key lines =
 fun old_theorem_boundary line =
   case String.tokens Char.isSpace line of
       ["theorem_boundary", safe_name, prefix_hash, path] =>
-        SOME {safe_name = safe_name, prefix_hash = prefix_hash, path = path}
+        SOME {safe_name = safe_name, prefix_hash = prefix_hash,
+              context_path = path, end_of_proof_path = ""}
+    | ["theorem_boundary", safe_name, prefix_hash, context_path, end_of_proof_path] =>
+        SOME {safe_name = safe_name, prefix_hash = prefix_hash,
+              context_path = context_path, end_of_proof_path = end_of_proof_path}
     | _ => NONE
 
 fun same_boundary old {safe_name, prefix_hash, ...} =
@@ -430,8 +438,8 @@ fun replay_candidates old_boundaries checkpoints =
     (fn checkpoint =>
         case List.find (fn old => same_boundary old checkpoint) old_boundaries of
             SOME old =>
-              if file_exists (#path old) then
-                SOME {boundary = #boundary checkpoint, path = #path old,
+              if file_exists (#context_path old) then
+                SOME {boundary = #boundary checkpoint, path = #context_path old,
                       safe_name = #safe_name checkpoint}
               else NONE
           | NONE => NONE)
@@ -490,7 +498,9 @@ fun build_theory tc project plan keys toolchain_key node =
     val _ = ensure_dir stage
     val _ = ensure_parent deps_loaded
     val _ = ensure_parent final_context
-    val _ = List.app (fn {path, ...} => ensure_parent path) theorem_checkpoints
+    val _ = List.app (fn {context_path, end_of_proof_path, ...} =>
+                         (ensure_parent context_path; ensure_parent end_of_proof_path))
+                     theorem_checkpoints
     val _ = write_final_context_loader
               {sig_path = staged_sig, sml_path = staged_sml,
                output = final_context, path = final_loader}
@@ -545,8 +555,9 @@ fun dependency_context_lines plan keys toolchain_key node =
         ["dependency_context_key=" ^ dependency_context_key toolchain_key plan keys node]
     | _ => []
 
-fun theorem_boundary_line {safe_name, prefix_hash, path, ...} =
-  "theorem_boundary " ^ safe_name ^ " " ^ prefix_hash ^ " " ^ path
+fun theorem_boundary_line {safe_name, prefix_hash, context_path, end_of_proof_path, ...} =
+  "theorem_boundary " ^ safe_name ^ " " ^ prefix_hash ^ " " ^
+  context_path ^ " " ^ end_of_proof_path
 
 fun theorem_boundary_lines project node =
   case #kind (HolbuildBuildPlan.source_of node) of

@@ -35,8 +35,11 @@ SML
 
 (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory)
 require_file "$project/.hol/checkpoints/replay/src/AScript.sml.a_thm_context.save"
+require_file "$project/.hol/checkpoints/replay/src/AScript.sml.a_thm_end_of_proof.save"
 require_file "$project/.hol/checkpoints/replay/src/AScript.sml.b_thm_context.save"
+require_file "$project/.hol/checkpoints/replay/src/AScript.sml.b_thm_end_of_proof.save"
 require_grep "theorem_boundary a_thm" "$project/.hol/dep/replay/src/AScript.sml.key"
+require_grep "_end_of_proof.save" "$project/.hol/dep/replay/src/AScript.sml.key"
 require_grep "dependency_context_key=" "$project/.hol/dep/replay/src/AScript.sml.key"
 
 python3 - <<PY

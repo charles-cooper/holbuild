@@ -322,12 +322,16 @@ used as stable semantic keys. Checkpoints remain local under `.hol/checkpoints/`
 until their path/session sensitivity is understood well enough for sharing.
 
 The prototype currently instruments simple `store_thm("name", ...)` boundaries
-with local `<thm>_context.save` checkpoints. If a later source edit leaves an
-earlier theorem prefix byte-identical and the resolved dependency context still
-matches, a dirty rebuild can load the nearest valid theorem-context checkpoint
-and replay only the suffix to `export_theory()`. End-of-proof proof-navigation
-checkpoints remain future work unless the HOL runtime/prover dumpheap machinery
-is available; they are not treated as successor-ready contexts.
+inside this repository, without requiring HOL-side dumpheap/goalfrag support. It
+rewrites those simple calls through a holbuild wrapper that saves
+`<thm>_end_of_proof.save` after `Tactical.prove` succeeds but before the theorem
+is saved into the theory context, then saves `<thm>_context.save` after the
+statement completes. If a later source edit leaves an earlier theorem prefix
+byte-identical and the resolved dependency context still matches, a dirty rebuild
+can load the nearest valid theorem-context checkpoint and replay only the suffix
+to `export_theory()`. End-of-proof checkpoints are recorded as proof-complete /
+pre-store boundaries; they are not successor-ready contexts and are not used for
+dependency replay.
 
 ## Legacy transition
 
