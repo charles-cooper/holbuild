@@ -128,13 +128,16 @@ holbuild -j4 build FooTheory
 holbuild --jobs 4 heap main
 ```
 
-The build scheduler runs over the resolved DAG. Actions become ready only after
-all direct project dependencies complete. Each action builds in a private staging
-directory and installs its own outputs/metadata; dependents are scheduled after
-successful completion. The default remains `-j1` because HOL/PolyML heaps can be
-memory-heavy and path-sensitive artifact installs need conservative discipline.
-Heap targets use `-j` for their declared object build phase, then export the heap
-serially from the explicit base state.
+The build scheduler runs over the resolved DAG inside one holbuild process.
+Actions become ready only after all direct project dependencies complete. Each
+action builds in a private staging directory and installs its own outputs/metadata;
+dependents are scheduled after successful completion. Separate holbuild processes
+must not concurrently mutate the same project `.hol/`; build and heap commands
+take a coarse project write lock with an owner file for diagnostics. The default
+remains `-j1` because HOL/PolyML heaps can be memory-heavy and path-sensitive
+artifact installs need conservative discipline. Heap targets use `-j` for their
+declared object build phase, then export the heap serially from the explicit base
+state.
 
 ## Artifacts and local materialization
 

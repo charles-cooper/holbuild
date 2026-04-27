@@ -98,7 +98,9 @@ fun build tc jobs args =
     val toolchain_key = HolbuildToolchain.toolchain_key tc
   in
     if dry_run then HolbuildBuildPlan.describe toolchain_key plan
-    else HolbuildBuildExec.build tc project plan toolchain_key jobs
+    else
+      HolbuildBuildExec.with_project_lock project "build"
+        (fn () => HolbuildBuildExec.build tc project plan toolchain_key jobs)
   end
 
 fun heap_named project target =
@@ -120,8 +122,10 @@ fun build_heap tc jobs target =
     val toolchain_key = HolbuildToolchain.toolchain_key tc
     val output_path = HolbuildProject.abs_under (#root project) output
   in
-    HolbuildBuildExec.build tc project plan toolchain_key jobs;
-    HolbuildBuildExec.export_heap tc project plan output_path
+    HolbuildBuildExec.with_project_lock project ("heap " ^ target)
+      (fn () =>
+          (HolbuildBuildExec.build tc project plan toolchain_key jobs;
+           HolbuildBuildExec.export_heap tc project plan output_path))
   end
 
 fun hol_args_for_project tc project subcommand user_args =

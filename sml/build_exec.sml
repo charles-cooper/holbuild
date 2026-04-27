@@ -223,6 +223,51 @@ fun final_context_path project node = checkpoint_base project node ^ ".final_con
 fun remove_tree path =
   ignore (OS.Process.system ("rm -rf " ^ HolbuildToolchain.quote path))
 
+fun project_lock_path (project : HolbuildProject.t) =
+  Path.concat(Path.concat(#root project, ".hol/locks"), "project.lock")
+
+fun project_lock_owner_path lock = Path.concat(lock, "owner")
+
+fun env_default name default = Option.getOpt(OS.Process.getEnv name, default)
+
+fun project_lock_owner command =
+  String.concatWith "\n"
+    ["holbuild-project-lock-v1",
+     "command=" ^ command,
+     "cwd=" ^ FS.getDir (),
+     "host=" ^ env_default "HOSTNAME" "unknown",
+     "started=" ^ Time.toString (Time.now ())] ^ "\n"
+
+fun current_lock_owner lock =
+  SOME (read_text (project_lock_owner_path lock)) handle _ => NONE
+
+fun acquire_project_lock project command =
+  let
+    val lock = project_lock_path project
+  in
+    ensure_parent lock;
+    (FS.mkDir lock;
+     write_text (project_lock_owner_path lock) (project_lock_owner command);
+     lock)
+    handle OS.SysErr _ =>
+      let
+        val owner = Option.getOpt(current_lock_owner lock, "owner unavailable\n")
+      in
+        raise Error ("project is already being modified by another holbuild process\n" ^
+                     "lock: " ^ lock ^ "\n" ^ owner)
+      end
+  end
+
+fun release_project_lock lock =
+  (remove_file (project_lock_owner_path lock); FS.rmDir lock handle OS.SysErr _ => ())
+
+fun with_project_lock project command f =
+  let val lock = acquire_project_lock project command
+  in
+    (f () before release_project_lock lock)
+    handle e => (release_project_lock lock; raise e)
+  end
+
 fun file_exists path = FS.access(path, [FS.A_READ]) handle OS.SysErr _ => false
 
 fun file_hash path = SHA1_ML.sha1_file {filename = path}
