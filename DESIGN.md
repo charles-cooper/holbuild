@@ -225,9 +225,10 @@ are regenerated or rebased during materialization. The prototype currently
 publishes simple theory bundles containing `Theory.sig`, `Theory.dat`, and a
 `Theory.sml` template with the `.dat` load path replaced by a placeholder. On a
 cache hit, holbuild copies blobs into local `.hol/`, rewrites the template to the
-local `.dat.load` path, writes local `.uo/.ui` load manifests, and recreates
-local `deps_loaded.save`/`final_context.save` checkpoints from the explicit HOL
-base state. Missing or corrupt cache entries warn and fall back to source build.
+canonical local `.dat` path, writes local `.uo/.ui` load manifests plus
+`HOLFileSys` remap copies, and recreates local
+`deps_loaded.save`/`final_context.save` checkpoints from the explicit HOL base
+state. Missing or corrupt cache entries warn and fall back to source build.
 
 Materialization preference:
 

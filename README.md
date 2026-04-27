@@ -130,9 +130,9 @@ object filenames as targets. `holbuild build MyTheory` is the intended shape.
 `holbuild` should produce the same logical artifacts as Holmake (`.uo`, `.ui`,
 `.dat`, generated theory files, etc.) while allowing their physical storage to
 move under a project-level `.hol/` directory. `.uo` and `.ui` files are internal
-ML artifacts; users should request logical targets only. The prototype may also
-write auxiliary path-stable load copies such as `.dat.load` while the generated
-HOL theory source is being rebased into the project layout.
+ML artifacts; users should request logical targets only. The prototype also
+writes auxiliary `HOLFileSys` remap copies under `.hol/objs` for path-sensitive
+internal loads while preserving canonical artifacts in the project layout.
 
 Theory scripts are modeled as pure build actions for now: no user-specified side
 effects are part of the v1 contract. A future manifest schema may mark selected

@@ -109,11 +109,11 @@ fun script_base node =
 
 fun write_manifest path lines = write_text path (String.concatWith "\n" lines ^ "\n")
 
-fun hfs_object_load_path path = Path.concat(Path.concat(Path.dir path, ".hol/objs"), Path.file path)
+fun hfs_remapped_path path = Path.concat(Path.concat(Path.dir path, ".hol/objs"), Path.file path)
 
 fun write_object_manifest path lines =
   (write_manifest path lines;
-   write_manifest (hfs_object_load_path path) lines)
+   write_manifest (hfs_remapped_path path) lines)
 
 fun dependency_sml dep = one_with_suffix ".sml" (#generated (source_artifacts dep))
 fun dependency_sig dep = one_with_suffix ".sig" (#generated (source_artifacts dep))
@@ -396,15 +396,14 @@ fun materialize_theory_cache tc project plan input_key node =
     val _ = FS.setTime (manifest, NONE) handle OS.SysErr _ => ()
     val {sig_hash, sml_hash, dat_hash} = cache_manifest_blobs root input_key
     val {sig_path, sml_path, data_path, ...} = theory_outputs node
-    val load_data_path = data_path ^ ".load"
     val template = FS.tmpName ()
     fun cleanup () = FS.remove template handle OS.SysErr _ => ()
     fun install () =
       (copy_blob root dat_hash data_path;
-       copy_blob root dat_hash load_data_path;
+       copy_blob root dat_hash (hfs_remapped_path data_path);
        copy_blob root sig_hash sig_path;
        copy_blob root sml_hash template;
-       write_text sml_path (replace_all cache_sml_token load_data_path (read_text template));
+       write_text sml_path (replace_all cache_sml_token data_path (read_text template));
        write_local_theory_manifests plan node;
        save_cached_theory_checkpoints tc project plan input_key node;
        print (logical_name node ^ " restored from cache\n");
@@ -590,13 +589,12 @@ fun build_theory tc project plan keys toolchain_key node source_text theorem_che
     val _ = run_hol_files tc stage (#holstate run_spec)
               (#files run_spec @ [final_loader])
               "hol run failed while building theory script"
-    val load_data_path = data_path ^ ".load"
     val _ = copy_binary staged_dat data_path
-    val _ = copy_binary staged_dat load_data_path
+    val _ = copy_binary staged_dat (hfs_remapped_path data_path)
     val _ = copy_binary staged_sig sig_path
     val _ = copy_rewriting_path {src = staged_sml, dst = sml_path,
                                  old_path = staged_dat_reference stage node,
-                                 new_path = load_data_path}
+                                 new_path = data_path}
     val _ = publish_theory_cache input_key (staged_dat_reference stage node) staged_sig staged_sml staged_dat
   in
     write_local_theory_manifests plan node;
@@ -629,13 +627,14 @@ fun build_sml_like plan node output_suffix =
 fun output_paths project node =
   let val artifacts = source_artifacts node
       val object_paths = #objects artifacts
+      val data_paths = #theory_data artifacts
       val base = #generated artifacts @ object_paths @
-                 map hfs_object_load_path object_paths @ #theory_data artifacts
+                 map hfs_remapped_path object_paths @ data_paths @
+                 map hfs_remapped_path data_paths
   in
     case #kind (HolbuildBuildPlan.source_of node) of
         HolbuildSourceIndex.TheoryScript =>
-          deps_loaded_path project node :: final_context_path project node ::
-          (one_with_suffix ".dat" (#theory_data artifacts) ^ ".load") :: base
+          deps_loaded_path project node :: final_context_path project node :: base
       | _ => base
   end
 
