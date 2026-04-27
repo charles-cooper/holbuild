@@ -70,12 +70,31 @@ fun manifest_root manifest = Path.dir manifest
 
 fun lookup table key = TOML.lookupInTable table key
 
-fun string_value value =
-  case value of
-      TOML.STRING s => SOME s
-    | _ => NONE
+fun key_text key = String.concatWith "." key
 
-fun string_at table key = Option.mapPartial string_value (lookup table key)
+fun table_keys table = map (fn (name, _) => name) table
+
+fun member value values = List.exists (fn existing => existing = value) values
+
+fun require_known_fields context allowed table =
+  let val unknown = List.filter (fn name => not (member name allowed)) (table_keys table)
+  in
+    case unknown of
+        [] => ()
+      | name :: _ => die ("unknown field in " ^ context ^ ": " ^ name)
+  end
+
+fun string_at table key =
+  case lookup table key of
+      NONE => NONE
+    | SOME (TOML.STRING s) => SOME s
+    | SOME _ => die (key_text key ^ " must be a string")
+
+fun int_at table key =
+  case lookup table key of
+      NONE => NONE
+    | SOME (TOML.INTEGER n) => SOME n
+    | SOME _ => die (key_text key ^ " must be an integer")
 
 fun string_array_value value =
   case value of
@@ -96,7 +115,7 @@ fun string_array_at table key =
     | SOME value =>
         case string_array_value value of
             SOME xs => xs
-          | NONE => die "expected string array in holproject.toml"
+          | NONE => die (key_text key ^ " must be a string array")
 
 fun table_field table key =
   case lookup table key of
@@ -144,6 +163,53 @@ fun heaps_at table =
     | SOME (TOML.ARRAY values) => map parse_heap values
     | SOME _ => die "heap must be an array of tables"
 
+fun validate_schema table =
+  case table_field table ["holbuild"] of
+      NONE => ()
+    | SOME holbuild =>
+        (require_known_fields "holbuild" ["schema"] holbuild;
+         case int_at holbuild ["schema"] of
+             NONE => ()
+           | SOME n =>
+               if n = IntInf.fromInt 1 then ()
+               else die ("unsupported holproject schema: " ^ IntInf.toString n))
+
+fun validate_dependency_table (name, table) =
+  require_known_fields ("dependencies." ^ name) ["path", "manifest", "git", "rev"] table
+
+fun validate_manifest_table table =
+  let
+    val _ = require_known_fields "holproject.toml"
+              ["holbuild", "project", "build", "paths", "dependencies", "run", "heap"] table
+    val _ = Option.app (require_known_fields "project" ["name", "version"])
+              (table_field table ["project"])
+    val _ = Option.app (require_known_fields "build" ["members"])
+              (table_field table ["build"])
+    val _ = Option.app (require_known_fields "paths" ["includes"])
+              (table_field table ["paths"])
+    val _ = Option.app (require_known_fields "run" ["heap", "loads"])
+              (table_field table ["run"])
+    val _ = List.app validate_dependency_table (named_table_entries table ["dependencies"])
+    fun validate_heap_entry value =
+      case value of
+          TOML.TABLE heap => require_known_fields "heap" ["name", "output", "objects"] heap
+        | _ => die "heap entries must be tables"
+    val _ =
+      case lookup table ["heap"] of
+          NONE => ()
+        | SOME (TOML.ARRAY values) => List.app validate_heap_entry values
+        | SOME _ => die "heap must be an array of tables"
+  in
+    validate_schema table
+  end
+
+fun validate_override_table (name, table) =
+  require_known_fields ("overrides." ^ name) ["path"] table
+
+fun validate_local_config_table table =
+  (require_known_fields ".holconfig.toml" ["overrides"] table;
+   List.app validate_override_table (named_table_entries table ["overrides"]))
+
 fun parse_dependency (name, table) =
   Dependency
     { name = name,
@@ -163,11 +229,17 @@ fun overrides_at table = map parse_override (named_table_entries table ["overrid
 
 fun parse_local_config root =
   let val config = Path.concat(root, ".holconfig.toml")
-  in if readable config then overrides_at (TOML.fromFile config) else [] end
+  in
+    if readable config then
+      let val table = TOML.fromFile config
+      in validate_local_config_table table; overrides_at table end
+    else []
+  end
 
 fun parse_at {manifest, root, overrides} =
   let
     val table = TOML.fromFile manifest
+    val _ = validate_manifest_table table
     val project = table_field table ["project"]
     val build = table_field table ["build"]
     val paths = table_field table ["paths"]

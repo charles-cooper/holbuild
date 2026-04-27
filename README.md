@@ -10,7 +10,7 @@ artifacts, and a future in-tree `hol build` implementation.
 
 This prototype is intentionally small:
 
-- reads the nearest `holproject.toml`
+- reads and schema-checks the nearest `holproject.toml`
 - establishes a shared project context for `build`, `run`, and `repl`
 - reuses HOL's existing SML TOML parser from `$HOLDIR/tools/Holmake/toml`
 - accepts logical build targets such as `MyTheory`, not object filenames such as `MyTheory.uo`
@@ -88,6 +88,9 @@ an optional global cache that never changes build semantics.
 ## Example `holproject.toml`
 
 ```toml
+[holbuild]
+schema = 1
+
 [project]
 name = "example"
 version = "0.1.0"
@@ -121,6 +124,8 @@ path = "../foo-dev"
 
 The override changes only where the package is found locally. The package still
 needs its own `holproject.toml` or an explicit shim manifest from the consumer.
+Both `holproject.toml` and `.holconfig.toml` reject unknown fields in recognized
+tables so typos fail early.
 
 ## Notes
 

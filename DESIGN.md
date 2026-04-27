@@ -18,7 +18,16 @@ and cacheable builds that never require users to reason about the cache.
 ## Packages and manifests
 
 Every package in the resolved graph has a manifest. A source file can enter the
-build graph only through a declared package root.
+build graph only through a declared package root. Manifests are schema-checked:
+unknown fields in recognized tables are rejected, and an optional schema marker
+must name a supported schema:
+
+```toml
+[holbuild]
+schema = 1
+```
+
+Omitting `[holbuild]` currently means schema 1 for transition convenience.
 
 Package roots are declared by one of:
 
@@ -47,7 +56,8 @@ path = "../foo-dev"
 An override changes where package `foo` is found on this machine; it does not
 change the package identity. The override path must still validate as `foo`,
 either by containing `foo`'s `holproject.toml` or by using the configured shim
-manifest for that dependency.
+manifest for that dependency. Local config is schema-checked too; unknown fields
+in `.holconfig.toml` are errors rather than silently ignored.
 
 Transition rule:
 
