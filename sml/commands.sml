@@ -12,8 +12,9 @@ fun usage () = print
   \  holbuild [--holdir PATH] context\n\
   \  holbuild [--holdir PATH] build [--dry-run] [TARGET ...]\n\
   \  holbuild [--holdir PATH] run [ARG ...]\n\
-  \  holbuild [--holdir PATH] repl [ARG ...]\n\n\
-  \HOLDIR is found from --holdir, HOLBUILD_HOLDIR, or HOLDIR.\n"
+  \  holbuild [--holdir PATH] repl [ARG ...]\n\
+  \  holbuild cache gc [--retention-days DAYS] [--cache-dir PATH]\n\n\
+  \HOLDIR is found from --holdir, HOLBUILD_HOLDIR, or HOLDIR for HOL commands.\n"
 
 fun split_flags args =
   let
@@ -112,6 +113,13 @@ fun dispatch tc args =
     | "repl" :: rest => run_hol tc "repl" rest
     | cmd :: _ => raise Error ("unknown command: " ^ cmd)
 
+fun dispatch_with_holdir holdir_opt args =
+  case args of
+      "cache" :: rest => HolbuildCache.dispatch rest
+    | _ =>
+      let val tc = {holdir = runtime_holdir holdir_opt}
+      in dispatch tc args end
+
 fun main raw_args =
   let
     val _ =
@@ -119,9 +127,8 @@ fun main raw_args =
       then (usage (); OS.Process.exit OS.Process.success)
       else ()
     val (holdir_opt, args) = take_holdir raw_args
-    val tc = {holdir = runtime_holdir holdir_opt}
   in
-    dispatch tc args
+    dispatch_with_holdir holdir_opt args
     handle Error msg => err msg
          | HolbuildToolchain.Error msg => err msg
          | HolbuildProject.Error msg => err msg
@@ -129,6 +136,7 @@ fun main raw_args =
          | HolbuildDependencies.Error msg => err msg
          | HolbuildBuildPlan.Error msg => err msg
          | HolbuildBuildExec.Error msg => err msg
+         | HolbuildCache.Error msg => err msg
          | e => err (General.exnMessage e)
   end
 

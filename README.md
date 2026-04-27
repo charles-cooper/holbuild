@@ -23,6 +23,7 @@ This prototype is intentionally small:
 - records local action metadata and skips unchanged actions
 - includes the explicit HOL base state/toolchain in prototype action keys
 - saves successor-ready local `final_context.save` checkpoints for theory actions
+- exposes `holbuild cache gc` with a 7-day default global-cache retention policy
 - does not delegate build semantics to Holmake
 - treats `.uo`/`.ui` as internal ML artifacts, never user-requestable targets
 - delegates execution to `$HOLDIR/bin/hol run` / `hol repl` for now
@@ -48,9 +49,12 @@ bin/holbuild build
 bin/holbuild build MyTheory
 bin/holbuild run someScript.sml
 bin/holbuild repl
+bin/holbuild cache gc
 ```
 
-`--holdir PATH` can be used instead of `HOLBUILD_HOLDIR` at runtime.
+`--holdir PATH` can be used instead of `HOLBUILD_HOLDIR` at runtime for HOL
+commands. `cache gc` uses `$HOLBUILD_CACHE`, `$XDG_CACHE_HOME/holbuild`, or
+`$HOME/.cache/holbuild` and does not require a HOL toolchain.
 
 See `DESIGN.md` for the intended long-term model: manifest-based package
 resolution, project-local `.hol/` materialization, action-key invalidation, and
@@ -114,6 +118,11 @@ Incremental correctness is action-key based. `holbuild` should not use legacy
 checkpoints at syntactic boundaries: dependencies loaded, theorem/proof
 boundaries, and successor-ready final context, stored locally under
 `.hol/checkpoints/`.
+
+The optional global cache is not used by builds yet, but `holbuild cache gc`
+already implements the intended cleanup surface. It removes stale temporary
+entries, stale action manifests, and old unreferenced blobs after 7 days by
+default.
 
 `holbuild run` and `holbuild repl` generate `.hol/holbuild-run-context.sml`
 in the project root before loading `[run].loads` and user-supplied arguments.

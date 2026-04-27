@@ -225,7 +225,12 @@ Expose:
 
 ```text
 holbuild cache gc
+holbuild cache gc --retention-days 7
+holbuild cache gc --cache-dir /path/to/cache
 ```
+
+The cache root is `$HOLBUILD_CACHE`, else `$XDG_CACHE_HOME/holbuild`, else
+`$HOME/.cache/holbuild`.
 
 Future in-tree spelling may be:
 
@@ -234,8 +239,9 @@ hol build --gc
 ```
 
 GC should remove stale tmp dirs, remove old action manifests, mark blobs still
-reachable from complete manifests, and sweep old unreferenced blobs. Races with
-builds should degrade to cache misses and source rebuilds.
+reachable from non-expired manifests, and sweep old unreferenced blobs. Races
+with builds should degrade to cache misses and source rebuilds. The prototype
+uses a cache-local `locks/gc.lock` directory to avoid concurrent GC runs.
 
 ## Heaps and checkpoints
 
