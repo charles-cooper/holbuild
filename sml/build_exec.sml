@@ -230,32 +230,86 @@ fun project_lock_owner_path lock = Path.concat(lock, "owner")
 
 fun env_default name default = Option.getOpt(OS.Process.getEnv name, default)
 
+fun current_pid_text () =
+  LargeInt.toString (SysWord.toLargeInt (Posix.Process.pidToWord (Posix.ProcEnv.getpid ())))
+
+fun trim_trailing_newline text =
+  if size text > 0 andalso String.sub(text, size text - 1) = #"\n" then
+    String.substring(text, 0, size text - 1)
+  else text
+
+fun current_host () =
+  trim_trailing_newline (read_text "/proc/sys/kernel/hostname")
+  handle _ => env_default "HOSTNAME" "unknown"
+
 fun project_lock_owner command =
   String.concatWith "\n"
     ["holbuild-project-lock-v1",
      "command=" ^ command,
+     "pid=" ^ current_pid_text (),
      "cwd=" ^ FS.getDir (),
-     "host=" ^ env_default "HOSTNAME" "unknown",
+     "host=" ^ current_host (),
      "started=" ^ Time.toString (Time.now ())] ^ "\n"
 
 fun current_lock_owner lock =
   SOME (read_text (project_lock_owner_path lock)) handle _ => NONE
 
+fun owner_lines owner = String.tokens (fn c => c = #"\n") owner
+
+fun owner_value key owner =
+  let
+    val prefix = key ^ "="
+    fun value line =
+      if String.isPrefix prefix line then SOME (String.extract(line, size prefix, NONE))
+      else NONE
+    fun first lines =
+      case lines of
+          [] => NONE
+        | line :: rest =>
+            case value line of
+                SOME v => SOME v
+              | NONE => first rest
+  in
+    first (owner_lines owner)
+  end
+
+fun local_pid_alive pid = FS.access(Path.concat("/proc", pid), []) handle OS.SysErr _ => false
+
+fun stale_project_lock owner =
+  case (owner_value "host" owner, owner_value "pid" owner) of
+      (SOME host, SOME pid) => host = current_host () andalso not (local_pid_alive pid)
+    | _ => false
+
+fun remove_stale_project_lock lock owner =
+  (TextIO.output(TextIO.stdErr,
+                 "holbuild: warning: removing stale project lock: " ^ lock ^ "\n" ^ owner);
+   remove_file (project_lock_owner_path lock);
+   FS.rmDir lock handle OS.SysErr _ => ())
+
+fun project_lock_error lock owner =
+  Error ("project is already being modified by another holbuild process\n" ^
+         "lock: " ^ lock ^ "\n" ^ owner)
+
+fun acquire_fresh_project_lock lock command =
+  (FS.mkDir lock;
+   write_text (project_lock_owner_path lock) (project_lock_owner command);
+   lock)
+
 fun acquire_project_lock project command =
   let
     val lock = project_lock_path project
+    fun retry_after_existing () =
+      case current_lock_owner lock of
+          SOME owner =>
+            if stale_project_lock owner then
+              (remove_stale_project_lock lock owner;
+               acquire_fresh_project_lock lock command)
+            else raise project_lock_error lock owner
+        | NONE => raise project_lock_error lock "owner unavailable\n"
   in
     ensure_parent lock;
-    (FS.mkDir lock;
-     write_text (project_lock_owner_path lock) (project_lock_owner command);
-     lock)
-    handle OS.SysErr _ =>
-      let
-        val owner = Option.getOpt(current_lock_owner lock, "owner unavailable\n")
-      in
-        raise Error ("project is already being modified by another holbuild process\n" ^
-                     "lock: " ^ lock ^ "\n" ^ owner)
-      end
+    acquire_fresh_project_lock lock command
+    handle OS.SysErr _ => retry_after_existing ()
   end
 
 fun release_project_lock lock =

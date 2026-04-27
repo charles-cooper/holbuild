@@ -43,6 +43,7 @@ done
 [[ -d "$lock" ]] || { echo "project lock was not acquired" >&2; wait "$first_pid" || true; exit 1; }
 require_file "$lock/owner"
 require_grep "command=build" "$lock/owner"
+require_grep "pid=" "$lock/owner"
 
 second_log=$tmpdir/second.log
 if (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$second_log" 2>&1; then
@@ -60,3 +61,18 @@ require_file "$project/.hol/obj/src/ATheory.dat"
 third_log=$tmpdir/third.log
 (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$third_log" 2>&1
 require_grep "ATheory is up to date" "$third_log"
+
+mkdir -p "$lock"
+cat > "$lock/owner" <<TOML
+holbuild-project-lock-v1
+command=build
+pid=999999999
+cwd=$project
+host=$(hostname)
+started=stale-test
+TOML
+stale_log=$tmpdir/stale.log
+(cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$stale_log" 2>&1
+require_grep "removing stale project lock" "$stale_log"
+require_grep "ATheory is up to date" "$stale_log"
+[[ ! -e "$lock" ]] || { echo "stale project lock survived recovery build" >&2; exit 1; }
