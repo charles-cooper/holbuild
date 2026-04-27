@@ -50,16 +50,25 @@ runner and can run cases in parallel with `HOLBUILD_TEST_JOBS`.
 
 ```sh
 export HOLBUILD_HOLDIR=/path/to/HOL
-bin/holbuild context
-bin/holbuild build --dry-run
-bin/holbuild build
 bin/holbuild build MyTheory
 bin/holbuild -j4 build MyTheory
-bin/holbuild -j4 heap main
-bin/holbuild heap main
+```
+
+Useful inspection/maintenance commands:
+
+```sh
+bin/holbuild context
+bin/holbuild build --dry-run MyTheory
+bin/holbuild cache gc
+```
+
+Additional prototype commands exist for project-context execution and explicit
+heap exports:
+
+```sh
 bin/holbuild run someScript.sml
 bin/holbuild repl
-bin/holbuild cache gc
+bin/holbuild heap main
 ```
 
 `--holdir PATH` can be used instead of `HOLBUILD_HOLDIR` at runtime for HOL
@@ -125,13 +134,13 @@ Theory scripts are modeled as pure build actions for now: no user-specified side
 effects are part of the v1 contract. A future manifest schema may mark selected
 files as always re-execute or explicitly impure.
 
-Incremental correctness is action-key based. `holbuild` should not use legacy
-`hol buildheap` as the default build primitive. Replay should use direct PolyML
-checkpoints at syntactic boundaries: dependencies loaded, theorem/proof
-boundaries, and successor-ready final context, stored locally under
-`.hol/checkpoints/`. Explicit `holbuild heap NAME` targets build their declared
-logical objects, load the generated theory modules, and save the requested heap
-with PolyML SaveState.
+Incremental correctness is action-key based. `holbuild` does not use
+`hol buildheap` as its default build primitive; it builds contexts directly by
+loading resolved ancestors and saving PolyML checkpoints at syntactic boundaries:
+dependencies loaded, theorem/proof boundaries, and successor-ready final context,
+stored locally under `.hol/checkpoints/`. Explicit `holbuild heap NAME` targets
+build their declared logical objects, load the generated theory modules, and save
+the requested heap with PolyML SaveState.
 
 The optional global cache stores simple theory semantic artifacts by action key:
 `Theory.sig`, a path-rebased `Theory.sml` template, and `Theory.dat`. On a cache
