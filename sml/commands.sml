@@ -76,17 +76,18 @@ fun build tc args =
     val _ = reject_object_targets targets
     val index = HolbuildSourceIndex.discover project
     val plan = HolbuildBuildPlan.plan index targets
+    val toolchain_key = HolbuildToolchain.toolchain_key tc
   in
-    if dry_run then HolbuildBuildPlan.describe plan
-    else HolbuildBuildExec.build tc project plan
+    if dry_run then HolbuildBuildPlan.describe toolchain_key plan
+    else HolbuildBuildExec.build tc project plan toolchain_key
   end
 
-fun hol_args_for_project project subcommand user_args =
+fun hol_args_for_project tc project subcommand user_args =
   let
     val context = HolbuildToolchain.write_run_context project
     val heap_args =
       case HolbuildProject.abs_run_heap project of
-          NONE => []
+          NONE => ["--holstate", HolbuildToolchain.base_state tc]
         | SOME heap => ["--holstate", heap]
   in
     [subcommand] @ heap_args @ [context] @ #run_loads project @ user_args
@@ -95,7 +96,7 @@ fun hol_args_for_project project subcommand user_args =
 fun run_hol tc subcommand user_args =
   let
     val project = load_project ()
-    val argv = HolbuildToolchain.hol tc :: hol_args_for_project project subcommand user_args
+    val argv = HolbuildToolchain.hol tc :: hol_args_for_project tc project subcommand user_args
     val status = HolbuildToolchain.run argv
   in
     if HolbuildToolchain.success status then ()

@@ -78,6 +78,19 @@ fun topo_sort nodes roots =
     rev order
   end
 
+fun transitive_project_deps nodes node = topo_sort nodes (direct_project_deps nodes node)
+
+fun member_string value values = List.exists (fn x => x = value) values
+
+fun add_unique (value, values) = if member_string value values then values else value :: values
+
+fun unique_strings values = rev (List.foldl add_unique [] values)
+
+fun closure_external_theories nodes node =
+  unique_strings
+    (List.concat (map (direct_external_theories nodes)
+       (transitive_project_deps nodes node @ [node])))
+
 fun make_node source =
   {source = source, deps = HolbuildDependencies.extract (#source_path source)}
 
@@ -108,16 +121,17 @@ fun lookup_key keys dep =
       SOME (_, input_key) => input_key
     | NONE => raise Error ("missing action key for dependency: " ^ logical_name dep)
 
-fun action_text nodes keys node =
+fun action_text toolchain_key nodes keys node =
   let
     val source = source_of node
     val source_hash = SHA1_ML.sha1_file {filename = #source_path source}
     val project_deps =
       map (fn dep => package dep ^ ":" ^ logical_name dep ^ "@" ^ lookup_key keys dep)
         (direct_project_deps nodes node)
-    val external_deps = map (fn name => "external:" ^ name) (direct_external_theories nodes node)
+    val external_deps = map (fn name => "HOL:" ^ name ^ "@" ^ toolchain_key) (direct_external_theories nodes node)
     val lines =
       ["holbuild-action-v1",
+       "toolchain=" ^ toolchain_key,
        "kind=" ^ kind_name source,
        "package=" ^ #package source,
        "logical=" ^ #logical_name source,
@@ -128,10 +142,11 @@ fun action_text nodes keys node =
     String.concatWith "\n" lines ^ "\n"
   end
 
-fun add_input_key nodes (node, keys) =
-  (key node, hash_text (action_text nodes keys node)) :: keys
+fun add_input_key toolchain_key nodes (node, keys) =
+  (key node, hash_text (action_text toolchain_key nodes keys node)) :: keys
 
-fun input_keys nodes = List.foldl (fn (node, keys) => add_input_key nodes (node, keys)) [] nodes
+fun input_keys toolchain_key nodes =
+  List.foldl (fn (node, keys) => add_input_key toolchain_key nodes (node, keys)) [] nodes
 
 fun input_key_for keys node = lookup_key keys node
 
@@ -152,8 +167,8 @@ fun describe_node nodes keys node =
    print_project_deps nodes node;
    print_external_deps nodes node)
 
-fun describe nodes =
-  let val keys = input_keys nodes
+fun describe toolchain_key nodes =
+  let val keys = input_keys toolchain_key nodes
   in List.app (describe_node nodes keys) nodes end
 
 end

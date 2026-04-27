@@ -21,6 +21,8 @@ This prototype is intentionally small:
 - computes prototype source/resolved-dependency input keys for planned actions
 - executes simple theory-script builds into project `.hol/` without Holmake
 - records local action metadata and skips unchanged actions
+- includes the explicit HOL base state/toolchain in prototype action keys
+- saves successor-ready local `final_context.save` checkpoints for theory actions
 - does not delegate build semantics to Holmake
 - treats `.uo`/`.ui` as internal ML artifacts, never user-requestable targets
 - delegates execution to `$HOLDIR/bin/hol run` / `hol repl` for now
@@ -106,6 +108,12 @@ HOL theory source is being rebased into the project layout.
 Theory scripts are modeled as pure build actions for now: no user-specified side
 effects are part of the v1 contract. A future manifest schema may mark selected
 files as always re-execute or explicitly impure.
+
+Incremental correctness is action-key based. `holbuild` should not use legacy
+`hol buildheap` as the default build primitive. Replay should use direct PolyML
+checkpoints at syntactic boundaries: dependencies loaded, theorem/proof
+boundaries, and successor-ready final context, stored locally under
+`.hol/checkpoints/`.
 
 `holbuild run` and `holbuild repl` generate `.hol/holbuild-run-context.sml`
 in the project root before loading `[run].loads` and user-supplied arguments.

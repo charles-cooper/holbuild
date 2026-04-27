@@ -13,6 +13,7 @@ fun executable {holdir} parts =
 
 fun hol tc = executable tc ["bin", "hol"]
 fun holmake tc = executable tc ["bin", "Holmake"]
+fun base_state tc = executable tc ["bin", "hol.state"]
 
 fun quote s =
   "'" ^ String.translate (fn #"'" => "'\\''" | c => str c) s ^ "'"
@@ -27,8 +28,37 @@ fun run_in_dir dir argv =
 fun success status = OS.Process.isSuccess status
 
 fun ensure_dir path =
-  if FS.access(path, []) handle OS.SysErr _ => false then ()
-  else FS.mkDir path
+  if path = "" orelse path = "." then ()
+  else if FS.access(path, []) handle OS.SysErr _ => false then ()
+  else (ensure_dir (Path.dir path); FS.mkDir path handle OS.SysErr _ => ())
+
+fun ensure_parent path = ensure_dir (Path.dir path)
+
+fun readable path = FS.access(path, [FS.A_READ]) handle OS.SysErr _ => false
+
+fun require_readable path =
+  if readable path then () else raise Error ("required toolchain file not readable: " ^ path)
+
+fun hash_text text =
+  let
+    val tmp = FS.tmpName ()
+    val out = TextIO.openOut tmp
+    val _ = TextIO.output(out, text)
+    val _ = TextIO.closeOut out
+    val hash = SHA1_ML.sha1_file {filename = tmp}
+    val _ = FS.remove tmp handle OS.SysErr _ => ()
+  in
+    hash
+  end
+
+fun file_hash path = (require_readable path; SHA1_ML.sha1_file {filename = path})
+
+fun toolchain_key tc =
+  hash_text
+    (String.concatWith "\n"
+       ["holbuild-toolchain-v1",
+        "hol=" ^ file_hash (hol tc),
+        "base_state=" ^ file_hash (base_state tc)] ^ "\n")
 
 fun sml_string s =
   "\"" ^ String.translate

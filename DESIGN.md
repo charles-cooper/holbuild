@@ -142,7 +142,7 @@ input_key = hash(
   source content hash,
   resolved dependency input/output keys,
   relevant manifest fields,
-  HOL/toolchain key,
+  HOL/toolchain/base-state key,
   platform/ML-system facts where relevant
 )
 ```
@@ -242,14 +242,49 @@ builds should degrade to cache misses and source rebuilds.
 PolyML heap checkpoints and `.save` files are local project artifacts for now:
 
 ```text
-.hol/heap/
-.hol/checkpoints/
+.hol/heap/          optional user-requested exported heaps
+.hol/checkpoints/   local PolyML replay checkpoints
 ```
 
 They are large, path/session/toolchain sensitive, and can create contention if
-shared globally. A future global heap cache needs stricter validation, locking,
-and platform/toolchain/root keys. Until then, global cache stores semantic build
-artifacts only.
+shared globally. A future global checkpoint cache needs stricter validation,
+locking, and platform/toolchain/root keys. Until then, global cache stores
+semantic build artifacts only.
+
+`holbuild` should not use legacy `hol buildheap` as the normal incremental-build
+primitive. `buildheap` snapshots a process after loading a closure of `.uo`
+modules. In holbuild, loading ancestors in resolved topological order naturally
+constructs the same dependency context inside the build process; any checkpoint
+after that load is just another syntactic checkpoint, not a separate closure
+cache concept.
+
+The relevant checkpointing model is the `Holmake --dumpheap` design: while a
+theory script executes, the prover/runtime saves PolyML states at syntactic
+boundaries such as:
+
+```text
+deps_loaded.save         after resolved ancestors are loaded in topological order
+<thm>_context.save       after the theorem has been stored in the theory context
+<thm>_end_of_proof.save  after goal-fragment proof replay, for navigation
+final_context.save       after the script is successor-ready
+```
+
+`final_context.save` must mean successor-ready, not merely immediately after
+`export_theory()`. The generated `FooTheory.sig/sml` module must be loaded before
+saving so dependents can open/use `FooTheory` when starting from the checkpoint.
+
+Those checkpoints answer a different question from action keys:
+
+```text
+action key/cache:        can this whole script action be skipped?
+syntactic checkpoint:    if the action changed, where can replay resume?
+```
+
+A future holbuild checkpoint action should key each checkpoint by the source
+prefix/boundary identity, resolved dependency input keys, HOL/toolchain/base-state
+key, and checkpoint schema. Raw `.save` bytes are diagnostic only and must not be
+used as stable semantic keys. Checkpoints remain local under `.hol/checkpoints/`
+until their path/session sensitivity is understood well enough for sharing.
 
 ## Legacy transition
 
