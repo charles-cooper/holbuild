@@ -159,11 +159,12 @@ output key  = what semantic artifact did this build actually produce?
 
 For theories, the output key should center on semantic outputs such as
 `FooTheory.dat` and generated theory interface/source content, not local `.uo` or
-`.ui` path manifests. Different input keys may legitimately produce the same
-output key: for example, a proof refactor or comment change may change the script
-hash without changing the exported theory. Downstream theory invalidation should
-prefer semantic dependency output keys once available, while source-build cache
-lookup still needs input keys computable before building.
+`.ui` path manifests. Source-build cache lookup must use the input key, so any
+source byte change — including proof edits or comments — invalidates that
+action's cache entry and reruns the script. Different input keys may still
+produce the same output key. After rerunning a changed parent, downstream
+invalidation may use the parent's output key to avoid rebuilding children when
+the exported theory is unchanged.
 
 Different absolute paths under the same declared root may normalize to the same
 root-relative identity. Arbitrary outside-root paths are rejected or treated as
