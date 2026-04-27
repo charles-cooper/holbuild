@@ -6,6 +6,24 @@ structure FS = OS.FileSys
 
 datatype heap = Heap of {name : string, output : string, objects : string list}
 
+datatype dependency =
+  Dependency of
+    { name : string,
+      path : string option,
+      manifest : string option,
+      git : string option,
+      rev : string option }
+
+datatype override = Override of {name : string, path : string}
+
+datatype package =
+  Package of
+    { name : string,
+      root : string,
+      manifest : string,
+      members : string list,
+      artifact_root : string }
+
 type t =
   { root : string,
     manifest : string,
@@ -13,6 +31,8 @@ type t =
     version : string option,
     members : string list,
     includes : string list,
+    dependencies : dependency list,
+    overrides : override list,
     run_heap : string option,
     run_loads : string list,
     heaps : heap list }
@@ -87,6 +107,19 @@ fun table_field table key =
 fun string_field table name = string_at table [name]
 fun string_array_field table name = string_array_at table [name]
 
+fun named_table_entries table key =
+  case table_field table key of
+      NONE => []
+    | SOME entries =>
+        let
+          fun one (name, value) =
+            case value of
+                TOML.TABLE t => (name, t)
+              | _ => die (String.concatWith "." (key @ [name]) ^ " must be a table")
+        in
+          map one entries
+        end
+
 fun parse_heap value =
   case value of
       TOML.TABLE table =>
@@ -111,7 +144,28 @@ fun heaps_at table =
     | SOME (TOML.ARRAY values) => map parse_heap values
     | SOME _ => die "heap must be an array of tables"
 
-fun parse manifest =
+fun parse_dependency (name, table) =
+  Dependency
+    { name = name,
+      path = string_field table "path",
+      manifest = string_field table "manifest",
+      git = string_field table "git",
+      rev = string_field table "rev" }
+
+fun dependencies_at table = map parse_dependency (named_table_entries table ["dependencies"])
+
+fun parse_override (name, table) =
+  case string_field table "path" of
+      SOME path => Override {name = name, path = path}
+    | NONE => die ("[overrides." ^ name ^ "] requires path")
+
+fun overrides_at table = map parse_override (named_table_entries table ["overrides"])
+
+fun parse_local_config root =
+  let val config = Path.concat(root, ".holconfig.toml")
+  in if readable config then overrides_at (TOML.fromFile config) else [] end
+
+fun parse_at {manifest, root, overrides} =
   let
     val table = TOML.fromFile manifest
     val project = table_field table ["project"]
@@ -120,15 +174,25 @@ fun parse manifest =
     val run = table_field table ["run"]
     fun from opt f default = case opt of NONE => default | SOME t => f t
   in
-    { root = manifest_root manifest,
+    { root = root,
       manifest = manifest,
       name = Option.mapPartial (fn t => string_field t "name") project,
       version = Option.mapPartial (fn t => string_field t "version") project,
       members = from build (fn t => string_array_field t "members") ["."],
       includes = from paths (fn t => string_array_field t "includes") [],
+      dependencies = dependencies_at table,
+      overrides = overrides,
       run_heap = Option.mapPartial (fn t => string_field t "heap") run,
       run_loads = from run (fn t => string_array_field t "loads") [],
       heaps = heaps_at table }
+  end
+
+fun parse manifest =
+  let
+    val root = manifest_root manifest
+    val overrides = parse_local_config root
+  in
+    parse_at {manifest = manifest, root = root, overrides = overrides}
   end
 
 fun discover () =
@@ -143,13 +207,92 @@ fun abs_member ({root, ...} : t) member = abs_under root member
 fun abs_include ({root, ...} : t) include_path = abs_under root include_path
 fun abs_run_heap ({root, run_heap, ...} : t) = Option.map (abs_under root) run_heap
 
+fun override_path overrides name =
+  let
+    fun matches (Override {name = name', ...}) = name = name'
+  in
+    case List.find matches overrides of
+        SOME (Override {path, ...}) => SOME path
+      | NONE => NONE
+  end
+
+fun dependency_name (Dependency {name, ...}) = name
+
+fun package_name (Package {name, ...}) = name
+fun package_root (Package {root, ...}) = root
+fun package_members (Package {members, ...}) = members
+fun package_artifact_root (Package {artifact_root, ...}) = artifact_root
+
+fun dependency_local_path ({root, overrides, ...} : t) (Dependency {name, path, ...}) =
+  Option.map (abs_under root)
+    (case override_path overrides name of
+         SOME override => SOME override
+       | NONE => path)
+
+fun dependency_manifest (project as {root, ...} : t) dep =
+  case dep of
+      Dependency {manifest = SOME manifest, ...} => SOME (abs_under root manifest)
+    | Dependency {manifest = NONE, ...} =>
+        Option.map (fn path => Path.concat(path, "holproject.toml"))
+          (dependency_local_path project dep)
+
 fun heap_to_string (Heap {name, output, objects}) =
   name ^ " -> " ^ output ^ " [" ^ String.concatWith ", " objects ^ "]"
 
+fun dependency_to_string project (dep as Dependency {name, path, manifest, git, rev}) =
+  let
+    fun field label value =
+      case value of NONE => [] | SOME s => [label ^ "=" ^ s]
+    val override = override_path (#overrides project) name
+    val local_path = dependency_local_path project dep
+    val resolved_manifest = dependency_manifest project dep
+    val fields =
+      field "path" path @ field "override" override @ field "local" local_path @
+      field "manifest" manifest @ field "resolved-manifest" resolved_manifest @
+      field "git" git @ field "rev" rev
+  in
+    name ^ " [" ^ String.concatWith ", " fields ^ "]"
+  end
+
+fun override_to_string (Override {name, path}) = name ^ " -> " ^ path
+
+fun project_package ({root, manifest, name, members, ...} : t) =
+  Package {name = Option.getOpt(name, "root"), root = root, manifest = manifest,
+           members = members, artifact_root = Path.concat(root, ".hol")}
+
+fun dependency_package (project : t) (dep as Dependency {name, ...}) =
+  let
+    val dep_root =
+      case dependency_local_path project dep of
+          SOME path => path
+        | NONE => die ("dependency " ^ name ^ " has no local path; add path or .holconfig.toml override")
+    val dep_manifest =
+      case dependency_manifest project dep of
+          SOME manifest => manifest
+        | NONE => die ("dependency " ^ name ^ " has no manifest")
+    val _ =
+      if readable dep_manifest then ()
+      else die ("dependency " ^ name ^ " manifest not found: " ^ dep_manifest)
+    val dep_project = parse_at {manifest = dep_manifest, root = dep_root, overrides = #overrides project}
+    val declared_name = #name dep_project
+    val _ =
+      case declared_name of
+          NONE => ()
+        | SOME actual =>
+            if actual = name then ()
+            else die ("dependency " ^ name ^ " manifest declares project.name = " ^ actual)
+    val artifact_root = Path.concat(Path.concat(#root project, ".hol/deps"), name)
+  in
+    Package {name = name, root = dep_root, manifest = dep_manifest,
+             members = #members dep_project, artifact_root = artifact_root}
+  end
+
+fun packages (project : t) = project_package project :: map (dependency_package project) (#dependencies project)
+
 fun describe (project : t) =
   let
-    val {root, manifest, name, version, members, includes, run_heap,
-         run_loads, heaps} = project
+    val {root, manifest, name, version, members, includes, dependencies,
+         overrides, run_heap, run_loads, heaps} = project
     fun opt label value =
       case value of NONE => () | SOME s => print (label ^ s ^ "\n")
   in
@@ -159,6 +302,8 @@ fun describe (project : t) =
     opt "version: " version;
     print ("members: " ^ String.concatWith ", " members ^ "\n");
     print ("includes: " ^ String.concatWith ", " includes ^ "\n");
+    List.app (fn dep => print ("dependency: " ^ dependency_to_string project dep ^ "\n")) dependencies;
+    List.app (fn override => print ("override: " ^ override_to_string override ^ "\n")) overrides;
     opt "run.heap: " run_heap;
     print ("run.loads: " ^ String.concatWith ", " run_loads ^ "\n");
     List.app (fn heap => print ("heap: " ^ heap_to_string heap ^ "\n")) heaps

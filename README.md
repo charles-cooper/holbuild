@@ -16,6 +16,8 @@ This prototype is intentionally small:
 - accepts logical build targets such as `MyTheory`, not object filenames such as `MyTheory.uo`
 - owns source discovery and maps outputs to project-level `.hol/`
 - extracts simple theory dependencies from source text and orders dry-run build plans
+- parses dependency manifests and local `.holconfig.toml` path overrides
+- materializes dependency plans under project `.hol/deps/<package>/`
 - does not delegate build semantics to Holmake
 - treats `.uo`/`.ui` as internal ML artifacts, never user-requestable targets
 - delegates execution to `$HOLDIR/bin/hol run` / `hol repl` for now
@@ -59,6 +61,10 @@ version = "0.1.0"
 [build]
 members = ["src", "examples"]
 
+[dependencies.foo]
+git = "https://github.com/acme/foo"
+rev = "abc123"
+
 [run]
 heap = "build/main.heap"
 loads = ["MyProjectLib"]
@@ -68,6 +74,19 @@ name = "main"
 output = "build/main.heap"
 objects = ["MyProjectLib"]
 ```
+
+## Local dependency overrides
+
+Use an uncommitted `.holconfig.toml` when a declared dependency lives at a
+different local path on your machine:
+
+```toml
+[overrides.foo]
+path = "../foo-dev"
+```
+
+The override changes only where the package is found locally. The package still
+needs its own `holproject.toml` or an explicit shim manifest from the consumer.
 
 ## Notes
 

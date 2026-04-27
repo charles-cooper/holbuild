@@ -12,8 +12,9 @@ type t = node list
 fun source_of ({source, ...} : node) = source
 fun deps_of ({deps, ...} : node) = deps
 fun logical_name node = #logical_name (source_of node)
+fun package node = #package (source_of node)
 fun relative_path node = #relative_path (source_of node)
-fun key node = relative_path node ^ "\000" ^ logical_name node
+fun key node = package node ^ "\000" ^ relative_path node ^ "\000" ^ logical_name node
 
 fun member value values = List.exists (fn x => x = value) values
 

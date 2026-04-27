@@ -14,7 +14,8 @@ type artifacts =
     theory_data : string list }
 
 type source =
-  { kind : kind,
+  { package : string,
+    kind : kind,
     logical_name : string,
     source_path : string,
     relative_path : string,
@@ -47,12 +48,12 @@ fun relative_path root path =
 fun dirname rel = #dir (Path.splitDirFile rel)
 fun filename rel = #file (Path.splitDirFile rel)
 
-fun obj_path root rel ext =
+fun obj_path artifact_root rel ext =
   let val {base, ...} = Path.splitBaseExt rel
-  in join root (join ".hol/obj" (base ^ ext)) end
+  in join artifact_root (join "obj" (base ^ ext)) end
 
-fun gen_path root rel name ext = join root (join ".hol/gen" (join (dirname rel) (name ^ ext)))
-fun theory_obj_path root rel name ext = join root (join ".hol/obj" (join (dirname rel) (name ^ ext)))
+fun gen_path artifact_root rel name ext = join artifact_root (join "gen" (join (dirname rel) (name ^ ext)))
+fun theory_obj_path artifact_root rel name ext = join artifact_root (join "obj" (join (dirname rel) (name ^ ext)))
 fun dat_path root rel name = theory_obj_path root rel name ".dat"
 
 fun theory_artifacts root rel theory =
@@ -67,33 +68,36 @@ fun sml_artifacts root rel =
 fun sig_artifacts root rel =
   { generated = [], objects = [obj_path root rel ".ui"], theory_data = [] }
 
-fun classify root abs_path =
+fun classify package source_root artifact_root abs_path =
   let
-    val rel = relative_path root abs_path
+    val rel = relative_path source_root abs_path
     val file = filename rel
   in
     if has_suffix "Script.sml" file then
       let
         val theory = drop_suffix "Script.sml" file ^ "Theory"
       in
-        SOME {kind = TheoryScript,
+        SOME {package = package,
+              kind = TheoryScript,
               logical_name = theory,
               source_path = abs_path,
               relative_path = rel,
-              artifacts = theory_artifacts root rel theory}
+              artifacts = theory_artifacts artifact_root rel theory}
       end
     else if has_suffix ".sml" file then
-      SOME {kind = Sml,
+      SOME {package = package,
+            kind = Sml,
             logical_name = drop_suffix ".sml" file,
             source_path = abs_path,
             relative_path = rel,
-            artifacts = sml_artifacts root rel}
+            artifacts = sml_artifacts artifact_root rel}
     else if has_suffix ".sig" file then
-      SOME {kind = Sig,
+      SOME {package = package,
+            kind = Sig,
             logical_name = drop_suffix ".sig" file,
             source_path = abs_path,
             relative_path = rel,
-            artifacts = sig_artifacts root rel}
+            artifacts = sig_artifacts artifact_root rel}
     else NONE
   end
 
@@ -113,19 +117,19 @@ fun list_dir path =
     loop [] handle e => (FS.closeDir stream; raise e)
   end
 
-fun scan_file root path acc =
-  case classify root path of
+fun scan_file package source_root artifact_root path acc =
+  case classify package source_root artifact_root path of
       NONE => acc
     | SOME source => source :: acc
 
-fun scan_dir root path acc =
+fun scan_dir package source_root artifact_root path acc =
   let
     fun scan_name (name, acc) =
       let val path' = join path name
       in
         if is_dir path' then
-          if skip_dir name then acc else scan_dir root path' acc
-        else if is_readable path' then scan_file root path' acc
+          if skip_dir name then acc else scan_dir package source_root artifact_root path' acc
+        else if is_readable path' then scan_file package source_root artifact_root path' acc
         else acc
       end
   in
@@ -133,13 +137,16 @@ fun scan_dir root path acc =
   end
 
 fun compare_source (a : source, b : source) =
-  String.compare(#relative_path a, #relative_path b)
+  case String.compare(#package a, #package b) of
+      EQUAL => String.compare(#relative_path a, #relative_path b)
+    | order => order
 
 fun compatible_same_name (a : source) (b : source) =
-  case (#kind a, #kind b) of
-      (Sml, Sig) => true
-    | (Sig, Sml) => true
-    | _ => false
+  #package a = #package b andalso
+  (case (#kind a, #kind b) of
+       (Sml, Sig) => true
+     | (Sig, Sml) => true
+     | _ => false)
 
 fun by_logical sources =
   let
@@ -151,7 +158,8 @@ fun by_logical sources =
           NONE => source :: seen
         | SOME other =>
             raise Error ("duplicate logical name " ^ #logical_name source ^ ": " ^
-                         #relative_path other ^ " and " ^ #relative_path source)
+                         #package other ^ ":" ^ #relative_path other ^ " and " ^
+                         #package source ^ ":" ^ #relative_path source)
   in
     ignore (List.foldl insert [] sources);
     sources
@@ -166,21 +174,31 @@ fun insert_sorted source sources =
 
 fun sort_sources sources = List.foldl (fn (source, acc) => insert_sorted source acc) [] sources
 
-fun discover (project : HolbuildProject.t) =
+fun discover_package package acc =
   let
-    val root = #root project
-    val members = map (HolbuildProject.abs_member project) (#members project)
-    val sources =
-      List.foldl
-        (fn (member, acc) =>
-            if is_dir member then scan_dir root member acc
-            else if is_readable member then scan_file root member acc
-            else raise Error ("member does not exist: " ^ member))
-        []
-        members
+    val name = HolbuildProject.package_name package
+    val source_root = HolbuildProject.package_root package
+    val artifact_root = HolbuildProject.package_artifact_root package
+    val members =
+      map (fn member => HolbuildProject.abs_under source_root member)
+        (HolbuildProject.package_members package)
   in
-    by_logical (sort_sources sources)
+    List.foldl
+      (fn (member, acc) =>
+          if is_dir member then scan_dir name source_root artifact_root member acc
+          else if is_readable member then scan_file name source_root artifact_root member acc
+          else raise Error ("member does not exist: " ^ member))
+      acc
+      members
   end
+
+fun discover (project : HolbuildProject.t) =
+  by_logical
+    (sort_sources
+       (List.foldl
+          (fn (package, acc) => discover_package package acc)
+          []
+          (HolbuildProject.packages project)))
 
 fun kind_string kind =
   case kind of
@@ -193,10 +211,10 @@ fun print_list label values =
       [] => ()
     | _ => print ("  " ^ label ^ ": " ^ String.concatWith ", " values ^ "\n")
 
-fun describe_source ({kind, logical_name, relative_path,
+fun describe_source ({package, kind, logical_name, relative_path,
                       artifacts = {generated, objects, theory_data}, ...} : source) =
-  (print (logical_name ^ " (" ^ kind_string kind ^ ")\n");
-   print ("  source: " ^ relative_path ^ "\n");
+  (print (logical_name ^ " (" ^ kind_string kind ^ ", package " ^ package ^ ")\n");
+   print ("  source: " ^ package ^ ":" ^ relative_path ^ "\n");
    print_list "generated" generated;
    print_list "objects" objects;
    print_list "theory_data" theory_data)
