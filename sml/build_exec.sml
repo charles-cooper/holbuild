@@ -366,10 +366,7 @@ fun cache_manifest_text {input_key, sig_hash, sml_hash, dat_hash} =
      "blob sml-template " ^ sml_hash,
      "blob dat " ^ dat_hash] ^ "\n"
 
-fun blob_line role line =
-  case String.tokens Char.isSpace line of
-      ["blob", role', hash] => if role = role' then SOME hash else NONE
-    | _ => NONE
+fun cache_manifest_lines text = String.tokens (fn c => c = #"\n") text
 
 fun first_some f values =
   case values of
@@ -379,26 +376,70 @@ fun first_some f values =
             SOME y => SOME y
           | NONE => first_some f xs
 
-fun required_blob role lines =
-  case first_some (blob_line role) lines of
-      SOME hash => hash
+fun is_hex_digit c =
+  (#"0" <= c andalso c <= #"9") orelse
+  (#"a" <= c andalso c <= #"f") orelse
+  (#"A" <= c andalso c <= #"F")
+
+fun all_chars pred text =
+  let
+    fun loop i = i >= size text orelse (pred (String.sub(text, i)) andalso loop (i + 1))
+  in
+    loop 0
+  end
+
+fun valid_sha1_text text = size text = 40 andalso all_chars is_hex_digit text
+
+fun require_sha1 role hash =
+  if valid_sha1_text hash then hash
+  else raise Error ("cache manifest invalid " ^ role ^ " blob hash: " ^ hash)
+
+fun known_blob_role role = role = "sig" orelse role = "sml-template" orelse role = "dat"
+
+fun add_manifest_blob role hash blobs =
+  if not (known_blob_role role) then
+    raise Error ("cache manifest unknown blob role: " ^ role)
+  else if List.exists (fn (role', _) => role' = role) blobs then
+    raise Error ("cache manifest duplicate blob role: " ^ role)
+  else
+    (role, require_sha1 role hash) :: blobs
+
+fun blob_from_manifest role blobs =
+  case List.find (fn (role', _) => role' = role) blobs of
+      SOME (_, hash) => hash
     | NONE => raise Error ("cache manifest missing blob role: " ^ role)
 
-fun cache_manifest_lines text = String.tokens (fn c => c = #"\n") text
-
-fun require_manifest_line expected lines =
-  if List.exists (fn line => line = expected) lines then ()
-  else raise Error ("cache manifest missing line: " ^ expected)
+fun parse_cache_manifest_line input_key line (saw_header, saw_input, saw_kind, blobs) =
+  if line = "holbuild-cache-action-v1" then
+    if saw_header then raise Error "cache manifest duplicate header"
+    else (true, saw_input, saw_kind, blobs)
+  else if line = "input_key=" ^ input_key then
+    if saw_input then raise Error "cache manifest duplicate input key"
+    else (saw_header, true, saw_kind, blobs)
+  else if String.isPrefix "input_key=" line then
+    raise Error "cache manifest input key mismatch"
+  else if line = "kind=theory" then
+    if saw_kind then raise Error "cache manifest duplicate kind"
+    else (saw_header, saw_input, true, blobs)
+  else if String.isPrefix "kind=" line then
+    raise Error "cache manifest unsupported kind"
+  else
+    case String.tokens Char.isSpace line of
+        ["blob", role, hash] => (saw_header, saw_input, saw_kind, add_manifest_blob role hash blobs)
+      | _ => raise Error ("cache manifest unknown line: " ^ line)
 
 fun cache_manifest_blobs_from_lines input_key lines =
   let
-    val _ = require_manifest_line "holbuild-cache-action-v1" lines
-    val _ = require_manifest_line ("input_key=" ^ input_key) lines
-    val _ = require_manifest_line "kind=theory" lines
+    val (saw_header, saw_input, saw_kind, blobs) =
+      List.foldl (fn (line, state) => parse_cache_manifest_line input_key line state)
+                 (false, false, false, []) lines
+    val _ = if saw_header then () else raise Error "cache manifest missing header"
+    val _ = if saw_input then () else raise Error "cache manifest missing input key"
+    val _ = if saw_kind then () else raise Error "cache manifest missing kind"
   in
-    {sig_hash = required_blob "sig" lines,
-     sml_hash = required_blob "sml-template" lines,
-     dat_hash = required_blob "dat" lines}
+    {sig_hash = blob_from_manifest "sig" blobs,
+     sml_hash = blob_from_manifest "sml-template" blobs,
+     dat_hash = blob_from_manifest "dat" blobs}
   end
 
 fun cache_manifest_blobs root input_key =
@@ -489,6 +530,22 @@ fun save_cached_theory_checkpoints tc project plan input_key node =
     remove_tree stage
   end
 
+fun remove_failed_cache_outputs project node =
+  let
+    val {sig_path, sml_path, data_path, script_uo, theory_ui, theory_uo} = theory_outputs node
+    val paths =
+      [data_path, hfs_remapped_path data_path,
+       sig_path, hfs_remapped_path sig_path,
+       sml_path, hfs_remapped_path sml_path,
+       script_uo, hfs_remapped_path script_uo,
+       theory_ui, hfs_remapped_path theory_ui,
+       theory_uo, hfs_remapped_path theory_uo,
+       deps_loaded_path project node,
+       final_context_path project node]
+  in
+    List.app remove_file paths
+  end
+
 fun materialize_theory_cache tc project plan input_key node =
   let
     val root = cache_root ()
@@ -515,7 +572,9 @@ fun materialize_theory_cache tc project plan input_key node =
     (install () before cleanup ()) handle e => (cleanup (); raise e)
   end
   handle Error "cache entry not found" => false
-       | e => (warn ("cache entry unusable for " ^ logical_name node ^ ": " ^ General.exnMessage e); false)
+       | e => (remove_failed_cache_outputs project node;
+               warn ("cache entry unusable for " ^ logical_name node ^ ": " ^ General.exnMessage e);
+               false)
 
 fun metadata_path (project : HolbuildProject.t) node =
   let

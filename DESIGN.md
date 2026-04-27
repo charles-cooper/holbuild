@@ -244,15 +244,17 @@ canonical local `.dat` path, writes local `.uo/.ui` load manifests plus
 `deps_loaded.save`/`final_context.save` checkpoints from the explicit HOL base
 state. Missing or corrupt cache entries warn and fall back to source build.
 
-Materialization preference:
+Materialization preference for v1:
 
 ```text
 1. reflink / copy-on-write clone
-2. hardlink immutable blobs
-3. copy
+2. copy
 ```
 
-Build actions must never mutate installed cache-linked outputs in place. Write
+Avoid hardlinking cache blobs into project `.hol/`: even if cache blobs are meant
+to be immutable, project outputs are the local materialized build view and should
+not be able to mutate global cache contents by accident. Build actions must never
+mutate installed cache-derived outputs in place. Write
 to staging locations and atomically install validated outputs. Concurrent source
 builds for the same action key serialize cache publication with a per-action
 cache lock; losing publishers skip publication because the local source build has

@@ -56,6 +56,14 @@ corrupt_manifest_log=$tmpdir/corrupt-manifest.log
 require_grep "cache entry unusable" "$corrupt_manifest_log"
 require_file "$project/.hol/obj/src/ATheory.dat"
 
+awk '{ if ($1 == "blob" && $2 == "sig") print "blob sig not-a-sha1"; else print }' "$manifest" > "$manifest.tmp"
+mv "$manifest.tmp" "$manifest"
+rm -rf "$project/.hol"
+invalid_hash_log=$tmpdir/invalid-hash.log
+(cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$invalid_hash_log" 2>&1
+require_grep "invalid sig blob hash" "$invalid_hash_log"
+require_file "$project/.hol/obj/src/ATheory.dat"
+
 rm -rf "$project/.hol"
 repaired_manifest_log=$tmpdir/repaired-manifest.log
 (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$repaired_manifest_log" 2>&1
