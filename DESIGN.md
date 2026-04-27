@@ -157,14 +157,17 @@ input key   = can I reuse a cached build for these sources and resolved deps?
 output key  = what semantic artifact did this build actually produce?
 ```
 
-For theories, the output key should center on semantic outputs such as
-`FooTheory.dat` and generated theory interface/source content, not local `.uo` or
-`.ui` path manifests. Source-build cache lookup must use the input key, so any
-source byte change — including proof edits or comments — invalidates that
-action's cache entry and reruns the script. Different input keys may still
-produce the same output key. After rerunning a changed parent, downstream
-invalidation may use the parent's output key to avoid rebuilding children when
-the exported theory is unchanged.
+For v1, downstream invalidation also uses dependency input keys. A target's
+input key is effectively the hash of its own source content plus the DAG heads
+(input keys) of its resolved dependencies, along with toolchain/config facts.
+Therefore any source byte change — including proof edits or comments — changes
+that action's input key and changes the input keys of dependents. This is
+conservative and avoids relying on semantic equivalence of generated theory
+outputs.
+
+A build may record output hashes, such as `FooTheory.dat` or generated theory
+interface/source hashes, for diagnostics and future cache analysis. V1 must not
+use output hashes to skip rebuilding dependents.
 
 Different absolute paths under the same declared root may normalize to the same
 root-relative identity. Arbitrary outside-root paths are rejected or treated as
