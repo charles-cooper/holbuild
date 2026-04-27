@@ -15,7 +15,7 @@ cache=$tmpdir/cache
 mkdir -p "$cache/tmp/oldtmp" "$cache/blobs" "$cache/actions/live" "$cache/actions/old" "$cache/actions/nomani"
 : > "$cache/blobs/live"
 : > "$cache/blobs/dead"
-printf 'holbuild-cache-action-v1\nblob=live\n' > "$cache/actions/live/manifest"
+printf 'holbuild-cache-action-v1\nblob sig live\n' > "$cache/actions/live/manifest"
 printf 'holbuild-cache-action-v1\nblob=old\n' > "$cache/actions/old/manifest"
 touch -d '10 days ago' \
   "$cache/tmp/oldtmp" \

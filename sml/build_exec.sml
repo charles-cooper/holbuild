@@ -21,13 +21,28 @@ fun ensure_dir path =
 
 fun ensure_parent path = ensure_dir (Path.dir path)
 
+fun temp_near path =
+  Path.concat(Path.dir path,
+              "." ^ Path.file path ^ "." ^ Path.file (FS.tmpName ()) ^ ".tmp")
+
+fun remove_file path = FS.remove path handle OS.SysErr _ => ()
+
+fun rename_replace {old, new} =
+  FS.rename {old = old, new = new}
+  handle OS.SysErr _ =>
+    (FS.remove new handle OS.SysErr _ => ();
+     FS.rename {old = old, new = new})
+
 fun copy_binary src dst =
   let
     val input = BinIO.openIn src
       handle e => raise Error ("could not read " ^ src ^ ": " ^ General.exnMessage e)
     val _ = ensure_parent dst
-    val output = BinIO.openOut dst
+    val tmp = temp_near dst
+    val output = BinIO.openOut tmp
       handle e => (BinIO.closeIn input; raise Error ("could not write " ^ dst ^ ": " ^ General.exnMessage e))
+    fun close_input () = BinIO.closeIn input handle _ => ()
+    fun close_output () = BinIO.closeOut output handle _ => ()
     fun loop () =
       let val chunk = BinIO.inputN(input, 65536)
       in
@@ -35,9 +50,11 @@ fun copy_binary src dst =
         else (BinIO.output(output, chunk); loop ())
       end
   in
-    loop ();
-    BinIO.closeIn input;
-    BinIO.closeOut output
+    (loop ();
+     BinIO.closeIn input;
+     BinIO.closeOut output;
+     rename_replace {old = tmp, new = dst})
+    handle e => (close_input (); close_output (); remove_file tmp; raise e)
   end
 
 fun read_text path =
@@ -47,8 +64,16 @@ fun read_text path =
 fun write_text path text =
   let
     val _ = ensure_parent path
-    val output = TextIO.openOut path
-  in TextIO.output(output, text); TextIO.closeOut output end
+    val tmp = temp_near path
+    val output = TextIO.openOut tmp
+      handle e => raise Error ("could not write " ^ path ^ ": " ^ General.exnMessage e)
+    fun close_output () = TextIO.closeOut output handle _ => ()
+  in
+    (TextIO.output(output, text);
+     TextIO.closeOut output;
+     rename_replace {old = tmp, new = path})
+    handle e => (close_output (); remove_file tmp; raise e)
+  end
 
 fun replace_all needle replacement text =
   let
@@ -176,12 +201,16 @@ fun warn msg = TextIO.output(TextIO.stdErr, "holbuild: warning: " ^ msg ^ "\n")
 
 fun cache_root () = HolbuildCache.cache_root ()
 
+fun file_hash_matches path hash =
+  file_exists path andalso file_hash path = hash
+  handle _ => false
+
 fun cache_blob root path =
   let
     val hash = file_hash path
     val blob = HolbuildCache.blob_path root hash
   in
-    if file_exists blob then () else copy_binary path blob;
+    if file_hash_matches blob hash then () else copy_binary path blob;
     hash
   end
 
@@ -193,28 +222,6 @@ fun cache_manifest_text {input_key, sig_hash, sml_hash, dat_hash} =
      "blob sig " ^ sig_hash,
      "blob sml-template " ^ sml_hash,
      "blob dat " ^ dat_hash] ^ "\n"
-
-fun publish_theory_cache input_key staged_dat_ref staged_sig staged_sml staged_dat =
-  let
-    val root = cache_root ()
-    val _ = HolbuildCache.ensure_layout root
-    val template = FS.tmpName ()
-    val _ = write_text template (replace_all staged_dat_ref cache_sml_token (read_text staged_sml))
-    val sig_hash = cache_blob root staged_sig
-    val sml_hash = cache_blob root template
-    val dat_hash = cache_blob root staged_dat
-    val manifest = cache_manifest_text {input_key = input_key, sig_hash = sig_hash,
-                                        sml_hash = sml_hash, dat_hash = dat_hash}
-    val manifest_path = HolbuildCache.action_manifest root input_key
-    val existing = current_metadata manifest_path
-  in
-    case existing of
-        SOME old => if old = manifest then ()
-                    else warn ("cache entry already exists with different outputs: " ^ input_key)
-      | NONE => (ensure_parent manifest_path; write_text manifest_path manifest);
-    FS.remove template handle OS.SysErr _ => ()
-  end
-  handle e => warn ("could not publish cache entry: " ^ General.exnMessage e)
 
 fun blob_line role line =
   case String.tokens Char.isSpace line of
@@ -234,24 +241,77 @@ fun required_blob role lines =
       SOME hash => hash
     | NONE => raise Error ("cache manifest missing blob role: " ^ role)
 
-fun cache_manifest_blobs root input_key =
+fun cache_manifest_lines text = String.tokens (fn c => c = #"\n") text
+
+fun require_manifest_line expected lines =
+  if List.exists (fn line => line = expected) lines then ()
+  else raise Error ("cache manifest missing line: " ^ expected)
+
+fun cache_manifest_blobs_from_lines input_key lines =
   let
-    val manifest = HolbuildCache.action_manifest root input_key
-    val lines = String.tokens (fn c => c = #"\n") (read_text manifest)
-    val _ =
-      if List.exists (fn line => line = "input_key=" ^ input_key) lines then ()
-      else raise Error "cache manifest input key mismatch"
+    val _ = require_manifest_line "holbuild-cache-action-v1" lines
+    val _ = require_manifest_line ("input_key=" ^ input_key) lines
+    val _ = require_manifest_line "kind=theory" lines
   in
     {sig_hash = required_blob "sig" lines,
      sml_hash = required_blob "sml-template" lines,
      dat_hash = required_blob "dat" lines}
   end
 
+fun cache_manifest_blobs root input_key =
+  let val manifest = HolbuildCache.action_manifest root input_key
+  in cache_manifest_blobs_from_lines input_key (cache_manifest_lines (read_text manifest)) end
+
+fun cache_entry_usable root input_key text =
+  let
+    val {sig_hash, sml_hash, dat_hash} =
+      cache_manifest_blobs_from_lines input_key (cache_manifest_lines text)
+  in
+    file_hash_matches (HolbuildCache.blob_path root sig_hash) sig_hash andalso
+    file_hash_matches (HolbuildCache.blob_path root sml_hash) sml_hash andalso
+    file_hash_matches (HolbuildCache.blob_path root dat_hash) dat_hash
+  end
+  handle _ => false
+
 fun copy_blob root hash dst =
   let val blob = HolbuildCache.blob_path root hash
   in
-    if file_exists blob then copy_binary blob dst
-    else raise Error ("cache blob missing: " ^ hash)
+    if file_hash_matches blob hash then
+      (copy_binary blob dst;
+       if file_hash_matches dst hash then ()
+       else raise Error ("cache materialization hash mismatch: " ^ hash))
+    else raise Error ("cache blob missing or corrupt: " ^ hash)
+  end
+
+fun publish_theory_cache input_key staged_dat_ref staged_sig staged_sml staged_dat =
+  let
+    val root = cache_root ()
+    val _ = HolbuildCache.ensure_layout root
+    val template = FS.tmpName ()
+    fun cleanup () = FS.remove template handle OS.SysErr _ => ()
+    fun publish () =
+      let
+        val _ = write_text template (replace_all staged_dat_ref cache_sml_token (read_text staged_sml))
+        val sig_hash = cache_blob root staged_sig
+        val sml_hash = cache_blob root template
+        val dat_hash = cache_blob root staged_dat
+        val manifest = cache_manifest_text {input_key = input_key, sig_hash = sig_hash,
+                                            sml_hash = sml_hash, dat_hash = dat_hash}
+        val manifest_path = HolbuildCache.action_manifest root input_key
+        val existing = current_metadata manifest_path
+      in
+        case existing of
+            SOME old =>
+              if old = manifest then ()
+              else if cache_entry_usable root input_key old then
+                warn ("cache entry already exists with different outputs: " ^ input_key)
+              else
+                write_text manifest_path manifest
+          | NONE => write_text manifest_path manifest
+      end
+  in
+    (publish (); cleanup ())
+    handle e => (cleanup (); warn ("could not publish cache entry: " ^ General.exnMessage e))
   end
 
 fun write_local_theory_manifests plan node =
@@ -294,17 +354,19 @@ fun materialize_theory_cache tc project plan input_key node =
     val {sig_path, sml_path, data_path, ...} = theory_outputs node
     val load_data_path = data_path ^ ".load"
     val template = FS.tmpName ()
+    fun cleanup () = FS.remove template handle OS.SysErr _ => ()
+    fun install () =
+      (copy_blob root dat_hash data_path;
+       copy_blob root dat_hash load_data_path;
+       copy_blob root sig_hash sig_path;
+       copy_blob root sml_hash template;
+       write_text sml_path (replace_all cache_sml_token load_data_path (read_text template));
+       write_local_theory_manifests plan node;
+       save_cached_theory_checkpoints tc project plan input_key node;
+       print (logical_name node ^ " restored from cache\n");
+       true)
   in
-    copy_blob root dat_hash data_path;
-    copy_blob root dat_hash load_data_path;
-    copy_blob root sig_hash sig_path;
-    copy_blob root sml_hash template;
-    write_text sml_path (replace_all cache_sml_token load_data_path (read_text template));
-    FS.remove template handle OS.SysErr _ => ();
-    write_local_theory_manifests plan node;
-    save_cached_theory_checkpoints tc project plan input_key node;
-    print (logical_name node ^ " restored from cache\n");
-    true
+    (install () before cleanup ()) handle e => (cleanup (); raise e)
   end
   handle Error "cache entry not found" => false
        | e => (warn ("cache entry unusable for " ^ logical_name node ^ ": " ^ General.exnMessage e); false)

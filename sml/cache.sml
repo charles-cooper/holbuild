@@ -112,9 +112,12 @@ fun take_token s =
 fun blob_ref line =
   let val clean = trim_newline line
   in
-    if has_prefix "blob=" clean then SOME (take_token (String.extract(clean, 5, NONE)))
-    else if has_prefix "blob-sha1=" clean then SOME (take_token (String.extract(clean, 10, NONE)))
-    else NONE
+    case String.tokens Char.isSpace clean of
+        ["blob", _, hash] => SOME hash
+      | _ =>
+          if has_prefix "blob=" clean then SOME (take_token (String.extract(clean, 5, NONE)))
+          else if has_prefix "blob-sha1=" clean then SOME (take_token (String.extract(clean, 10, NONE)))
+          else NONE
   end
 
 fun add_unique item items =
