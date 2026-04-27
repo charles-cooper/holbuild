@@ -44,7 +44,10 @@ HOLBUILD_TEST_JOBS=16 make HOLDIR=/path/to/HOL test
 The compiler loads HOL's existing SML TOML parser from `$(HOLDIR)` and embeds it
 in `bin/holbuild`. Tests live under `tests/cases/*/test.sh` so they can move into
 HOL's selftest layout with minimal reshaping; `tests/run.sh` is the repo-local
-runner and can run cases in parallel with `HOLBUILD_TEST_JOBS`.
+runner and can run cases in parallel with `HOLBUILD_TEST_JOBS`. Current cases
+cover simple theory builds, package overrides, conservative invalidation,
+cache restoration, parallel diamonds, explicit heaps, object-target rejection,
+and cache GC.
 
 ## Usage
 
