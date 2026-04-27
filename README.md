@@ -39,9 +39,9 @@ make HOLDIR=/path/to/HOL test
 ```
 
 The compiler loads HOL's existing SML TOML parser from `$(HOLDIR)` and embeds it
-in `bin/holbuild`. The smoke tests create temporary projects and verify logical
-target rejection, simple theory execution/incrementality/checkpoints, explicit
-heap export, and cache GC.
+in `bin/holbuild`. Tests live under `tests/cases/*/test.sh` so they can move into
+HOL's selftest layout with minimal reshaping; `tests/run.sh` is the repo-local
+runner.
 
 ## Usage
 

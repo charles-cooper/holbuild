@@ -11,7 +11,7 @@ bin/holbuild: sml/holbuild-script.sml sml/project.sml sml/source_index.sml sml/d
 	HOLBUILD_HOLDIR="$(HOLDIR)" $(POLYC) -o $@ sml/holbuild-script.sml
 
 test: bin/holbuild
-	HOLDIR="$(HOLDIR)" tests/smoke.sh
+	HOLDIR="$(HOLDIR)" tests/run.sh
 
 clean:
 	rm -f bin/holbuild
