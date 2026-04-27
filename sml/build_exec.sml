@@ -98,12 +98,13 @@ fun save_heap_line output =
   HolbuildToolchain.sml_string output ^
   ", length (PolyML.SaveState.showHierarchy()));"
 
-fun write_preload plan node path =
+fun write_preload plan node deps_loaded path =
   let
     val external_deps = HolbuildBuildPlan.closure_external_theories plan node
     val project_deps = HolbuildBuildPlan.transitive_project_deps plan node
     val lines = map load_theory_line external_deps @
-                List.concat (map use_generated_lines project_deps)
+                List.concat (map use_generated_lines project_deps) @
+                [save_heap_line deps_loaded]
   in
     write_text path (String.concatWith "\n" lines ^ "\n")
   end
@@ -147,6 +148,7 @@ fun checkpoint_base (project : HolbuildProject.t) node =
                           HolbuildBuildPlan.package node),
               HolbuildBuildPlan.relative_path node)
 
+fun deps_loaded_path project node = checkpoint_base project node ^ ".deps_loaded.save"
 fun final_context_path project node = checkpoint_base project node ^ ".final_context.save"
 
 fun remove_tree path =
@@ -169,6 +171,7 @@ fun build_theory tc project plan keys node =
     val staged_script = Path.concat(stage, Path.file (source_file node))
     val preload = Path.concat(stage, "holbuild-preload.sml")
     val final_loader = Path.concat(stage, "holbuild-save-final-context.sml")
+    val deps_loaded = deps_loaded_path project node
     val final_context = final_context_path project node
     val {sig_path, sml_path, data_path, script_uo, theory_ui, theory_uo} = theory_outputs node
     val staged_sig = staged_theory_file stage node ".sig"
@@ -176,8 +179,9 @@ fun build_theory tc project plan keys node =
     val staged_dat = staged_theory_file stage node ".dat"
     val _ = ensure_dir stage
     val _ = copy_binary (source_file node) staged_script
+    val _ = ensure_parent deps_loaded
     val _ = ensure_parent final_context
-    val _ = write_preload plan node preload
+    val _ = write_preload plan node deps_loaded preload
     val _ = write_final_context_loader
               {sig_path = staged_sig, sml_path = staged_sml,
                output = final_context, path = final_loader}
@@ -222,37 +226,64 @@ fun output_paths project node =
   in
     case #kind (HolbuildBuildPlan.source_of node) of
         HolbuildSourceIndex.TheoryScript =>
-          final_context_path project node ::
+          deps_loaded_path project node :: final_context_path project node ::
           (one_with_suffix ".dat" (#theory_data artifacts) ^ ".load") :: base
       | _ => base
   end
 
 fun current_metadata path = SOME (read_text path) handle IO.Io _ => NONE
 
-fun metadata_text input_key = "input_key=" ^ input_key ^ "\n"
+fun file_hash path = SHA1_ML.sha1_file {filename = path}
 
-fun up_to_date project input_key node =
-  current_metadata (metadata_path project node) = SOME (metadata_text input_key) andalso
-  List.all file_exists (output_paths project node)
+fun output_hash_line path = "output-sha1=" ^ path ^ " " ^ file_hash path
 
-fun write_metadata project input_key node =
-  write_text (metadata_path project node) (metadata_text input_key)
+fun checkpoint_lines project node =
+  case #kind (HolbuildBuildPlan.source_of node) of
+      HolbuildSourceIndex.TheoryScript =>
+        ["deps_loaded=" ^ deps_loaded_path project node,
+         "final_context=" ^ final_context_path project node]
+    | _ => []
 
-fun build_node tc project plan keys node =
+fun metadata_text project input_key toolchain_key node =
+  let
+    val source = HolbuildBuildPlan.source_of node
+    val lines =
+      ["holbuild-action-metadata-v1",
+       "input_key=" ^ input_key,
+       "toolchain_key=" ^ toolchain_key,
+       "kind=" ^ HolbuildSourceIndex.kind_string (#kind source),
+       "package=" ^ #package source,
+       "logical=" ^ #logical_name source,
+       "source=" ^ #relative_path source] @
+      checkpoint_lines project node @
+      map output_hash_line (output_paths project node)
+  in
+    String.concatWith "\n" lines ^ "\n"
+  end
+
+fun up_to_date project input_key toolchain_key node =
+  List.all file_exists (output_paths project node) andalso
+  current_metadata (metadata_path project node) =
+    SOME (metadata_text project input_key toolchain_key node)
+
+fun write_metadata project input_key toolchain_key node =
+  write_text (metadata_path project node) (metadata_text project input_key toolchain_key node)
+
+fun build_node tc project plan keys toolchain_key node =
   let val input_key = HolbuildBuildPlan.input_key_for keys node
   in
-    if up_to_date project input_key node then
+    if up_to_date project input_key toolchain_key node then
       print (HolbuildBuildPlan.logical_name node ^ " is up to date\n")
     else
       (case #kind (HolbuildBuildPlan.source_of node) of
            HolbuildSourceIndex.TheoryScript => build_theory tc project plan keys node
          | HolbuildSourceIndex.Sml => build_sml_like node ".uo"
          | HolbuildSourceIndex.Sig => build_sml_like node ".ui";
-       write_metadata project input_key node)
+       write_metadata project input_key toolchain_key node)
   end
 
 fun build tc project plan toolchain_key =
   let val keys = HolbuildBuildPlan.input_keys toolchain_key plan
-  in List.app (build_node tc project plan keys) plan end
+  in List.app (build_node tc project plan keys toolchain_key) plan end
 
 end
