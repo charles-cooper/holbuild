@@ -20,6 +20,10 @@ fun key node = package node ^ "\000" ^ relative_path node ^ "\000" ^ logical_nam
 
 fun member value values = List.exists (fn x => x = value) values
 
+fun add_unique (value, values) = if member value values then values else value :: values
+
+fun unique_strings values = rev (List.foldl add_unique [] values)
+
 fun has_logical_name name node = logical_name node = name
 
 fun nodes_named nodes name = List.filter (has_logical_name name) nodes
@@ -37,21 +41,42 @@ fun selected_nodes nodes targets =
         List.concat (map find targets)
       end
 
-fun direct_theory_names node = #theories (deps_of node)
+fun direct_dependency_names node =
+  unique_strings (#theories (deps_of node) @ #loads (deps_of node))
+
+fun signature_companion_deps nodes node =
+  case #kind (source_of node) of
+      HolbuildSourceIndex.Sml =>
+        List.filter
+          (fn candidate =>
+              package candidate = package node andalso
+              logical_name candidate = logical_name node andalso
+              #kind (source_of candidate) = HolbuildSourceIndex.Sig)
+          nodes
+    | _ => []
+
+fun unique_nodes nodes =
+  let
+    fun add (node, kept) =
+      if member (key node) (map key kept) then kept else node :: kept
+  in
+    rev (List.foldl add [] nodes)
+  end
 
 fun direct_project_deps nodes node =
   let
     fun candidates name = nodes_named nodes name
     fun not_self candidate = key candidate <> key node
+    val named_deps = List.concat (map candidates (direct_dependency_names node))
   in
-    List.filter not_self (List.concat (map candidates (direct_theory_names node)))
+    unique_nodes (List.filter not_self (signature_companion_deps nodes node @ named_deps))
   end
 
 fun direct_external_theories nodes node =
   let
     fun known name = not (null (nodes_named nodes name))
   in
-    List.filter (fn name => not (known name)) (direct_theory_names node)
+    List.filter (fn name => not (known name)) (direct_dependency_names node)
   end
 
 fun cycle_message path node =
@@ -79,12 +104,6 @@ fun topo_sort nodes roots =
   end
 
 fun transitive_project_deps nodes node = topo_sort nodes (direct_project_deps nodes node)
-
-fun member_string value values = List.exists (fn x => x = value) values
-
-fun add_unique (value, values) = if member_string value values then values else value :: values
-
-fun unique_strings values = rev (List.foldl add_unique [] values)
 
 fun closure_external_theories nodes node =
   unique_strings

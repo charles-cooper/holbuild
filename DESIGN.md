@@ -141,10 +141,14 @@ project/.hol/
 
 Path-sensitive files are generated or rebased for this local layout. In
 particular, `.uo`/`.ui` files and generated `Theory.sml` files may contain paths
-and should not be treated as portable semantic truth. HOL's current
-`HOLFileSys` remaps files ending in `Theory.dat`/`.sml`/`.sig` through
-`.hol/objs`, so a project-level layout may need auxiliary load paths or rewritten
-non-semantic load copies while preserving canonical `.dat` artifacts.
+and should not be treated as portable semantic truth. Project SML/SIG modules are
+built as internal load manifests: `load "Module"` references are resolved against
+the project graph, `.sml` files get a `.uo` plus an empty companion `.ui` unless a
+real `.sig` companion exists, and same-name signatures are implicit dependencies
+of their implementation. HOL's current `HOLFileSys` remaps `.uo`/`.ui` and files
+ending in `Theory.dat`/`.sml`/`.sig` through `.hol/objs`, so a project-level
+layout may need auxiliary load paths or rewritten non-semantic load copies while
+preserving canonical artifacts.
 
 ## Invalidation and action keys
 

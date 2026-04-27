@@ -109,6 +109,12 @@ fun script_base node =
 
 fun write_manifest path lines = write_text path (String.concatWith "\n" lines ^ "\n")
 
+fun hfs_object_load_path path = Path.concat(Path.concat(Path.dir path, ".hol/objs"), Path.file path)
+
+fun write_object_manifest path lines =
+  (write_manifest path lines;
+   write_manifest (hfs_object_load_path path) lines)
+
 fun dependency_sml dep = one_with_suffix ".sml" (#generated (source_artifacts dep))
 fun dependency_sig dep = one_with_suffix ".sig" (#generated (source_artifacts dep))
 
@@ -117,6 +123,44 @@ fun load_theory_line name = "load " ^ HolbuildToolchain.sml_string name ^ ";"
 fun use_generated_lines dep =
   ["use " ^ HolbuildToolchain.sml_string (dependency_sig dep) ^ ";",
    "use " ^ HolbuildToolchain.sml_string (dependency_sml dep) ^ ";"]
+
+fun drop_suffix suffix path =
+  if has_suffix suffix path then String.substring(path, 0, size path - size suffix)
+  else raise Error ("expected suffix " ^ suffix ^ " in " ^ path)
+
+fun object_stem_with_suffix suffix dep =
+  drop_suffix suffix (one_with_suffix suffix (#objects (source_artifacts dep)))
+
+fun loadable_project_dep dep =
+  case #kind (HolbuildBuildPlan.source_of dep) of
+      HolbuildSourceIndex.Sig => false
+    | _ => true
+
+fun load_stem dep =
+  case #kind (HolbuildBuildPlan.source_of dep) of
+      HolbuildSourceIndex.TheoryScript =>
+        drop_suffix ".uo" (one_with_suffix (HolbuildBuildPlan.logical_name dep ^ ".uo")
+                                          (#objects (source_artifacts dep)))
+    | HolbuildSourceIndex.Sml => object_stem_with_suffix ".uo" dep
+    | HolbuildSourceIndex.Sig => object_stem_with_suffix ".ui" dep
+
+fun add_unique_string (value, values) =
+  if List.exists (fn existing => existing = value) values then values else value :: values
+
+fun unique_strings values = rev (List.foldl add_unique_string [] values)
+
+fun project_load_stems deps =
+  unique_strings (map load_stem (List.filter loadable_project_dep deps))
+
+fun fakeload_line name = "Meta.fakeload " ^ HolbuildToolchain.sml_string name ^ ";"
+
+fun load_project_line dep = "load " ^ HolbuildToolchain.sml_string dep ^ ";"
+
+fun project_preload_lines dep =
+  case #kind (HolbuildBuildPlan.source_of dep) of
+      HolbuildSourceIndex.TheoryScript => use_generated_lines dep @ [fakeload_line (logical_name dep)]
+    | HolbuildSourceIndex.Sml => [load_project_line (load_stem dep)]
+    | HolbuildSourceIndex.Sig => []
 
 fun save_heap_line output =
   "val _ = PolyML.SaveState.saveChild(" ^
@@ -128,7 +172,7 @@ fun write_preload plan node deps_loaded path =
     val external_deps = HolbuildBuildPlan.closure_external_theories plan node
     val project_deps = HolbuildBuildPlan.transitive_project_deps plan node
     val lines = map load_theory_line external_deps @
-                List.concat (map use_generated_lines project_deps) @
+                List.concat (map project_preload_lines project_deps) @
                 [save_heap_line deps_loaded]
   in
     write_text path (String.concatWith "\n" lines ^ "\n")
@@ -319,9 +363,9 @@ fun write_local_theory_manifests plan node =
     val {sig_path, sml_path, script_uo, theory_ui, theory_uo, ...} = theory_outputs node
     val deps = HolbuildBuildPlan.direct_project_deps plan node
   in
-    write_manifest theory_ui [sig_path];
-    write_manifest theory_uo (map dependency_sml deps @ [sml_path]);
-    write_manifest script_uo [source_file node]
+    write_object_manifest theory_ui [sig_path];
+    write_object_manifest theory_uo (project_load_stems deps @ [sml_path]);
+    write_object_manifest script_uo [source_file node]
   end
 
 fun save_cached_theory_checkpoints tc project plan input_key node =
@@ -559,16 +603,34 @@ fun build_theory tc project plan keys toolchain_key node source_text theorem_che
     remove_tree stage
   end
 
-fun build_sml_like node output_suffix =
+fun same_package_logical a b =
+  HolbuildBuildPlan.package a = HolbuildBuildPlan.package b andalso
+  HolbuildBuildPlan.logical_name a = HolbuildBuildPlan.logical_name b
+
+fun has_signature_companion plan node =
+  List.exists
+    (fn candidate => same_package_logical candidate node andalso
+                     #kind (HolbuildBuildPlan.source_of candidate) = HolbuildSourceIndex.Sig)
+    plan
+
+fun write_empty_ui_if_needed plan node =
+  if has_signature_companion plan node then ()
+  else write_object_manifest (one_with_suffix ".ui" (#objects (source_artifacts node))) []
+
+fun build_sml_like plan node output_suffix =
   let
     val output = one_with_suffix output_suffix (#objects (source_artifacts node))
+    val deps = HolbuildBuildPlan.direct_project_deps plan node
   in
-    write_manifest output [source_file node]
+    write_object_manifest output (project_load_stems deps @ [source_file node]);
+    if output_suffix = ".uo" then write_empty_ui_if_needed plan node else ()
   end
 
 fun output_paths project node =
   let val artifacts = source_artifacts node
-      val base = #generated artifacts @ #objects artifacts @ #theory_data artifacts
+      val object_paths = #objects artifacts
+      val base = #generated artifacts @ object_paths @
+                 map hfs_object_load_path object_paths @ #theory_data artifacts
   in
     case #kind (HolbuildBuildPlan.source_of node) of
         HolbuildSourceIndex.TheoryScript =>
@@ -662,12 +724,12 @@ fun build_node tc project plan keys toolchain_key node =
       | HolbuildSourceIndex.Sml =>
           if up_to_date project plan keys input_key toolchain_key node [] then
             print (HolbuildBuildPlan.logical_name node ^ " is up to date\n")
-          else (build_sml_like node ".uo";
+          else (build_sml_like plan node ".uo";
                 write_metadata project plan keys input_key toolchain_key node [])
       | HolbuildSourceIndex.Sig =>
           if up_to_date project plan keys input_key toolchain_key node [] then
             print (HolbuildBuildPlan.logical_name node ^ " is up to date\n")
-          else (build_sml_like node ".ui";
+          else (build_sml_like plan node ".ui";
                 write_metadata project plan keys input_key toolchain_key node [])
   end
 
@@ -786,11 +848,6 @@ fun build tc project plan toolchain_key jobs =
     if jobs <= 1 then build_serial tc project plan keys toolchain_key
     else build_parallel tc project plan keys toolchain_key jobs
   end
-
-fun add_unique_string (value, values) =
-  if List.exists (fn existing => existing = value) values then values else value :: values
-
-fun unique_strings values = rev (List.foldl add_unique_string [] values)
 
 fun heap_external_theories plan =
   unique_strings (List.concat (map (HolbuildBuildPlan.closure_external_theories plan) plan))

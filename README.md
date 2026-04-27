@@ -18,6 +18,7 @@ This prototype is intentionally small:
 - extracts simple theory dependencies from source text and orders dry-run build plans
 - parses transitive dependency manifests and local `.holconfig.toml` path overrides
 - materializes dependency plans under project `.hol/deps/<package>/`
+- includes project `load "Module"` SML/SIG dependencies in build plans and internal load manifests
 - computes prototype source/resolved-dependency input keys for planned actions
 - schedules build actions serially by default or in DAG-ready parallel order with `-jN`
 - executes simple theory-script builds into project `.hol/` without Holmake

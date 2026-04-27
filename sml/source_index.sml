@@ -63,7 +63,7 @@ fun theory_artifacts root rel theory =
     theory_data = [dat_path root rel theory] }
 
 fun sml_artifacts root rel =
-  { generated = [], objects = [obj_path root rel ".uo"], theory_data = [] }
+  { generated = [], objects = [obj_path root rel ".ui", obj_path root rel ".uo"], theory_data = [] }
 
 fun sig_artifacts root rel =
   { generated = [], objects = [obj_path root rel ".ui"], theory_data = [] }
