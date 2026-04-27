@@ -385,13 +385,52 @@ fun theorem_context_path project node safe_name =
 fun theorem_end_of_proof_path project node safe_name =
   checkpoint_base project node ^ "." ^ safe_name ^ "_end_of_proof.save"
 
-fun theorem_checkpoint_specs project node source_text =
-  map (fn {name, safe_name, call_start, boundary, prefix_hash} =>
-          {name = name, safe_name = safe_name, call_start = call_start,
-           boundary = boundary, prefix_hash = prefix_hash,
+fun theorem_discovery_script {source_path, report_path} =
+  String.concatWith "\n"
+    ["load \"HOLSourceParser\";",
+     "fun holbuild_read_all path = let val input = TextIO.openIn path in TextIO.inputAll input before TextIO.closeIn input end;",
+     "val holbuild_source_path = " ^ HolbuildToolchain.sml_string source_path ^ ";",
+     "val holbuild_report_path = " ^ HolbuildToolchain.sml_string report_path ^ ";",
+     "val holbuild_source = holbuild_read_all holbuild_source_path;",
+     "val holbuild_out = TextIO.openOut holbuild_report_path;",
+     "val holbuild_fed = ref false;",
+     "fun holbuild_read _ = if !holbuild_fed then \"\" else (holbuild_fed := true; holbuild_source);",
+     "fun holbuild_parse_error _ _ msg = raise Fail (\"HOL source parse error: \" ^ msg);",
+     "val holbuild_result = HOLSourceParser.parseSML holbuild_source_path holbuild_read holbuild_parse_error HOLSourceParser.initialScope;",
+     "fun holbuild_bool true = \"1\" | holbuild_bool false = \"0\";",
+     "fun holbuild_emit_theorem name start stop tac_start tac_end has_attrs = TextIO.output(holbuild_out, String.concatWith \"\\t\" [\"theorem\", name, Int.toString start, Int.toString stop, Int.toString tac_start, Int.toString tac_end, holbuild_bool has_attrs] ^ \"\\n\");",
+     "fun holbuild_loop () =",
+     "  case #parseDec holbuild_result () of",
+     "      NONE => ()",
+     "    | SOME (HOLSourceAST.HOLTheoremDecl {theorem_, id = (_, name), proof_, tac, stop, ...}) =>",
+     "        let val (tac_start, tac_end) = HOLSourceAST.expSpan tac in holbuild_emit_theorem name theorem_ stop tac_start tac_end (Option.isSome proof_); holbuild_loop () end",
+     "    | SOME _ => holbuild_loop ();",
+     "val _ = (holbuild_loop (); TextIO.closeOut holbuild_out);",
+     ""]
+
+fun discover_theorem_boundaries tc stage source_path source_text =
+  let
+    val script = Path.concat(stage, "holbuild-discover-theorems.sml")
+    val report_path = Path.concat(stage, "holbuild-theorems.tsv")
+    val _ = write_text script (theorem_discovery_script {source_path = source_path, report_path = report_path})
+    val _ = run_hol_files tc stage (HolbuildToolchain.base_state tc) [script]
+              "hol run failed while discovering theorem AST boundaries"
+    val report = read_text report_path handle IO.Io _ => ""
+  in
+    HolbuildTheoryCheckpoints.discover_from_report {source = source_text, report = report}
+  end
+
+fun theorem_checkpoint_specs project node boundaries =
+  map (fn {name, safe_name, theorem_start, theorem_stop, boundary, tactic_start,
+           tactic_end, tactic_text, has_proof_attrs, prefix_hash} =>
+          {name = name, safe_name = safe_name, theorem_start = theorem_start,
+           theorem_stop = theorem_stop, boundary = boundary,
+           tactic_start = tactic_start, tactic_end = tactic_end,
+           tactic_text = tactic_text, has_proof_attrs = has_proof_attrs,
+           prefix_hash = prefix_hash,
            context_path = theorem_context_path project node safe_name,
            end_of_proof_path = theorem_end_of_proof_path project node safe_name})
-      (HolbuildTheoryCheckpoints.discover source_text)
+      boundaries
 
 fun dependency_context_key toolchain_key plan keys node =
   let
@@ -480,7 +519,7 @@ fun write_theory_script tc project plan keys toolchain_key node source_text chec
          write_text staged_script (instrumented_source source_text 0 checkpoints);
          {holstate = HolbuildToolchain.base_state tc, files = [preload, staged_script]})
 
-fun build_theory tc project plan keys toolchain_key node =
+fun build_theory tc project plan keys toolchain_key node source_text theorem_checkpoints =
   let
     val input_key = HolbuildBuildPlan.input_key_for keys node
     val stage = stage_dir project input_key
@@ -493,8 +532,6 @@ fun build_theory tc project plan keys toolchain_key node =
     val staged_sig = staged_theory_file stage node ".sig"
     val staged_sml = staged_theory_file stage node ".sml"
     val staged_dat = staged_theory_file stage node ".dat"
-    val source_text = read_text (source_file node)
-    val theorem_checkpoints = theorem_checkpoint_specs project node source_text
     val _ = ensure_dir stage
     val _ = ensure_parent deps_loaded
     val _ = ensure_parent final_context
@@ -559,14 +596,10 @@ fun theorem_boundary_line {safe_name, prefix_hash, context_path, end_of_proof_pa
   "theorem_boundary " ^ safe_name ^ " " ^ prefix_hash ^ " " ^
   context_path ^ " " ^ end_of_proof_path
 
-fun theorem_boundary_lines project node =
-  case #kind (HolbuildBuildPlan.source_of node) of
-      HolbuildSourceIndex.TheoryScript =>
-        map theorem_boundary_line
-            (theorem_checkpoint_specs project node (read_text (source_file node)))
-    | _ => []
+fun theorem_boundary_lines theorem_checkpoints =
+  map theorem_boundary_line theorem_checkpoints
 
-fun metadata_text project plan keys input_key toolchain_key node =
+fun metadata_text project plan keys input_key toolchain_key node theorem_checkpoints =
   let
     val source = HolbuildBuildPlan.source_of node
     val lines =
@@ -579,34 +612,63 @@ fun metadata_text project plan keys input_key toolchain_key node =
        "source=" ^ #relative_path source] @
       dependency_context_lines plan keys toolchain_key node @
       checkpoint_lines project node @
-      theorem_boundary_lines project node @
+      theorem_boundary_lines theorem_checkpoints @
       map output_hash_line (output_paths project node)
   in
     String.concatWith "\n" lines ^ "\n"
   end
 
-fun up_to_date project plan keys input_key toolchain_key node =
+fun up_to_date project plan keys input_key toolchain_key node theorem_checkpoints =
   List.all file_exists (output_paths project node) andalso
   current_metadata (metadata_path project node) =
-    SOME (metadata_text project plan keys input_key toolchain_key node)
+    SOME (metadata_text project plan keys input_key toolchain_key node theorem_checkpoints)
 
-fun write_metadata project plan keys input_key toolchain_key node =
+fun write_metadata project plan keys input_key toolchain_key node theorem_checkpoints =
   write_text (metadata_path project node)
-             (metadata_text project plan keys input_key toolchain_key node)
+             (metadata_text project plan keys input_key toolchain_key node theorem_checkpoints)
+
+fun theory_checkpoints_for_node tc project node input_key source_text =
+  let
+    val stage = stage_dir project input_key
+    val _ = ensure_dir stage
+    val boundaries = discover_theorem_boundaries tc stage (source_file node) source_text
+  in
+    theorem_checkpoint_specs project node boundaries
+  end
+
+fun build_theory_node tc project plan keys toolchain_key node input_key =
+  let
+    val source_text = read_text (source_file node)
+    val theorem_checkpoints = theory_checkpoints_for_node tc project node input_key source_text
+    val stage = stage_dir project input_key
+  in
+    if up_to_date project plan keys input_key toolchain_key node theorem_checkpoints then
+      (remove_tree stage;
+       print (HolbuildBuildPlan.logical_name node ^ " is up to date\n"))
+    else if materialize_theory_cache tc project plan input_key node then
+      (remove_tree stage;
+       write_metadata project plan keys input_key toolchain_key node theorem_checkpoints)
+    else
+      (build_theory tc project plan keys toolchain_key node source_text theorem_checkpoints;
+       write_metadata project plan keys input_key toolchain_key node theorem_checkpoints)
+  end
 
 fun build_node tc project plan keys toolchain_key node =
   let val input_key = HolbuildBuildPlan.input_key_for keys node
   in
-    if up_to_date project plan keys input_key toolchain_key node then
-      print (HolbuildBuildPlan.logical_name node ^ " is up to date\n")
-    else
-      (case #kind (HolbuildBuildPlan.source_of node) of
-           HolbuildSourceIndex.TheoryScript =>
-             if materialize_theory_cache tc project plan input_key node then ()
-             else build_theory tc project plan keys toolchain_key node
-         | HolbuildSourceIndex.Sml => build_sml_like node ".uo"
-         | HolbuildSourceIndex.Sig => build_sml_like node ".ui";
-       write_metadata project plan keys input_key toolchain_key node)
+    case #kind (HolbuildBuildPlan.source_of node) of
+        HolbuildSourceIndex.TheoryScript =>
+          build_theory_node tc project plan keys toolchain_key node input_key
+      | HolbuildSourceIndex.Sml =>
+          if up_to_date project plan keys input_key toolchain_key node [] then
+            print (HolbuildBuildPlan.logical_name node ^ " is up to date\n")
+          else (build_sml_like node ".uo";
+                write_metadata project plan keys input_key toolchain_key node [])
+      | HolbuildSourceIndex.Sig =>
+          if up_to_date project plan keys input_key toolchain_key node [] then
+            print (HolbuildBuildPlan.logical_name node ^ " is up to date\n")
+          else (build_sml_like node ".ui";
+                write_metadata project plan keys input_key toolchain_key node [])
   end
 
 fun build_serial tc project plan keys toolchain_key =

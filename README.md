@@ -24,7 +24,7 @@ This prototype is intentionally small:
 - records local action metadata and skips unchanged actions
 - publishes/restores simple theory semantic artifacts through the global cache
 - includes the explicit HOL base state/toolchain in prototype action keys
-- saves local theory checkpoints: dependencies-loaded, theorem end-of-proof, theorem context, and successor-ready final context
+- saves local theory checkpoints: dependencies-loaded, AST-derived theorem end-of-proof/context checkpoints for modern theorem declarations, and successor-ready final context
 - exports explicit project heap targets from `[[heap]]` entries using local SaveState
 - exposes `holbuild cache gc` with a 7-day default global-cache retention policy
 - does not delegate build semantics to Holmake
@@ -140,10 +140,11 @@ files as always re-execute or explicitly impure.
 Incremental correctness is action-key based. `holbuild` does not use
 `hol buildheap` as its default build primitive; it builds contexts directly by
 loading resolved ancestors and saving PolyML checkpoints at syntactic boundaries:
-dependencies loaded, theorem end-of-proof boundaries, theorem context boundaries,
-and successor-ready final context, stored locally under `.hol/checkpoints/`. When
-a script is dirty but a previous theorem-context prefix still matches exactly,
-holbuild can replay from that checkpoint instead of from the dependency-loaded state. Explicit
+dependencies loaded, AST-derived theorem end-of-proof/context boundaries for
+modern theorem declarations, and successor-ready final context, stored locally
+under `.hol/checkpoints/`. When a script is dirty but a previous theorem-context
+prefix still matches exactly, holbuild can replay from that checkpoint instead
+of from the dependency-loaded state. Explicit
 `holbuild heap NAME` targets build their declared logical objects, load the
 generated theory modules, and save the requested heap with PolyML SaveState.
 

@@ -321,17 +321,18 @@ key, and checkpoint schema. Raw `.save` bytes are diagnostic only and must not b
 used as stable semantic keys. Checkpoints remain local under `.hol/checkpoints/`
 until their path/session sensitivity is understood well enough for sharing.
 
-The prototype currently instruments simple `store_thm("name", ...)` boundaries
-inside this repository, without requiring HOL-side dumpheap/goalfrag support. It
-rewrites those simple calls through a holbuild wrapper that saves
-`<thm>_end_of_proof.save` after `Tactical.prove` succeeds but before the theorem
-is saved into the theory context, then saves `<thm>_context.save` after the
-statement completes. If a later source edit leaves an earlier theorem prefix
-byte-identical and the resolved dependency context still matches, a dirty rebuild
-can load the nearest valid theorem-context checkpoint and replay only the suffix
-to `export_theory()`. End-of-proof checkpoints are recorded as proof-complete /
-pre-store boundaries; they are not successor-ready contexts and are not used for
-dependency replay.
+The prototype currently instruments modern `Theorem ... Proof ... QED`
+declarations by parsing the HOL source AST before expansion to ML. It uses the
+AST theorem/tactic spans to insert a theorem marker before expansion, then runs
+the proof through `proofManagerLib`/`goalFrag` fragments. The
+`<thm>_end_of_proof.save` checkpoint is saved before `drop_all`, so it preserves
+proof-manager history for navigation; `<thm>_context.save` is saved after the
+expanded theorem declaration stores the theorem in the theory context. If a later
+source edit leaves an earlier theorem prefix byte-identical and the resolved
+dependency context still matches, a dirty rebuild can load the nearest valid
+theorem-context checkpoint and replay only the suffix to `export_theory()`.
+End-of-proof checkpoints are proof-navigation states, not successor-ready
+contexts, and are not used for dependency replay.
 
 ## Legacy transition
 

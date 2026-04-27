@@ -26,9 +26,17 @@ open HolKernel Parse boolLib bossLib;
 
 val _ = new_theory "A";
 
-val a_thm = store_thm("a_thm", ``T``, ACCEPT_TAC TRUTH);
+Theorem a_thm:
+  T
+Proof
+  ACCEPT_TAC TRUTH
+QED
 
-val b_thm = store_thm("b_thm", ``T``, ACCEPT_TAC TRUTH);
+Theorem b_thm:
+  T
+Proof
+  ACCEPT_TAC TRUTH
+QED
 
 val _ = export_theory();
 SML
@@ -42,11 +50,22 @@ require_grep "theorem_boundary a_thm" "$project/.hol/dep/replay/src/AScript.sml.
 require_grep "_end_of_proof.save" "$project/.hol/dep/replay/src/AScript.sml.key"
 require_grep "dependency_context_key=" "$project/.hol/dep/replay/src/AScript.sml.key"
 
+cat > "$tmpdir/check-proof-state.sml" <<'SML'
+val _ = proofManagerLib.b();
+val _ =
+  case proofManagerLib.top_goals() of
+      [] => raise Fail "end-of-proof checkpoint has no goalfrag history"
+    | _ => ();
+SML
+"$HOLDIR/bin/hol" run --noconfig \
+  --holstate "$project/.hol/checkpoints/replay/src/AScript.sml.a_thm_end_of_proof.save" \
+  "$tmpdir/check-proof-state.sml"
+
 python3 - <<PY
 from pathlib import Path
 path = Path("$project/src/AScript.sml")
 text = path.read_text()
-path.write_text(text.replace('val b_thm =', '(* proof/comment edit after a_thm *)\nval b_thm ='))
+path.write_text(text.replace('Theorem b_thm:', '(* proof/comment edit after a_thm *)\nTheorem b_thm:'))
 PY
 
 replay_log=$tmpdir/replay.log
