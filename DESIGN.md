@@ -27,6 +27,28 @@ Package roots are declared by one of:
 - an explicit shim manifest supplied by the consumer
 - the built-in/root HOL manifest
 
+Committed manifests describe what dependency is required. They should not rely on
+ambient search paths such as `HOLPATH`. Per-user local paths are supplied by an
+uncommitted `.holconfig.toml` override file instead:
+
+```toml
+# holproject.toml
+[dependencies.foo]
+git = "https://github.com/acme/foo"
+rev = "abc123"
+```
+
+```toml
+# .holconfig.toml, not committed
+[overrides.foo]
+path = "../foo-dev"
+```
+
+An override changes where package `foo` is found on this machine; it does not
+change the package identity. The override path must still validate as `foo`,
+either by containing `foo`'s `holproject.toml` or by using the configured shim
+manifest for that dependency.
+
 Transition rule:
 
 ```text
@@ -212,9 +234,11 @@ project mode:
 
 ```text
 - no `.holpath`
+- no `HOLPATH` ambient dependency search
 - no user-facing INCLUDES
 - no Holmakefile interpretation
 - dependencies require manifests or explicit shims
+- user-specific dependency locations go in uncommitted `.holconfig.toml`
 ```
 
 A minimal legacy-standard project manifest can be as small as:
