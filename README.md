@@ -24,7 +24,7 @@ This prototype is intentionally small:
 - records local action metadata and skips unchanged actions
 - publishes/restores simple theory semantic artifacts through the global cache
 - includes the explicit HOL base state/toolchain in prototype action keys
-- saves successor-ready local `final_context.save` checkpoints for theory actions
+- saves local theory checkpoints: dependencies-loaded, theorem context, and successor-ready final context
 - exports explicit project heap targets from `[[heap]]` entries using local SaveState
 - exposes `holbuild cache gc` with a 7-day default global-cache retention policy
 - does not delegate build semantics to Holmake
@@ -46,8 +46,8 @@ in `bin/holbuild`. Tests live under `tests/cases/*/test.sh` so they can move int
 HOL's selftest layout with minimal reshaping; `tests/run.sh` is the repo-local
 runner and can run cases in parallel with `HOLBUILD_TEST_JOBS`. Current cases
 cover simple theory builds, package overrides, conservative invalidation,
-cache restoration/corruption fallback, parallel diamonds, explicit heaps,
-object-target rejection, and cache GC.
+theorem checkpoint replay, cache restoration/corruption fallback, parallel
+diamonds, explicit heaps, object-target rejection, and cache GC.
 
 ## Usage
 
@@ -140,10 +140,12 @@ files as always re-execute or explicitly impure.
 Incremental correctness is action-key based. `holbuild` does not use
 `hol buildheap` as its default build primitive; it builds contexts directly by
 loading resolved ancestors and saving PolyML checkpoints at syntactic boundaries:
-dependencies loaded, theorem/proof boundaries, and successor-ready final context,
-stored locally under `.hol/checkpoints/`. Explicit `holbuild heap NAME` targets
-build their declared logical objects, load the generated theory modules, and save
-the requested heap with PolyML SaveState.
+dependencies loaded, theorem context boundaries, and successor-ready final
+context, stored locally under `.hol/checkpoints/`. When a script is dirty but a
+previous theorem-context prefix still matches exactly, holbuild can replay from
+that checkpoint instead of from the dependency-loaded state. Explicit
+`holbuild heap NAME` targets build their declared logical objects, load the
+generated theory modules, and save the requested heap with PolyML SaveState.
 
 The optional global cache stores simple theory semantic artifacts by action key:
 `Theory.sig`, a path-rebased `Theory.sml` template, and `Theory.dat`. On a cache

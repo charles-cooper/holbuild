@@ -315,11 +315,19 @@ action key/cache:        can this whole script action be skipped?
 syntactic checkpoint:    if the action changed, where can replay resume?
 ```
 
-A future holbuild checkpoint action should key each checkpoint by the source
-prefix/boundary identity, resolved dependency input keys, HOL/toolchain/base-state
+A holbuild checkpoint action keys replay eligibility by the exact source
+prefix/boundary identity, resolved dependency-context key, HOL/toolchain/base-state
 key, and checkpoint schema. Raw `.save` bytes are diagnostic only and must not be
 used as stable semantic keys. Checkpoints remain local under `.hol/checkpoints/`
 until their path/session sensitivity is understood well enough for sharing.
+
+The prototype currently instruments simple `store_thm("name", ...)` boundaries
+with local `<thm>_context.save` checkpoints. If a later source edit leaves an
+earlier theorem prefix byte-identical and the resolved dependency context still
+matches, a dirty rebuild can load the nearest valid theorem-context checkpoint
+and replay only the suffix to `export_theory()`. End-of-proof proof-navigation
+checkpoints remain future work unless the HOL runtime/prover dumpheap machinery
+is available; they are not treated as successor-ready contexts.
 
 ## Legacy transition
 
