@@ -66,6 +66,12 @@ require_file "$project/.hol/obj/src/ATheory.dat"
 require_grep ".hol/obj/src/Foo" "$project/.hol/obj/src/Bar.uo"
 require_grep ".hol/obj/src/Bar" "$project/.hol/obj/src/ATheory.uo"
 
+cat > "$tmpdir/load-internal-theory.sml" <<SML
+load "$project/.hol/obj/src/ATheory";
+val _ = ATheory.a_thm;
+SML
+"$HOLDIR/bin/hol" run --noconfig --holstate "$HOLDIR/bin/hol.state" "$tmpdir/load-internal-theory.sml"
+
 second_log=$tmpdir/second.log
 (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$second_log"
 require_grep "ATheory is up to date" "$second_log"

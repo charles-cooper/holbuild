@@ -402,8 +402,10 @@ fun materialize_theory_cache tc project plan input_key node =
       (copy_blob root dat_hash data_path;
        copy_blob root dat_hash (hfs_remapped_path data_path);
        copy_blob root sig_hash sig_path;
+       copy_blob root sig_hash (hfs_remapped_path sig_path);
        copy_blob root sml_hash template;
        write_text sml_path (replace_all cache_sml_token data_path (read_text template));
+       write_text (hfs_remapped_path sml_path) (read_text sml_path);
        write_local_theory_manifests plan node;
        save_cached_theory_checkpoints tc project plan input_key node;
        print (logical_name node ^ " restored from cache\n");
@@ -592,9 +594,11 @@ fun build_theory tc project plan keys toolchain_key node source_text theorem_che
     val _ = copy_binary staged_dat data_path
     val _ = copy_binary staged_dat (hfs_remapped_path data_path)
     val _ = copy_binary staged_sig sig_path
+    val _ = copy_binary staged_sig (hfs_remapped_path sig_path)
     val _ = copy_rewriting_path {src = staged_sml, dst = sml_path,
                                  old_path = staged_dat_reference stage node,
                                  new_path = data_path}
+    val _ = copy_binary sml_path (hfs_remapped_path sml_path)
     val _ = publish_theory_cache input_key (staged_dat_reference stage node) staged_sig staged_sml staged_dat
   in
     write_local_theory_manifests plan node;
@@ -626,11 +630,12 @@ fun build_sml_like plan node output_suffix =
 
 fun output_paths project node =
   let val artifacts = source_artifacts node
+      val generated_paths = #generated artifacts
       val object_paths = #objects artifacts
       val data_paths = #theory_data artifacts
-      val base = #generated artifacts @ object_paths @
-                 map hfs_remapped_path object_paths @ data_paths @
-                 map hfs_remapped_path data_paths
+      val base = generated_paths @ map hfs_remapped_path generated_paths @
+                 object_paths @ map hfs_remapped_path object_paths @
+                 data_paths @ map hfs_remapped_path data_paths
   in
     case #kind (HolbuildBuildPlan.source_of node) of
         HolbuildSourceIndex.TheoryScript =>
