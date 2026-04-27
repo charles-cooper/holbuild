@@ -36,12 +36,13 @@ It requires an already-configured HOL checkout or installation.
 ```sh
 make HOLDIR=/path/to/HOL
 make HOLDIR=/path/to/HOL test
+HOLBUILD_TEST_JOBS=4 make HOLDIR=/path/to/HOL test
 ```
 
 The compiler loads HOL's existing SML TOML parser from `$(HOLDIR)` and embeds it
 in `bin/holbuild`. Tests live under `tests/cases/*/test.sh` so they can move into
 HOL's selftest layout with minimal reshaping; `tests/run.sh` is the repo-local
-runner.
+runner and can run cases in parallel with `HOLBUILD_TEST_JOBS`.
 
 ## Usage
 
