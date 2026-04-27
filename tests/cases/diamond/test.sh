@@ -55,7 +55,7 @@ require_grep "BTheory" "$dry_log"
 require_grep "CTheory" "$dry_log"
 require_grep "DTheory" "$dry_log"
 
-(cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build DTheory)
+(cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" -j2 build DTheory)
 require_file "$project/.hol/checkpoints/diamond/src/DScript.sml.final_context.save"
 
 second_log=$tmpdir/second.log

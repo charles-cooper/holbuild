@@ -32,5 +32,5 @@ val a_thm = store_thm("a_thm", ``T``, ACCEPT_TAC TRUTH);
 val _ = export_theory();
 SML
 
-(cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" heap main)
+(cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" -j2 heap main)
 require_file "$project/.hol/heap/main.save"

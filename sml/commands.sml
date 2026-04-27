@@ -9,13 +9,14 @@ fun err msg = (TextIO.output(TextIO.stdErr, "holbuild: " ^ msg ^ "\n");
 fun usage () = print
   "holbuild: experimental project-aware build frontend for HOL4\n\n\
   \Usage:\n\
-  \  holbuild [--holdir PATH] context\n\
-  \  holbuild [--holdir PATH] build [--dry-run] [TARGET ...]\n\
-  \  holbuild [--holdir PATH] heap NAME\n\
+  \  holbuild [--holdir PATH] [-jN] context\n\
+  \  holbuild [--holdir PATH] [-jN] build [--dry-run] [TARGET ...]\n\
+  \  holbuild [--holdir PATH] [-jN] heap NAME\n\
   \  holbuild [--holdir PATH] run [ARG ...]\n\
   \  holbuild [--holdir PATH] repl [ARG ...]\n\
   \  holbuild cache gc [--retention-days DAYS] [--cache-dir PATH]\n\n\
-  \HOLDIR is found from --holdir, HOLBUILD_HOLDIR, or HOLDIR for HOL commands.\n"
+  \HOLDIR is found from --holdir, HOLBUILD_HOLDIR, or HOLDIR for HOL commands.\n\
+  \-j/--jobs controls build parallelism and defaults to 1.\n"
 
 fun split_flags args =
   let
@@ -44,15 +45,31 @@ fun reject_object_target target =
 
 fun reject_object_targets targets = List.app reject_object_target targets
 
-fun take_holdir args =
-  case args of
-      [] => (NONE, [])
-    | "--holdir" :: path :: rest => (SOME path, rest)
-    | arg :: rest =>
-        if String.isPrefix "--holdir=" arg then
-          (SOME (String.extract (arg, size "--holdir=", NONE)), rest)
-        else
-          let val (h, rest') = take_holdir rest in (h, arg :: rest') end
+fun positive_int label text =
+  case Int.fromString text of
+      SOME n => if n >= 1 then n else raise Error (label ^ " must be a positive integer")
+    | NONE => raise Error (label ^ " must be a positive integer")
+
+fun parse_global_options args =
+  let
+    fun loop holdir jobs rest =
+      case rest of
+          [] => ({holdir = holdir, jobs = jobs}, [])
+        | "--holdir" :: path :: xs => loop (SOME path) jobs xs
+        | "--jobs" :: n :: xs => loop holdir (positive_int "--jobs" n) xs
+        | "-j" :: n :: xs => loop holdir (positive_int "-j" n) xs
+        | arg :: xs =>
+            if String.isPrefix "--holdir=" arg then
+              loop (SOME (String.extract (arg, size "--holdir=", NONE))) jobs xs
+            else if String.isPrefix "--jobs=" arg then
+              loop holdir (positive_int "--jobs" (String.extract (arg, size "--jobs=", NONE))) xs
+            else if String.isPrefix "-j" arg andalso size arg > 2 then
+              loop holdir (positive_int "-j" (String.extract (arg, 2, NONE))) xs
+            else
+              let val (opts, args') = loop holdir jobs xs in (opts, arg :: args') end
+  in
+    loop NONE 1 args
+  end
 
 fun runtime_holdir cline_holdir =
   case cline_holdir of
@@ -71,7 +88,7 @@ fun load_project () =
 
 fun context () = HolbuildProject.describe (load_project ())
 
-fun build tc args =
+fun build tc jobs args =
   let
     val project = load_project ()
     val (dry_run, targets) = split_flags args
@@ -81,7 +98,7 @@ fun build tc args =
     val toolchain_key = HolbuildToolchain.toolchain_key tc
   in
     if dry_run then HolbuildBuildPlan.describe toolchain_key plan
-    else HolbuildBuildExec.build tc project plan toolchain_key
+    else HolbuildBuildExec.build tc project plan toolchain_key jobs
   end
 
 fun heap_named project target =
@@ -93,7 +110,7 @@ fun heap_named project target =
       | NONE => raise Error ("unknown heap target: " ^ target)
   end
 
-fun build_heap tc target =
+fun build_heap tc jobs target =
   let
     val project = load_project ()
     val HolbuildProject.Heap {output, objects, ...} = heap_named project target
@@ -103,7 +120,7 @@ fun build_heap tc target =
     val toolchain_key = HolbuildToolchain.toolchain_key tc
     val output_path = HolbuildProject.abs_under (#root project) output
   in
-    HolbuildBuildExec.build tc project plan toolchain_key;
+    HolbuildBuildExec.build tc project plan toolchain_key jobs;
     HolbuildBuildExec.export_heap tc project plan output_path
   end
 
@@ -128,42 +145,42 @@ fun run_hol tc subcommand user_args =
     else raise Error ("hol " ^ subcommand ^ " failed")
   end
 
-fun dispatch tc args =
+fun dispatch tc jobs args =
   case args of
       [] => context ()
     | "context" :: [] => context ()
-    | "build" :: rest => build tc rest
-    | "heap" :: [target] => build_heap tc target
+    | "build" :: rest => build tc jobs rest
+    | "heap" :: [target] => build_heap tc jobs target
     | "heap" :: _ => raise Error "usage: holbuild heap NAME"
     | "run" :: rest => run_hol tc "run" rest
     | "repl" :: rest => run_hol tc "repl" rest
     | cmd :: _ => raise Error ("unknown command: " ^ cmd)
 
-fun dispatch_with_holdir holdir_opt args =
+fun dispatch_with_options {holdir, jobs} args =
   case args of
       "cache" :: rest => HolbuildCache.dispatch rest
     | _ =>
-      let val tc = {holdir = runtime_holdir holdir_opt}
-      in dispatch tc args end
+      let val tc = {holdir = runtime_holdir holdir}
+      in dispatch tc jobs args end
 
 fun main raw_args =
-  let
-    val _ =
-      if List.exists (fn s => s = "--help" orelse s = "-h" orelse s = "help") raw_args
-      then (usage (); OS.Process.exit OS.Process.success)
-      else ()
-    val (holdir_opt, args) = take_holdir raw_args
-  in
-    dispatch_with_holdir holdir_opt args
-    handle Error msg => err msg
-         | HolbuildToolchain.Error msg => err msg
-         | HolbuildProject.Error msg => err msg
-         | HolbuildSourceIndex.Error msg => err msg
-         | HolbuildDependencies.Error msg => err msg
-         | HolbuildBuildPlan.Error msg => err msg
-         | HolbuildBuildExec.Error msg => err msg
-         | HolbuildCache.Error msg => err msg
-         | e => err (General.exnMessage e)
-  end
+  (let
+     val _ =
+       if List.exists (fn s => s = "--help" orelse s = "-h" orelse s = "help") raw_args
+       then (usage (); OS.Process.exit OS.Process.success)
+       else ()
+     val (options, args) = parse_global_options raw_args
+   in
+     dispatch_with_options options args
+   end)
+  handle Error msg => err msg
+       | HolbuildToolchain.Error msg => err msg
+       | HolbuildProject.Error msg => err msg
+       | HolbuildSourceIndex.Error msg => err msg
+       | HolbuildDependencies.Error msg => err msg
+       | HolbuildBuildPlan.Error msg => err msg
+       | HolbuildBuildExec.Error msg => err msg
+       | HolbuildCache.Error msg => err msg
+       | e => err (General.exnMessage e)
 
 end

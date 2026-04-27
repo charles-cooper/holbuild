@@ -19,6 +19,7 @@ This prototype is intentionally small:
 - parses transitive dependency manifests and local `.holconfig.toml` path overrides
 - materializes dependency plans under project `.hol/deps/<package>/`
 - computes prototype source/resolved-dependency input keys for planned actions
+- schedules build actions serially by default or in DAG-ready parallel order with `-jN`
 - executes simple theory-script builds into project `.hol/` without Holmake
 - records local action metadata and skips unchanged actions
 - includes the explicit HOL base state/toolchain in prototype action keys
@@ -36,7 +37,7 @@ It requires an already-configured HOL checkout or installation.
 ```sh
 make HOLDIR=/path/to/HOL
 make HOLDIR=/path/to/HOL test
-HOLBUILD_TEST_JOBS=4 make HOLDIR=/path/to/HOL test
+HOLBUILD_TEST_JOBS=16 make HOLDIR=/path/to/HOL test
 ```
 
 The compiler loads HOL's existing SML TOML parser from `$(HOLDIR)` and embeds it
@@ -52,6 +53,8 @@ bin/holbuild context
 bin/holbuild build --dry-run
 bin/holbuild build
 bin/holbuild build MyTheory
+bin/holbuild -j4 build MyTheory
+bin/holbuild -j4 heap main
 bin/holbuild heap main
 bin/holbuild run someScript.sml
 bin/holbuild repl
@@ -59,8 +62,10 @@ bin/holbuild cache gc
 ```
 
 `--holdir PATH` can be used instead of `HOLBUILD_HOLDIR` at runtime for HOL
-commands. `cache gc` uses `$HOLBUILD_CACHE`, `$XDG_CACHE_HOME/holbuild`, or
-`$HOME/.cache/holbuild` and does not require a HOL toolchain.
+commands. `-jN`, `-j N`, or `--jobs N` controls build parallelism for `build`
+and for the build phase of `heap` targets; the default is `-j1`. `cache gc` uses
+`$HOLBUILD_CACHE`, `$XDG_CACHE_HOME/holbuild`, or `$HOME/.cache/holbuild` and
+does not require a HOL toolchain.
 
 See `DESIGN.md` for the intended long-term model: manifest-based package
 resolution, project-local `.hol/` materialization, action-key invalidation, and

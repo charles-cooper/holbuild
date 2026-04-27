@@ -282,9 +282,121 @@ fun build_node tc project plan keys toolchain_key node =
        write_metadata project input_key toolchain_key node)
   end
 
-fun build tc project plan toolchain_key =
+fun build_serial tc project plan keys toolchain_key =
+  List.app (build_node tc project plan keys toolchain_key) plan
+
+fun node_done done node = List.exists (fn k => k = HolbuildBuildPlan.key node) done
+
+fun deps_done plan done node =
+  List.all (node_done done) (HolbuildBuildPlan.direct_project_deps plan node)
+
+fun find_ready plan done pending =
+  let
+    fun loop prefix rest =
+      case rest of
+          [] => NONE
+        | node :: suffix =>
+            if deps_done plan done node then SOME (node, rev prefix @ suffix)
+            else loop (node :: prefix) suffix
+  in
+    loop [] pending
+  end
+
+fun build_error_message e =
+  case e of
+      Error msg => msg
+    | _ => General.exnMessage e
+
+fun build_parallel tc project plan keys toolchain_key jobs =
+  let
+    val mutex = Thread.Mutex.mutex ()
+    val cv = Thread.ConditionVar.conditionVar ()
+    val pending = ref plan
+    val running = ref 0
+    val active = ref jobs
+    val done = ref ([] : string list)
+    val failure = ref (NONE : string option)
+
+    fun signal () = Thread.ConditionVar.broadcast cv
+    fun lock () = Thread.Mutex.lock mutex
+    fun unlock () = Thread.Mutex.unlock mutex
+
+    fun next_work_locked () =
+      case !failure of
+          SOME _ => NONE
+        | NONE =>
+            case find_ready plan (!done) (!pending) of
+                SOME (node, rest) =>
+                  (pending := rest; running := !running + 1; SOME node)
+              | NONE =>
+                  if null (!pending) andalso !running = 0 then NONE
+                  else (Thread.ConditionVar.wait (cv, mutex); next_work_locked ())
+
+    fun with_lock f =
+      (lock (); f () before unlock ())
+      handle e => (unlock (); raise e)
+
+    fun next_work () = with_lock next_work_locked
+
+    fun finish_success node =
+      with_lock
+        (fn () =>
+            (running := !running - 1;
+             done := HolbuildBuildPlan.key node :: !done;
+             signal ()))
+
+    fun finish_failure msg =
+      with_lock
+        (fn () =>
+            (running := !running - 1;
+             case !failure of
+                 SOME _ => ()
+               | NONE => failure := SOME msg;
+             signal ()))
+
+    fun worker_exit () =
+      with_lock (fn () => (active := !active - 1; signal ()))
+
+    fun worker () =
+      let
+        fun loop () =
+          case next_work () of
+              NONE => worker_exit ()
+            | SOME node =>
+                ((build_node tc project plan keys toolchain_key node;
+                  finish_success node;
+                  loop ())
+                 handle e => (finish_failure (build_error_message e); worker_exit ()))
+      in
+        loop ()
+      end
+
+    fun wait_workers_locked () =
+      if !active = 0 then ()
+      else (Thread.ConditionVar.wait (cv, mutex); wait_workers_locked ())
+
+    fun wait_workers () =
+      let
+        val result =
+          (lock (); wait_workers_locked (); !failure before unlock ())
+          handle e => (unlock (); raise e)
+      in
+        case result of
+            NONE => ()
+          | SOME msg => raise Error msg
+      end
+  in
+    List.app (fn _ => ignore (Thread.Thread.fork (worker, [])))
+             (List.tabulate (jobs, fn i => i));
+    wait_workers ()
+  end
+
+fun build tc project plan toolchain_key jobs =
   let val keys = HolbuildBuildPlan.input_keys toolchain_key plan
-  in List.app (build_node tc project plan keys toolchain_key) plan end
+  in
+    if jobs <= 1 then build_serial tc project plan keys toolchain_key
+    else build_parallel tc project plan keys toolchain_key jobs
+  end
 
 fun add_unique_string (value, values) =
   if List.exists (fn existing => existing = value) values then values else value :: values
