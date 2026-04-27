@@ -16,8 +16,9 @@ This prototype is intentionally small:
 - accepts logical build targets such as `MyTheory`, not object filenames such as `MyTheory.uo`
 - owns source discovery and maps outputs to project-level `.hol/`
 - extracts simple theory dependencies from source text and orders dry-run build plans
-- parses dependency manifests and local `.holconfig.toml` path overrides
+- parses transitive dependency manifests and local `.holconfig.toml` path overrides
 - materializes dependency plans under project `.hol/deps/<package>/`
+- computes prototype source/resolved-dependency input keys for planned actions
 - does not delegate build semantics to Holmake
 - treats `.uo`/`.ui` as internal ML artifacts, never user-requestable targets
 - delegates execution to `$HOLDIR/bin/hol run` / `hol repl` for now

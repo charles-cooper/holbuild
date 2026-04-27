@@ -260,7 +260,7 @@ fun project_package ({root, manifest, name, members, ...} : t) =
   Package {name = Option.getOpt(name, "root"), root = root, manifest = manifest,
            members = members, artifact_root = Path.concat(root, ".hol")}
 
-fun dependency_package (project : t) (dep as Dependency {name, ...}) =
+fun dependency_project (project : t) (dep as Dependency {name, ...}) =
   let
     val dep_root =
       case dependency_local_path project dep of
@@ -281,13 +281,45 @@ fun dependency_package (project : t) (dep as Dependency {name, ...}) =
         | SOME actual =>
             if actual = name then ()
             else die ("dependency " ^ name ^ " manifest declares project.name = " ^ actual)
-    val artifact_root = Path.concat(Path.concat(#root project, ".hol/deps"), name)
   in
-    Package {name = name, root = dep_root, manifest = dep_manifest,
-             members = #members dep_project, artifact_root = artifact_root}
+    dep_project
   end
 
-fun packages (project : t) = project_package project :: map (dependency_package project) (#dependencies project)
+fun dependency_package artifact_parent project (dep as Dependency {name, ...}) =
+  let
+    val dep_project = dependency_project project dep
+    val dep_root = valOf (dependency_local_path project dep)
+    val dep_manifest = valOf (dependency_manifest project dep)
+    val artifact_root = Path.concat(Path.concat(artifact_parent, ".hol/deps"), name)
+  in
+    (Package {name = name, root = dep_root, manifest = dep_manifest,
+              members = #members dep_project, artifact_root = artifact_root},
+     dep_project)
+  end
+
+fun packages (project : t) =
+  let
+    val artifact_parent = #root project
+    fun seen name names = List.exists (fn n => n = name) names
+    fun add_dependency parent_project (dep, (names, packages)) =
+      let val name = dependency_name dep
+      in
+        if seen name names then (names, packages)
+        else
+          let
+            val (package, dep_project) = dependency_package artifact_parent parent_project dep
+            val (names', packages') = add_project dep_project (name :: names, package :: packages)
+          in
+            (names', packages')
+          end
+      end
+    and add_project current_project state =
+      List.foldl (add_dependency current_project) state (#dependencies current_project)
+    val root_package = project_package project
+    val (_, packages) = add_project project ([package_name root_package], [root_package])
+  in
+    rev packages
+  end
 
 fun describe (project : t) =
   let

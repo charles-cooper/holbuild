@@ -131,25 +131,42 @@ and should not be treated as portable semantic truth.
 Each build action has an input key derived from resolved facts, not raw paths:
 
 ```text
-action_key = hash(
+input_key = hash(
   holbuild action schema version,
   action kind,
   logical target,
   source package id + relative path,
   source content hash,
-  resolved dependency action keys,
+  resolved dependency input/output keys,
   relevant manifest fields,
   HOL/toolchain key,
   platform/ML-system facts where relevant
 )
 ```
 
+HOL's existing `Holmake --cachekey` work is a useful precedent: it avoids raw
+path ordering, ignores path-sensitive `.uo`/`.ui` files, substitutes theory
+`.uo`/`.ui` dependencies with the corresponding `.dat`, and sorts by filename
+plus content hash. That points at an important distinction for `holbuild`:
+
+```text
+input key   = can I reuse a cached build for these sources and resolved deps?
+output key  = what semantic artifact did this build actually produce?
+```
+
+For theories, the output key should center on semantic outputs such as
+`FooTheory.dat` and generated theory interface/source content, not local `.uo` or
+`.ui` path manifests. Different input keys may legitimately produce the same
+output key: for example, a proof refactor or comment change may change the script
+hash without changing the exported theory. Downstream theory invalidation should
+prefer semantic dependency output keys once available, while source-build cache
+lookup still needs input keys computable before building.
+
 Different absolute paths under the same declared root may normalize to the same
 root-relative identity. Arbitrary outside-root paths are rejected or treated as
 uncacheable.
 
-A build may also record an output key, such as hashes of produced semantic
-artifacts. If the same input key produces different output keys, that indicates
+If the same input key produces different output keys, that indicates
 nondeterminism or undeclared inputs; the safe response is to warn and disable
 cache use for that action.
 

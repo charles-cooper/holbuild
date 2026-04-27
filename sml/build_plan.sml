@@ -9,6 +9,8 @@ type node =
 
 type t = node list
 
+type keyed_node = {node : node, input_key : string}
+
 fun source_of ({source, ...} : node) = source
 fun deps_of ({deps, ...} : node) = deps
 fun logical_name node = #logical_name (source_of node)
@@ -87,6 +89,52 @@ fun plan sources targets =
     topo_sort nodes roots
   end
 
+fun kind_name source = HolbuildSourceIndex.kind_string (#kind source)
+
+fun hash_text text =
+  let
+    val tmp = OS.FileSys.tmpName ()
+    val out = TextIO.openOut tmp
+    val _ = TextIO.output(out, text)
+    val _ = TextIO.closeOut out
+    val hash = SHA1_ML.sha1_file {filename = tmp}
+    val _ = OS.FileSys.remove tmp handle OS.SysErr _ => ()
+  in
+    hash
+  end
+
+fun lookup_key keys dep =
+  case List.find (fn (dep_key, _) => dep_key = key dep) keys of
+      SOME (_, input_key) => input_key
+    | NONE => raise Error ("missing action key for dependency: " ^ logical_name dep)
+
+fun action_text nodes keys node =
+  let
+    val source = source_of node
+    val source_hash = SHA1_ML.sha1_file {filename = #source_path source}
+    val project_deps =
+      map (fn dep => package dep ^ ":" ^ logical_name dep ^ "@" ^ lookup_key keys dep)
+        (direct_project_deps nodes node)
+    val external_deps = map (fn name => "external:" ^ name) (direct_external_theories nodes node)
+    val lines =
+      ["holbuild-action-v1",
+       "kind=" ^ kind_name source,
+       "package=" ^ #package source,
+       "logical=" ^ #logical_name source,
+       "source=" ^ #relative_path source,
+       "source-sha1=" ^ source_hash] @
+      map (fn dep => "dep=" ^ dep) (project_deps @ external_deps)
+  in
+    String.concatWith "\n" lines ^ "\n"
+  end
+
+fun add_input_key nodes (node, keys) =
+  (key node, hash_text (action_text nodes keys node)) :: keys
+
+fun input_keys nodes = List.foldl (fn (node, keys) => add_input_key nodes (node, keys)) [] nodes
+
+fun input_key_for keys node = lookup_key keys node
+
 fun print_external_deps nodes node =
   case direct_external_theories nodes node of
       [] => ()
@@ -98,11 +146,14 @@ fun print_project_deps nodes node =
     | deps => print ("  project deps: " ^
                      String.concatWith ", " (map logical_name deps) ^ "\n")
 
-fun describe_node nodes node =
+fun describe_node nodes keys node =
   (HolbuildSourceIndex.describe_source (source_of node);
+   print ("  input_key: " ^ input_key_for keys node ^ "\n");
    print_project_deps nodes node;
    print_external_deps nodes node)
 
-fun describe nodes = List.app (describe_node nodes) nodes
+fun describe nodes =
+  let val keys = input_keys nodes
+  in List.app (describe_node nodes keys) nodes end
 
 end

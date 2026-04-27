@@ -22,6 +22,8 @@ use_hol("tools-poly/poly/Binarymap.sig");
 use_hol("tools-poly/poly/Binarymap.sml");
 use_hol("tools/Holmake/toml/TOML.sig");
 use_hol("tools/Holmake/toml/TOML.sml");
+use_hol("src/portableML/poly/SHA1_ML.sig");
+use_hol("src/portableML/poly/w64-SHA1.ML");
 
 use "sml/project.sml";
 use "sml/source_index.sml";
