@@ -286,4 +286,42 @@ fun build tc project plan toolchain_key =
   let val keys = HolbuildBuildPlan.input_keys toolchain_key plan
   in List.app (build_node tc project plan keys toolchain_key) plan end
 
+fun add_unique_string (value, values) =
+  if List.exists (fn existing => existing = value) values then values else value :: values
+
+fun unique_strings values = rev (List.foldl add_unique_string [] values)
+
+fun heap_external_theories plan =
+  unique_strings (List.concat (map (HolbuildBuildPlan.closure_external_theories plan) plan))
+
+fun heap_theory_load_lines node =
+  case #kind (HolbuildBuildPlan.source_of node) of
+      HolbuildSourceIndex.TheoryScript => use_generated_lines node
+    | _ =>
+      raise Error ("heap objects currently must be theory targets: " ^
+                   HolbuildBuildPlan.logical_name node)
+
+fun write_heap_loader plan output path =
+  let
+    val lines =
+      map load_theory_line (heap_external_theories plan) @
+      List.concat (map heap_theory_load_lines plan) @
+      [save_heap_line output]
+  in
+    write_text path (String.concatWith "\n" lines ^ "\n")
+  end
+
+fun export_heap tc (project : HolbuildProject.t) plan output =
+  let
+    val stage = Path.concat(Path.concat(#root project, ".hol/stage"), "heap")
+    val loader = Path.concat(stage, "holbuild-save-heap.sml")
+  in
+    ensure_dir stage;
+    ensure_parent output;
+    write_heap_loader plan output loader;
+    run_hol_files tc stage (HolbuildToolchain.base_state tc) [loader]
+      ("hol run failed while exporting heap: " ^ output);
+    remove_tree stage
+  end
+
 end

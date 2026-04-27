@@ -11,6 +11,7 @@ fun usage () = print
   \Usage:\n\
   \  holbuild [--holdir PATH] context\n\
   \  holbuild [--holdir PATH] build [--dry-run] [TARGET ...]\n\
+  \  holbuild [--holdir PATH] heap NAME\n\
   \  holbuild [--holdir PATH] run [ARG ...]\n\
   \  holbuild [--holdir PATH] repl [ARG ...]\n\
   \  holbuild cache gc [--retention-days DAYS] [--cache-dir PATH]\n\n\
@@ -83,6 +84,29 @@ fun build tc args =
     else HolbuildBuildExec.build tc project plan toolchain_key
   end
 
+fun heap_named project target =
+  let
+    fun matches (HolbuildProject.Heap {name, ...}) = name = target
+  in
+    case List.find matches (#heaps project) of
+        SOME heap => heap
+      | NONE => raise Error ("unknown heap target: " ^ target)
+  end
+
+fun build_heap tc target =
+  let
+    val project = load_project ()
+    val HolbuildProject.Heap {output, objects, ...} = heap_named project target
+    val _ = if null objects then raise Error ("heap target has no objects: " ^ target) else ()
+    val index = HolbuildSourceIndex.discover project
+    val plan = HolbuildBuildPlan.plan index objects
+    val toolchain_key = HolbuildToolchain.toolchain_key tc
+    val output_path = HolbuildProject.abs_under (#root project) output
+  in
+    HolbuildBuildExec.build tc project plan toolchain_key;
+    HolbuildBuildExec.export_heap tc project plan output_path
+  end
+
 fun hol_args_for_project tc project subcommand user_args =
   let
     val context = HolbuildToolchain.write_run_context project
@@ -109,6 +133,8 @@ fun dispatch tc args =
       [] => context ()
     | "context" :: [] => context ()
     | "build" :: rest => build tc rest
+    | "heap" :: [target] => build_heap tc target
+    | "heap" :: _ => raise Error "usage: holbuild heap NAME"
     | "run" :: rest => run_hol tc "run" rest
     | "repl" :: rest => run_hol tc "repl" rest
     | cmd :: _ => raise Error ("unknown command: " ^ cmd)

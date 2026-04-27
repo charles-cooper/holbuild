@@ -252,6 +252,12 @@ PolyML heap checkpoints and `.save` files are local project artifacts for now:
 .hol/checkpoints/   local PolyML replay checkpoints
 ```
 
+Explicit heap targets are requested with `holbuild heap NAME` from `[[heap]]`
+manifest entries. They are exported artifacts, not the normal incremental-build
+primitive: holbuild first builds the declared logical objects, then starts from
+the explicit HOL base state, loads generated theory modules in resolved
+build-graph order, and saves the requested heap with PolyML SaveState.
+
 They are large, path/session/toolchain sensitive, and can create contention if
 shared globally. A future global checkpoint cache needs stricter validation,
 locking, and platform/toolchain/root keys. Until then, global cache stores

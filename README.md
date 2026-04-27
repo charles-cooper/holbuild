@@ -23,6 +23,7 @@ This prototype is intentionally small:
 - records local action metadata and skips unchanged actions
 - includes the explicit HOL base state/toolchain in prototype action keys
 - saves successor-ready local `final_context.save` checkpoints for theory actions
+- exports explicit project heap targets from `[[heap]]` entries using local SaveState
 - exposes `holbuild cache gc` with a 7-day default global-cache retention policy
 - does not delegate build semantics to Holmake
 - treats `.uo`/`.ui` as internal ML artifacts, never user-requestable targets
@@ -39,8 +40,8 @@ make HOLDIR=/path/to/HOL test
 
 The compiler loads HOL's existing SML TOML parser from `$(HOLDIR)` and embeds it
 in `bin/holbuild`. The smoke tests create temporary projects and verify logical
-target rejection, simple theory execution/incrementality/checkpoints, and cache
-GC.
+target rejection, simple theory execution/incrementality/checkpoints, explicit
+heap export, and cache GC.
 
 ## Usage
 
@@ -50,6 +51,7 @@ bin/holbuild context
 bin/holbuild build --dry-run
 bin/holbuild build
 bin/holbuild build MyTheory
+bin/holbuild heap main
 bin/holbuild run someScript.sml
 bin/holbuild repl
 bin/holbuild cache gc
@@ -120,7 +122,9 @@ Incremental correctness is action-key based. `holbuild` should not use legacy
 `hol buildheap` as the default build primitive. Replay should use direct PolyML
 checkpoints at syntactic boundaries: dependencies loaded, theorem/proof
 boundaries, and successor-ready final context, stored locally under
-`.hol/checkpoints/`.
+`.hol/checkpoints/`. Explicit `holbuild heap NAME` targets build their declared
+logical objects, load the generated theory modules, and save the requested heap
+with PolyML SaveState.
 
 The optional global cache is not used by builds yet, but `holbuild cache gc`
 already implements the intended cleanup surface. It removes stale temporary

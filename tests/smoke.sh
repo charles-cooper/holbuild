@@ -8,7 +8,7 @@ if [[ -z "${HOLDIR}" ]]; then
 fi
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-HOLBUILD=${HOLBUILD:-"$ROOT/bin/holbuild"}
+HOLBUILD_BIN=${HOLBUILD_BIN:-"$ROOT/bin/holbuild"}
 
 tmpdir=$(mktemp -d)
 cleanup() { rm -rf "$tmpdir"; }
@@ -28,6 +28,11 @@ name = "basic"
 
 [build]
 members = ["src"]
+
+[[heap]]
+name = "main"
+output = ".hol/heap/main.save"
+objects = ["ATheory"]
 TOML
   cat > "$project/src/AScript.sml" <<'SML'
 open HolKernel Parse boolLib bossLib;
@@ -39,7 +44,7 @@ val a_thm = store_thm("a_thm", ``T``, ACCEPT_TAC TRUTH);
 val _ = export_theory();
 SML
 
-  (cd "$project" && "$HOLBUILD" --holdir "$HOLDIR" build ATheory)
+  (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory)
 
   require_file "$project/.hol/gen/src/ATheory.sig"
   require_file "$project/.hol/gen/src/ATheory.sml"
@@ -49,8 +54,11 @@ SML
   require_file "$project/.hol/dep/basic/src/AScript.sml.key"
 
   local second_log=$tmpdir/basic-second.log
-  (cd "$project" && "$HOLBUILD" --holdir "$HOLDIR" build ATheory) > "$second_log"
+  (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$second_log"
   grep -q "ATheory is up to date" "$second_log"
+
+  (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" heap main)
+  require_file "$project/.hol/heap/main.save"
 }
 
 run_diamond_theory_build() {
@@ -92,17 +100,17 @@ val _ = export_theory();
 SML
 
   local dry_log=$tmpdir/diamond-dry.log
-  (cd "$project" && "$HOLBUILD" --holdir "$HOLDIR" build --dry-run DTheory) > "$dry_log"
+  (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --dry-run DTheory) > "$dry_log"
   grep -n "ATheory" "$dry_log" | grep -q "^[0-9]"
   grep -n "BTheory" "$dry_log" | grep -q "^[0-9]"
   grep -n "CTheory" "$dry_log" | grep -q "^[0-9]"
   grep -n "DTheory" "$dry_log" | grep -q "^[0-9]"
 
-  (cd "$project" && "$HOLBUILD" --holdir "$HOLDIR" build DTheory)
+  (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build DTheory)
   require_file "$project/.hol/checkpoints/diamond/src/DScript.sml.final_context.save"
 
   local second_log=$tmpdir/diamond-second.log
-  (cd "$project" && "$HOLBUILD" --holdir "$HOLDIR" build DTheory) > "$second_log"
+  (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build DTheory) > "$second_log"
   grep -q "DTheory is up to date" "$second_log"
 }
 
@@ -123,7 +131,7 @@ val _ = export_theory();
 SML
 
   local log=$tmpdir/reject.log
-  if (cd "$project" && "$HOLBUILD" --holdir "$HOLDIR" build ATheory.uo) > "$log" 2>&1; then
+  if (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory.uo) > "$log" 2>&1; then
     echo "object target unexpectedly accepted" >&2
     exit 1
   fi
@@ -144,7 +152,7 @@ run_cache_gc() {
     "$cache/actions/old/manifest" \
     "$cache/actions/nomani"
 
-  env -u HOLDIR -u HOLBUILD_HOLDIR HOLBUILD_CACHE="$cache" "$HOLBUILD" cache gc > "$tmpdir/cache-gc.log"
+  env -u HOLDIR -u HOLBUILD_HOLDIR HOLBUILD_CACHE="$cache" "$HOLBUILD_BIN" cache gc > "$tmpdir/cache-gc.log"
 
   [[ -f "$cache/blobs/live" ]] || { echo "referenced blob removed" >&2; exit 1; }
   [[ ! -e "$cache/blobs/dead" ]] || { echo "unreferenced blob survived" >&2; exit 1; }
