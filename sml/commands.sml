@@ -69,7 +69,7 @@ fun load_project () =
 
 fun context () = HolbuildProject.describe (load_project ())
 
-fun build _ args =
+fun build tc args =
   let
     val project = load_project ()
     val (dry_run, targets) = split_flags args
@@ -78,9 +78,7 @@ fun build _ args =
     val plan = HolbuildBuildPlan.plan index targets
   in
     if dry_run then HolbuildBuildPlan.describe plan
-    else
-      (HolbuildBuildPlan.describe plan;
-       raise Error "build execution is not implemented yet; dry-run shows holbuild's dependency-ordered plan")
+    else HolbuildBuildExec.build tc project plan
   end
 
 fun hol_args_for_project project subcommand user_args =
@@ -129,6 +127,7 @@ fun main raw_args =
          | HolbuildSourceIndex.Error msg => err msg
          | HolbuildDependencies.Error msg => err msg
          | HolbuildBuildPlan.Error msg => err msg
+         | HolbuildBuildExec.Error msg => err msg
          | e => err (General.exnMessage e)
   end
 

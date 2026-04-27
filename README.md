@@ -19,6 +19,8 @@ This prototype is intentionally small:
 - parses transitive dependency manifests and local `.holconfig.toml` path overrides
 - materializes dependency plans under project `.hol/deps/<package>/`
 - computes prototype source/resolved-dependency input keys for planned actions
+- executes simple theory-script builds into project `.hol/` without Holmake
+- records local action metadata and skips unchanged actions
 - does not delegate build semantics to Holmake
 - treats `.uo`/`.ui` as internal ML artifacts, never user-requestable targets
 - delegates execution to `$HOLDIR/bin/hol run` / `hol repl` for now
@@ -97,7 +99,9 @@ object filenames as targets. `holbuild build MyTheory` is the intended shape.
 `holbuild` should produce the same logical artifacts as Holmake (`.uo`, `.ui`,
 `.dat`, generated theory files, etc.) while allowing their physical storage to
 move under a project-level `.hol/` directory. `.uo` and `.ui` files are internal
-ML artifacts; users should request logical targets only.
+ML artifacts; users should request logical targets only. The prototype may also
+write auxiliary path-stable load copies such as `.dat.load` while the generated
+HOL theory source is being rebased into the project layout.
 
 Theory scripts are modeled as pure build actions for now: no user-specified side
 effects are part of the v1 contract. A future manifest schema may mark selected

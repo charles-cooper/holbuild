@@ -124,7 +124,10 @@ project/.hol/
 
 Path-sensitive files are generated or rebased for this local layout. In
 particular, `.uo`/`.ui` files and generated `Theory.sml` files may contain paths
-and should not be treated as portable semantic truth.
+and should not be treated as portable semantic truth. HOL's current
+`HOLFileSys` remaps files ending in `Theory.dat`/`.sml`/`.sig` through
+`.hol/objs`, so a project-level layout may need auxiliary load paths or rewritten
+non-semantic load copies while preserving canonical `.dat` artifacts.
 
 ## Invalidation and action keys
 
