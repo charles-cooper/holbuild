@@ -101,11 +101,13 @@ fun save_line output =
   HolbuildToolchain.sml_string output ^
   ", length (PolyML.SaveState.showHierarchy()));\n"
 
-fun begin_theorem_line ({name, tactic_text, end_of_proof_path, has_proof_attrs, ...} : checkpoint) =
+fun begin_theorem_line ({name, tactic_text, context_path, end_of_proof_path,
+                         has_proof_attrs, ...} : checkpoint) =
   String.concat
     ["val _ = holbuild_begin_theorem(",
      HolbuildToolchain.sml_string name, ", ",
      HolbuildToolchain.sml_string tactic_text, ", ",
+     HolbuildToolchain.sml_string context_path, ", ",
      HolbuildToolchain.sml_string end_of_proof_path, ", ",
      if has_proof_attrs then "true" else "false",
      ");\n"]
@@ -116,8 +118,9 @@ fun runtime_prelude [] = ""
     ["load \"HOLSourceParser\";\n",
      "load \"TacticParse\";\n",
      "load \"smlExecute\";\n",
-     "val holbuild_theorem_info = ref NONE : (string * string * string * bool) option ref;\n",
-     "fun holbuild_begin_theorem info = holbuild_theorem_info := SOME info;\n",
+     "val holbuild_theorem_info = ref NONE : (string * string * string * string * bool) option ref;\n",
+     "fun holbuild_delete path = if OS.FileSys.access(path, []) then OS.FileSys.remove path else ();\n",
+     "fun holbuild_begin_theorem (info as (_, _, context_path, end_path, _)) = (holbuild_delete context_path; holbuild_delete end_path; holbuild_theorem_info := SOME info);\n",
      "fun holbuild_parse_tactic s = let\n",
      "  val fed = ref false\n",
      "  fun read _ = if !fed then \"\" else (fed := true; s)\n",
@@ -215,7 +218,7 @@ fun runtime_prelude [] = ""
      "fun holbuild_goalfrag_prover (g, tac) =\n",
      "  case !holbuild_theorem_info of\n",
      "      NONE => Tactical.TAC_PROOF(g, tac)\n",
-     "    | SOME (name, tactic_text, end_path, has_attrs) =>\n",
+     "    | SOME (name, tactic_text, _, end_path, has_attrs) =>\n",
      "        let\n",
      "          val _ = holbuild_theorem_info := NONE\n",
      "          val _ = proofManagerLib.set_goalfrag g\n",
