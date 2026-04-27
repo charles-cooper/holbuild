@@ -1,7 +1,7 @@
 HOLDIR ?= $(HOLBUILD_HOLDIR)
 POLYC ?= polyc
 
-.PHONY: all clean
+.PHONY: all test clean
 
 all: bin/holbuild
 
@@ -9,6 +9,9 @@ bin/holbuild: sml/holbuild-script.sml sml/project.sml sml/source_index.sml sml/d
 	@test -n "$(HOLDIR)" || (echo "Set HOLDIR=/path/to/HOL or HOLBUILD_HOLDIR" >&2; exit 1)
 	@mkdir -p bin
 	HOLBUILD_HOLDIR="$(HOLDIR)" $(POLYC) -o $@ sml/holbuild-script.sml
+
+test: bin/holbuild
+	HOLDIR="$(HOLDIR)" tests/smoke.sh
 
 clean:
 	rm -f bin/holbuild

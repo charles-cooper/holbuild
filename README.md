@@ -34,10 +34,13 @@ It requires an already-configured HOL checkout or installation.
 
 ```sh
 make HOLDIR=/path/to/HOL
+make HOLDIR=/path/to/HOL test
 ```
 
 The compiler loads HOL's existing SML TOML parser from `$(HOLDIR)` and embeds it
-in `bin/holbuild`.
+in `bin/holbuild`. The smoke tests create temporary projects and verify logical
+target rejection, simple theory execution/incrementality/checkpoints, and cache
+GC.
 
 ## Usage
 
