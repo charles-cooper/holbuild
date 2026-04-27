@@ -353,8 +353,10 @@ fun publish_theory_cache input_key staged_dat_ref staged_sig staged_sml staged_d
                 write_text manifest_path manifest
           | NONE => write_text manifest_path manifest
       end
+    fun skip_locked_publish () = ()
   in
-    (publish (); cleanup ())
+    (HolbuildCache.with_action_publish_lock root input_key publish skip_locked_publish;
+     cleanup ())
     handle e => (cleanup (); warn ("could not publish cache entry: " ^ General.exnMessage e))
   end
 

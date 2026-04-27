@@ -47,8 +47,9 @@ in `bin/holbuild`. Tests live under `tests/cases/*/test.sh` so they can move int
 HOL's selftest layout with minimal reshaping; `tests/run.sh` is the repo-local
 runner and can run cases in parallel with `HOLBUILD_TEST_JOBS`. Current cases
 cover simple theory builds, package overrides, conservative invalidation,
-theorem checkpoint replay, cache restoration/corruption fallback, parallel
-diamonds, explicit heaps, object-target rejection, and cache GC.
+theorem checkpoint replay, cache restoration/corruption/concurrency fallback,
+parallel diamonds, explicit heaps, object-target rejection, manifest schema
+validation, and cache GC.
 
 ## Usage
 

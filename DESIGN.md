@@ -249,7 +249,11 @@ Materialization preference:
 ```
 
 Build actions must never mutate installed cache-linked outputs in place. Write
-to staging locations and atomically install validated outputs.
+to staging locations and atomically install validated outputs. Concurrent source
+builds for the same action key serialize cache publication with a per-action
+cache lock; losing publishers skip publication because the local source build has
+already succeeded. Cache materialization still treats any missing, locked, or
+corrupt entry as a cache miss and falls back to source.
 
 ## Cache GC
 

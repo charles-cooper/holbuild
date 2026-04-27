@@ -179,14 +179,18 @@ fun sweep_blobs cutoff live_blobs blobs_dir =
     0
     (children blobs_dir)
 
+fun locks_dir root = Path.concat(root, "locks")
+
+fun acquire_lock_path {busy_message, lock} =
+  (FS.mkDir lock; lock)
+  handle OS.SysErr _ => raise Error busy_message
+
 fun acquire_lock root =
   let
-    val locks = Path.concat(root, "locks")
-    val lock = Path.concat(locks, "gc.lock")
+    val lock = Path.concat(locks_dir root, "gc.lock")
   in
-    ensure_dir locks;
-    (FS.mkDir lock; lock)
-    handle OS.SysErr _ => raise Error "cache gc already running"
+    ensure_dir (locks_dir root);
+    acquire_lock_path {busy_message = "cache gc already running", lock = lock}
   end
 
 fun release_lock lock = FS.rmDir lock handle OS.SysErr _ => ()
@@ -197,6 +201,22 @@ fun with_lock root f =
     (f () before release_lock lock)
     handle e => (release_lock lock; raise e)
   end
+
+fun action_lock root key = Path.concat(locks_dir root, "action-" ^ key ^ ".lock")
+
+fun try_acquire_action_lock root key =
+  let val lock = action_lock root key
+  in
+    ensure_dir (locks_dir root);
+    (FS.mkDir lock; SOME lock) handle OS.SysErr _ => NONE
+  end
+
+fun with_action_publish_lock root key publish skip =
+  case try_acquire_action_lock root key of
+      SOME lock =>
+        ((publish () before release_lock lock)
+         handle e => (release_lock lock; raise e))
+    | NONE => skip ()
 
 fun gc_root root days =
   if not (path_exists root) then
@@ -210,10 +230,12 @@ fun gc_root root days =
       fun run () =
         let
           val tmp_removed = remove_stale_children cutoff tmp_dir
+          val lock_removed = remove_stale_children cutoff (locks_dir root)
           val (live_blobs, actions_removed) = collect_live_actions cutoff actions_dir
           val blobs_removed = sweep_blobs cutoff live_blobs blobs_dir
         in
           print ("cache gc: removed tmp=" ^ Int.toString tmp_removed ^
+                 " locks=" ^ Int.toString lock_removed ^
                  " actions=" ^ Int.toString actions_removed ^
                  " blobs=" ^ Int.toString blobs_removed ^ "\n")
         end
