@@ -160,6 +160,16 @@ deps = "Foo"
 TOML
 expect_context_failure bad_action_deps_type "deps must be a string array"
 
+make_project bad_action_loads_type
+cat > "$tmpdir/bad_action_loads_type/holproject.toml" <<'TOML'
+[project]
+name = "bad_action_loads_type"
+
+[actions.FooTheory]
+loads = "FooLib"
+TOML
+expect_context_failure bad_action_loads_type "loads must be a string array"
+
 make_project bad_action_abs_input
 cat > "$tmpdir/bad_action_abs_input/holproject.toml" <<'TOML'
 [project]

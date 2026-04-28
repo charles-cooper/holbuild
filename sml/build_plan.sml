@@ -52,9 +52,13 @@ fun theory_name name =
 fun declared_dependency_names node =
   HolbuildProject.action_deps (#policy (source_of node))
 
+fun declared_load_names node =
+  HolbuildProject.action_loads (#policy (source_of node))
+
 fun direct_dependency_names node =
   unique_strings
-    (#theories (deps_of node) @ #loads (deps_of node) @ declared_dependency_names node)
+    (#theories (deps_of node) @ #loads (deps_of node) @ #libs (deps_of node) @
+     declared_dependency_names node @ declared_load_names node)
 
 fun signature_companion_deps nodes node =
   case #kind (source_of node) of
@@ -89,6 +93,13 @@ fun direct_external_theories nodes node =
     fun known name = not (null (nodes_named nodes name))
   in
     List.filter (fn name => not (known name)) (#theories (deps_of node))
+  end
+
+fun direct_external_libs nodes node =
+  let
+    fun known name = not (null (nodes_named nodes name))
+  in
+    List.filter (fn name => not (known name)) (#libs (deps_of node) @ declared_load_names node)
   end
 
 fun direct_unresolved_loads nodes node =
@@ -171,6 +182,11 @@ fun closure_external_theories nodes node =
     (List.concat (map (direct_external_theories nodes)
        (transitive_project_deps nodes node @ [node])))
 
+fun closure_external_libs nodes node =
+  unique_strings
+    (List.concat (map (direct_external_libs nodes)
+       (transitive_project_deps nodes node @ [node])))
+
 fun make_node source =
   {source = source, deps = HolbuildDependencies.extract (#source_path source)}
 
@@ -218,9 +234,12 @@ fun action_text toolchain_key nodes keys node =
       map (fn dep => package dep ^ ":" ^ logical_name dep ^ "@" ^ lookup_key keys dep)
         (direct_project_deps nodes node)
     val external_deps = map (fn name => "HOL:" ^ name ^ "@" ^ toolchain_key) (direct_external_theories nodes node)
+    val external_libs = map (fn name => "HOLLIB:" ^ name ^ "@" ^ toolchain_key) (direct_external_libs nodes node)
     val policy = #policy source
     val declared_deps = HolbuildProject.action_deps policy
+    val declared_loads = HolbuildProject.action_loads policy
     val declared_dep_lines = map (fn dep => "declared_dep=" ^ dep) declared_deps
+    val declared_load_lines = map (fn dep => "declared_load=" ^ dep) declared_loads
     val extra_inputs = HolbuildProject.action_extra_inputs policy
     val extra_input_lines =
       map (fn input =>
@@ -238,8 +257,9 @@ fun action_text toolchain_key nodes keys node =
        "cache=" ^ bool_text (HolbuildProject.action_cache_enabled policy),
        "always_reexecute=" ^ bool_text (HolbuildProject.action_always_reexecute policy)] @
       declared_dep_lines @
+      declared_load_lines @
       extra_input_lines @
-      map (fn dep => "dep=" ^ dep) (project_deps @ external_deps)
+      map (fn dep => "dep=" ^ dep) (project_deps @ external_deps @ external_libs)
   in
     String.concatWith "\n" lines ^ "\n"
   end
@@ -257,6 +277,11 @@ fun print_external_deps nodes node =
       [] => ()
     | deps => print ("  external theories: " ^ String.concatWith ", " deps ^ "\n")
 
+fun print_external_libs nodes node =
+  case direct_external_libs nodes node of
+      [] => ()
+    | deps => print ("  external libs: " ^ String.concatWith ", " deps ^ "\n")
+
 fun print_project_deps nodes node =
   case direct_project_deps nodes node of
       [] => ()
@@ -267,7 +292,8 @@ fun describe_node nodes keys node =
   (HolbuildSourceIndex.describe_source (source_of node);
    print ("  input_key: " ^ input_key_for keys node ^ "\n");
    print_project_deps nodes node;
-   print_external_deps nodes node)
+   print_external_deps nodes node;
+   print_external_libs nodes node)
 
 fun describe toolchain_key nodes =
   let val keys = input_keys toolchain_key nodes

@@ -23,6 +23,7 @@ members = ["src"]
 
 [actions.Baz]
 deps = ["Foo"]
+loads = ["numLib"]
 TOML
 cat > "$project/src/Foo.sig" <<'SML'
 signature FOO = sig
@@ -44,6 +45,7 @@ SML
 cat > "$project/src/Baz.sml" <<'SML'
 structure Baz = struct
   val witness = Foo.value
+  val reduce = numLib.REDUCE_CONV
 end
 SML
 cat > "$project/src/AScript.sml" <<'SML'
@@ -77,6 +79,7 @@ require_file "$project/.holbuild/obj/src/ATheory.dat"
 
 require_grep ".holbuild/obj/src/Foo" "$project/.holbuild/obj/src/Bar.uo"
 require_grep ".holbuild/obj/src/Foo" "$project/.holbuild/obj/src/Baz.uo"
+require_grep "numLib" "$project/.holbuild/obj/src/Baz.uo"
 require_grep ".holbuild/obj/src/Bar" "$project/.holbuild/obj/src/ATheory.uo"
 require_grep ".holbuild/obj/src/Baz" "$project/.holbuild/obj/src/ATheory.uo"
 

@@ -173,8 +173,10 @@ fun save_heap_line output =
 fun write_preload plan node deps_loaded path =
   let
     val external_deps = HolbuildBuildPlan.closure_external_theories plan node
+    val external_libs = HolbuildBuildPlan.closure_external_libs plan node
     val project_deps = HolbuildBuildPlan.transitive_project_deps plan node
     val lines = map load_theory_line external_deps @
+                map load_project_line external_libs @
                 List.concat (map project_preload_lines project_deps) @
                 [save_heap_line deps_loaded]
   in
@@ -537,10 +539,11 @@ fun write_local_theory_manifests plan node =
   let
     val {sig_path, sml_path, script_uo, theory_ui, theory_uo, ...} = theory_outputs node
     val deps = HolbuildBuildPlan.direct_project_deps plan node
+    val external_libs = HolbuildBuildPlan.closure_external_libs plan node
   in
     write_object_manifest theory_ui [sig_path];
-    write_object_manifest theory_uo (project_load_stems deps @ [sml_path]);
-    write_object_manifest script_uo [source_file node]
+    write_object_manifest theory_uo (external_libs @ project_load_stems deps @ [sml_path]);
+    write_object_manifest script_uo (external_libs @ [source_file node])
   end
 
 fun save_cached_theory_checkpoints tc project base_context plan input_key node =
@@ -826,8 +829,9 @@ fun build_sml_like plan node output_suffix =
   let
     val output = one_with_suffix output_suffix (#objects (source_artifacts node))
     val deps = HolbuildBuildPlan.direct_project_deps plan node
+    val external_libs = HolbuildBuildPlan.closure_external_libs plan node
   in
-    write_object_manifest output (project_load_stems deps @ [source_file node]);
+    write_object_manifest output (external_libs @ project_load_stems deps @ [source_file node]);
     if output_suffix = ".uo" then write_empty_ui_if_needed plan node else ()
   end
 
@@ -869,6 +873,8 @@ fun action_policy_lines node =
     val policy = source_policy node
     val declared_dep_lines =
       map (fn dep => "declared_dep=" ^ dep) (HolbuildProject.action_deps policy)
+    val declared_load_lines =
+      map (fn dep => "declared_load=" ^ dep) (HolbuildProject.action_loads policy)
     val extra_inputs = HolbuildProject.action_extra_inputs policy
     val extra_lines =
       map (fn input =>
@@ -879,6 +885,7 @@ fun action_policy_lines node =
     ["cache=" ^ bool_text (HolbuildProject.action_cache_enabled policy),
      "always_reexecute=" ^ bool_text (HolbuildProject.action_always_reexecute policy)] @
     declared_dep_lines @
+    declared_load_lines @
     extra_lines
   end
 

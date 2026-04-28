@@ -12,6 +12,7 @@ datatype action_policy =
   ActionPolicy of
     { logical : string,
       deps : string list,
+      loads : string list,
       extra_inputs : extra_input list,
       impure : bool,
       cache : bool,
@@ -212,7 +213,7 @@ fun validate_dependency_table (name, table) =
 
 fun validate_action_table (logical, table) =
   require_known_fields ("actions." ^ logical)
-    ["deps", "extra_inputs", "impure", "cache", "always_reexecute"] table
+    ["deps", "loads", "extra_inputs", "impure", "cache", "always_reexecute"] table
 
 fun validate_manifest_table table =
   let
@@ -266,6 +267,7 @@ fun parse_action_policy root (logical, table) =
     ActionPolicy
       { logical = logical,
         deps = string_array_field table "deps",
+        loads = string_array_field table "loads",
         extra_inputs = map extra (string_array_field table "extra_inputs"),
         impure = Option.getOpt(bool_at table ["impure"], false),
         cache = Option.getOpt(bool_at table ["cache"], true),
@@ -359,6 +361,7 @@ fun package_action_policies (Package {action_policies, ...}) = action_policies
 
 fun action_policy_logical (ActionPolicy {logical, ...}) = logical
 fun action_deps (ActionPolicy {deps, ...}) = deps
+fun action_loads (ActionPolicy {loads, ...}) = loads
 fun action_extra_inputs (ActionPolicy {extra_inputs, ...}) = extra_inputs
 fun action_cache_enabled (ActionPolicy {impure, cache, always_reexecute, ...}) =
   cache andalso not impure andalso not always_reexecute
@@ -368,7 +371,7 @@ fun extra_input_path (ExtraInput {path, ...}) = path
 fun extra_input_absolute_path (ExtraInput {absolute_path, ...}) = absolute_path
 
 fun default_action_policy logical =
-  ActionPolicy {logical = logical, deps = [], extra_inputs = [], impure = false,
+  ActionPolicy {logical = logical, deps = [], loads = [], extra_inputs = [], impure = false,
                 cache = true, always_reexecute = false}
 
 fun action_policy_for policies logical =

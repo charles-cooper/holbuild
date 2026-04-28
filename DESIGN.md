@@ -154,6 +154,7 @@ members = [
 exclude = ["*/selftest.sml", "*/examples/*", "*/theory_tests/*"]
 
 [actions.SomeGeneratedTheory]
+loads = ["GeneratedSupportLib"]
 extra_inputs = ["path/to/generated-input"]
 cache = false
 
@@ -163,10 +164,10 @@ impure = true
 
 This is deliberately not a Holmakefile translation. Historical directories that
 need dynamic `use`, generated files, external solvers, process/file-system side
-effects, source files whose dependencies are not declared in the source, or
-platform-variant modules should either be modeled with explicit action policy /
-package boundaries or stay outside the initial project-mode root package until
-their inputs, dependencies, and outputs are declared.
+effects, source files whose dependencies/loadable libraries are not declared in
+the source, or platform-variant modules should either be modeled with explicit
+action policy / package boundaries or stay outside the initial project-mode root
+package until their inputs, dependencies, and outputs are declared.
 
 ## Source model
 
@@ -198,7 +199,8 @@ mark exceptions explicitly:
 
 ```toml
 [actions.FooTheory]
-deps = ["GeneratedSupportLib"]
+deps = ["GeneratedSupportTheory"]
+loads = ["GeneratedSupportLib"]
 extra_inputs = ["data/table.txt"]
 cache = false
 always_reexecute = true
@@ -207,15 +209,18 @@ impure = true
 
 `deps` names additional logical project dependencies when source-level imports
 are insufficient or intentionally absent; every listed dependency must resolve to
-a source in the manifest graph. `extra_inputs` are package-root-relative paths
-whose exact bytes are hashed into the action key. `cache = false` disables
-global-cache restore/publish for the action. `always_reexecute = true` disables
-local up-to-date skipping and dirty checkpoint replay for the action. `impure =
-true` is a conservative shorthand for no cache and always re-execute. These
-fields are intended for audited exceptions such as generated data, root-HOL SML
-modules with explicit predecessor requirements, or tool/example side effects;
-they are not include paths and do not make arbitrary `use "file"` directives
-resolvable.
+a source in the manifest graph. `loads` names additional loadable module/library
+stems for source-implicit `load` predecessors; matching project modules are
+resolved in the DAG, otherwise the name is loaded from the configured HOL
+toolchain context. `extra_inputs` are package-root-relative paths whose exact
+bytes are hashed into the action key. `cache = false` disables global-cache
+restore/publish for the action. `always_reexecute = true` disables local
+up-to-date skipping and dirty checkpoint replay for the action. `impure = true`
+is a conservative shorthand for no cache and always re-execute. These fields are
+intended for audited exceptions such as generated data, root-HOL SML modules with
+explicit predecessor requirements, source-implicit external libraries, or
+tool/example side effects; they are not include paths and do not make arbitrary
+`use "file"` directives resolvable.
 
 ## Dependency resolution
 
@@ -310,7 +315,7 @@ input_key = hash(
   source package id + relative path,
   source content hash,
   resolved dependency input keys,
-  relevant manifest action policy, declared action deps, and extra input hashes,
+  relevant manifest action policy, declared action deps/loads, and extra input hashes,
   toolchain/base-context key,
   platform/ML-system facts where relevant
 )

@@ -22,7 +22,7 @@ This prototype is intentionally small:
   local `.sig`/`.sml` companion pairs
 - includes project `load "Module"` SML/SIG dependencies in build plans and internal load manifests
 - rejects source-level `use "file"` in project build actions; declare/load project modules instead
-- supports per-action policy for explicit logical dependencies, extra inputs, cache disabling, and always-rerun actions
+- supports per-action policy for explicit logical dependencies/loadable modules, extra inputs, cache disabling, and always-rerun actions
 - computes prototype source/resolved-dependency input keys for planned actions
 - schedules build actions serially by default or in DAG-ready parallel order with `-jN`
 - executes simple theory-script builds into project `.holbuild/` without Holmake
@@ -130,6 +130,7 @@ rev = "abc123"
 
 [actions.MyTheory]
 deps = ["MyProjectLib"]
+loads = ["SomeExternalLib"]
 extra_inputs = ["data/table.txt"]
 cache = false
 
@@ -187,6 +188,7 @@ non-source inputs or must not be cached/skipped, make that explicit:
 ```toml
 [actions.MyTheory]
 deps = ["MyProjectLib"]
+loads = ["SomeExternalLib"]
 extra_inputs = ["data/table.txt"]
 cache = false
 always_reexecute = true
@@ -195,11 +197,13 @@ always_reexecute = true
 
 `deps` names additional logical project dependencies when source-level imports
 are insufficient or intentionally absent; every listed name must resolve in the
-manifest/source graph. `extra_inputs` are hashed exactly and included in the
-action key. `cache = false` disables global-cache restore/publish for that
-action. `always_reexecute = true` prevents local up-to-date skipping and
-checkpoint replay for that action. These are escape hatches, not ambient
-include/search paths.
+manifest/source graph. `loads` names additional loadable module/library stems for
+source-implicit `load` predecessors; matching project modules are resolved in the
+DAG, otherwise the name is loaded from the configured HOL toolchain context.
+`extra_inputs` are hashed exactly and included in the action key. `cache = false`
+disables global-cache restore/publish for that action. `always_reexecute = true`
+prevents local up-to-date skipping and checkpoint replay for that action. These
+are escape hatches, not ambient include/search paths.
 
 Incremental correctness is action-key based. `holbuild` does not use
 `hol buildheap` as its default build primitive; it builds contexts directly by
