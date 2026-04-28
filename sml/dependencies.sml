@@ -146,9 +146,17 @@ fun header_stop_word word =
 fun extract_holsource_header tokens =
   let
     fun skip_qualifier rest =
-      case rest of
-          Symbol #"[" :: Word _ :: Symbol #"]" :: xs => xs
-        | _ => rest
+      let
+        fun skip_until_close tokens =
+          case tokens of
+              [] => []
+            | Symbol #"]" :: xs => xs
+            | _ :: xs => skip_until_close xs
+      in
+        case rest of
+            Symbol #"[" :: xs => skip_until_close xs
+          | _ => rest
+      end
     fun section current rest theories libs =
       case rest of
           [] => (theories, libs)

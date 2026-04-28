@@ -23,7 +23,7 @@ members = ["src"]
 TOML
 cat > "$project/src/AScript.sml" <<'SML'
 Theory A
-Ancestors arithmetic string
+Ancestors arithmetic[qualified, ignore_grammar] string
 Libs numLib
 
 Type identifier = “:string”;
@@ -40,8 +40,8 @@ SML
 (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --dry-run ATheory) > "$tmpdir/dry.log"
 require_grep "external theories: arithmeticTheory, stringTheory" "$tmpdir/dry.log"
 require_grep "external libs: numLib" "$tmpdir/dry.log"
-if grep -q "identifier" "$tmpdir/dry.log"; then
-  echo "HOLSource Type declaration was misclassified as a library" >&2
+if grep -q "ignore_grammar\|qualified\|identifier" "$tmpdir/dry.log"; then
+  echo "HOLSource header/body qualifier or Type declaration was misclassified" >&2
   exit 1
 fi
 
