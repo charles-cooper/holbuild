@@ -76,6 +76,22 @@ default HOL manifest. HOL is not permanently treated as an opaque legacy build.
 The prototype still requires an already configured `HOLDIR` so it can reuse HOL
 implementation pieces while the model is incubated.
 
+The root-HOL transition should be explicit rather than inferred from existing
+Holmakefiles. A plausible first in-tree/default manifest has package identity
+`HOL` (or another reserved built-in id), enumerates major source roots as normal
+manifest members, and declares bootstrap/tool phases as manifest concepts rather
+than as ambient directory conventions. During incubation, external holbuild may
+continue to key external HOL theory dependencies as `HOL:<Theory>@<toolchain_key>`;
+when root HOL is brought under holbuild, those dependencies should become normal
+resolved package nodes with the same action-key rules as user packages. Any HOL
+subtree that cannot yet be expressed by the manifest model should use an explicit
+shim/adaptor package boundary, not Holmakefile interpretation in project mode.
+
+The default manifest must also preserve the duplicate-logical-name invariant:
+root HOL cannot rely on load-path order to distinguish two `FooTheory` or `Foo`
+modules. If historical layout contains such ambiguity, the transition has to make
+that identity explicit or keep the subtree outside project mode until resolved.
+
 ## Source model
 
 Standard theory convention:

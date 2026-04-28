@@ -97,8 +97,9 @@ and for the build phase of `heap` targets; the default is `-j1`. `cache gc` uses
 does not require a HOL toolchain.
 
 See `DESIGN.md` for the intended long-term model: manifest-based package
-resolution, project-local `.holbuild/` materialization, action-key invalidation, and
-an optional global cache that never changes build semantics.
+resolution, project-local `.holbuild/` materialization, action-key invalidation,
+root-HOL migration through an explicit/default HOL manifest, and an optional
+global cache that never changes build semantics.
 
 ## Example `holproject.toml`
 
