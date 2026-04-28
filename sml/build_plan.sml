@@ -107,6 +107,19 @@ fun reject_unresolved_loads nodes plan =
     List.app check plan
   end
 
+fun reject_source_uses plan =
+  let
+    fun check node =
+      case #uses (deps_of node) of
+          [] => ()
+        | used :: _ =>
+            raise Error ("unsupported use " ^ used ^ " in " ^
+                         package node ^ ":" ^ relative_path node ^
+                         "; declare a project module and load it instead")
+  in
+    List.app check plan
+  end
+
 fun cycle_message path node =
   "dependency cycle: " ^
   String.concatWith " -> " (rev (logical_name node :: map logical_name path))
@@ -130,6 +143,7 @@ fun topo_sort nodes roots =
     val plan = rev order
   in
     reject_unresolved_loads nodes plan;
+    reject_source_uses plan;
     plan
   end
 

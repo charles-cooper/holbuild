@@ -82,3 +82,10 @@ load "Missing";
 structure A = struct val x = 1 end
 SML
 expect_build_failure unresolved_load A "unresolved load Missing in cycles:src/A.sml"
+
+make_project unsupported_use
+cat > "$tmpdir/unsupported_use/src/A.sml" <<'SML'
+use "other.sml";
+structure A = struct val x = 1 end
+SML
+expect_build_failure unsupported_use A "unsupported use other.sml in cycles:src/A.sml"

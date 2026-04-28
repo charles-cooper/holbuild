@@ -21,6 +21,7 @@ This prototype is intentionally small:
 - rejects duplicate logical theory/module names across the resolved graph, except
   local `.sig`/`.sml` companion pairs
 - includes project `load "Module"` SML/SIG dependencies in build plans and internal load manifests
+- rejects source-level `use "file"` in project build actions; declare/load project modules instead
 - computes prototype source/resolved-dependency input keys for planned actions
 - schedules build actions serially by default or in DAG-ready parallel order with `-jN`
 - executes simple theory-script builds into project `.holbuild/` without Holmake
