@@ -96,11 +96,6 @@ fun discover_from_report {source, report} : boundary list =
       (List.filter (fn line => line <> "")
                    (String.tokens (fn c => c = #"\n") report))
 
-fun save_line output =
-  "val _ = PolyML.SaveState.saveChild(" ^
-  HolbuildToolchain.sml_string output ^
-  ", length (PolyML.SaveState.showHierarchy()));\n"
-
 fun begin_theorem_line ({name, tactic_text, context_path, end_of_proof_path,
                          has_proof_attrs, ...} : checkpoint) =
   String.concat
@@ -121,9 +116,11 @@ val runtime_load_lines =
    "load \"smlExecute\";"]
 
 val runtime_theorem_state_lines =
-  ["val holbuild_theorem_info = ref NONE : (string * string * string * string * bool) option ref;",
+  ["val holbuild_theorem_info = ref NONE : (string * string * string * string * bool * int) option ref;",
+   "val holbuild_context_info = ref NONE : (string * int) option ref;",
    "fun holbuild_delete path = if OS.FileSys.access(path, []) then OS.FileSys.remove path else ();",
-   "fun holbuild_begin_theorem (info as (_, _, context_path, end_path, _)) = (holbuild_delete context_path; holbuild_delete end_path; holbuild_theorem_info := SOME info);"]
+   "fun holbuild_begin_theorem (name, tactic_text, context_path, end_path, has_attrs) = let val depth = length (PolyML.SaveState.showHierarchy()) in holbuild_delete context_path; holbuild_delete end_path; holbuild_theorem_info := SOME (name, tactic_text, context_path, end_path, has_attrs, depth); holbuild_context_info := SOME (context_path, depth) end;",
+   "fun holbuild_save_theorem_context () = case !holbuild_context_info of NONE => () | SOME (context_path, depth) => (holbuild_context_info := NONE; PolyML.SaveState.saveChild(context_path, depth));"]
 
 val runtime_tactic_parse_lines =
   ["fun holbuild_parse_tactic s = let",
@@ -233,16 +230,16 @@ val runtime_prover_lines =
    "fun holbuild_goalfrag_prover (g, tac) =",
    "  case !holbuild_theorem_info of",
    "      NONE => Tactical.TAC_PROOF(g, tac)",
-   "    | SOME (name, tactic_text, _, end_path, has_attrs) =>",
+   "    | SOME (name, tactic_text, _, end_path, has_attrs, checkpoint_depth) =>",
    "        let",
    "          val _ = holbuild_theorem_info := NONE",
    "          val _ = proofManagerLib.set_goalfrag g",
    "          val _ = if has_attrs orelse tactic_text = \"\" then (proofManagerLib.expand tac; ()) else holbuild_run_steps (holbuild_steps tactic_text)",
    "          val th = proofManagerLib.top_thm()",
-   "          val _ = PolyML.SaveState.saveChild(end_path, length (PolyML.SaveState.showHierarchy()))",
+   "          val _ = PolyML.SaveState.saveChild(end_path, checkpoint_depth)",
    "          val _ = proofManagerLib.drop_all()",
    "        in th end",
-   "        handle e => (holbuild_theorem_info := NONE; holbuild_drop_all(); raise e);",
+   "        handle e => (holbuild_theorem_info := NONE; holbuild_context_info := NONE; holbuild_drop_all(); raise e);",
    "val _ = Tactical.set_prover holbuild_goalfrag_prover;"]
 
 fun runtime_prelude [] = ""
@@ -271,7 +268,7 @@ fun instrument ({source, start_offset, checkpoints} :
             if boundary <= start_offset then loop pos rest acc
             else
               loop boundary rest
-                (save_line context_path ::
+                ("val _ = holbuild_save_theorem_context();\n" ::
                  "\n" ::
                  source_slice theorem_start boundary ::
                  begin_theorem_line checkpoint ::

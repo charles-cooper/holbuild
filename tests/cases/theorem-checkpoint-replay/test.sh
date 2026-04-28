@@ -60,6 +60,24 @@ require_grep "theorem_boundary a_thm" "$project/.holbuild/dep/replay/src/AScript
 require_grep "theorem_boundary c_thm" "$project/.holbuild/dep/replay/src/AScript.sml.key"
 require_grep "_end_of_proof.save" "$project/.holbuild/dep/replay/src/AScript.sml.key"
 require_grep "dependency_context_key=" "$project/.holbuild/dep/replay/src/AScript.sml.key"
+
+cat > "$tmpdir/check-checkpoint-parents.sml" <<SML
+fun expect_parent child expected =
+  case PolyML.SaveState.showParent child of
+      SOME actual => if actual = expected then () else raise Fail ("bad parent for " ^ child ^ ": " ^ actual)
+    | NONE => raise Fail ("missing parent for " ^ child);
+val deps_loaded = "$project/.holbuild/checkpoints/replay/src/AScript.sml.deps_loaded.save";
+val a_context = "$project/.holbuild/checkpoints/replay/src/AScript.sml.a_thm_context.save";
+val a_end = "$project/.holbuild/checkpoints/replay/src/AScript.sml.a_thm_end_of_proof.save";
+val b_context = "$project/.holbuild/checkpoints/replay/src/AScript.sml.b_thm_context.save";
+val b_end = "$project/.holbuild/checkpoints/replay/src/AScript.sml.b_thm_end_of_proof.save";
+val _ = expect_parent a_end deps_loaded;
+val _ = expect_parent a_context deps_loaded;
+val _ = expect_parent b_end a_context;
+val _ = expect_parent b_context a_context;
+SML
+"$HOLDIR/bin/hol" run --noconfig --holstate "$HOLDIR/bin/hol.state" "$tmpdir/check-checkpoint-parents.sml"
+
 if grep -q "theorem_boundary simple_thm" "$project/.holbuild/dep/replay/src/AScript.sml.key"; then
   echo "simple Theorem = declaration should not create a goalfrag checkpoint" >&2
   exit 1
