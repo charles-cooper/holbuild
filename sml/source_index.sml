@@ -19,7 +19,8 @@ type source =
     logical_name : string,
     source_path : string,
     relative_path : string,
-    artifacts : artifacts }
+    artifacts : artifacts,
+    policy : HolbuildProject.action_policy }
 
 type t = source list
 
@@ -68,7 +69,16 @@ fun sml_artifacts root rel =
 fun sig_artifacts root rel =
   { generated = [], objects = [obj_path root rel ".ui"], theory_data = [] }
 
-fun classify package source_root artifact_root abs_path =
+fun make_source package policies kind logical_name source_path relative_path artifacts =
+  {package = package,
+   kind = kind,
+   logical_name = logical_name,
+   source_path = source_path,
+   relative_path = relative_path,
+   artifacts = artifacts,
+   policy = HolbuildProject.action_policy_for policies logical_name}
+
+fun classify package source_root artifact_root policies abs_path =
   let
     val rel = relative_path source_root abs_path
     val file = filename rel
@@ -77,27 +87,17 @@ fun classify package source_root artifact_root abs_path =
       let
         val theory = drop_suffix "Script.sml" file ^ "Theory"
       in
-        SOME {package = package,
-              kind = TheoryScript,
-              logical_name = theory,
-              source_path = abs_path,
-              relative_path = rel,
-              artifacts = theory_artifacts artifact_root rel theory}
+        SOME (make_source package policies TheoryScript theory abs_path rel
+                            (theory_artifacts artifact_root rel theory))
       end
     else if has_suffix ".sml" file then
-      SOME {package = package,
-            kind = Sml,
-            logical_name = drop_suffix ".sml" file,
-            source_path = abs_path,
-            relative_path = rel,
-            artifacts = sml_artifacts artifact_root rel}
+      let val logical = drop_suffix ".sml" file
+      in SOME (make_source package policies Sml logical abs_path rel
+                           (sml_artifacts artifact_root rel)) end
     else if has_suffix ".sig" file then
-      SOME {package = package,
-            kind = Sig,
-            logical_name = drop_suffix ".sig" file,
-            source_path = abs_path,
-            relative_path = rel,
-            artifacts = sig_artifacts artifact_root rel}
+      let val logical = drop_suffix ".sig" file
+      in SOME (make_source package policies Sig logical abs_path rel
+                           (sig_artifacts artifact_root rel)) end
     else NONE
   end
 
@@ -117,19 +117,19 @@ fun list_dir path =
     loop [] handle e => (FS.closeDir stream; raise e)
   end
 
-fun scan_file package source_root artifact_root path acc =
-  case classify package source_root artifact_root path of
+fun scan_file package source_root artifact_root policies path acc =
+  case classify package source_root artifact_root policies path of
       NONE => acc
     | SOME source => source :: acc
 
-fun scan_dir package source_root artifact_root path acc =
+fun scan_dir package source_root artifact_root policies path acc =
   let
     fun scan_name (name, acc) =
       let val path' = join path name
       in
         if is_dir path' then
-          if skip_dir name then acc else scan_dir package source_root artifact_root path' acc
-        else if is_readable path' then scan_file package source_root artifact_root path' acc
+          if skip_dir name then acc else scan_dir package source_root artifact_root policies path' acc
+        else if is_readable path' then scan_file package source_root artifact_root policies path' acc
         else acc
       end
   in
@@ -174,22 +174,43 @@ fun insert_sorted source sources =
 
 fun sort_sources sources = List.foldl (fn (source, acc) => insert_sorted source acc) [] sources
 
+fun validate_action_policies package_name policies sources =
+  let
+    fun has_logical logical =
+      List.exists
+        (fn source => #package source = package_name andalso #logical_name source = logical)
+        sources
+    fun validate policy =
+      let val logical = HolbuildProject.action_policy_logical policy
+      in
+        if has_logical logical then ()
+        else raise Error ("action policy references unknown target " ^
+                          package_name ^ ":" ^ logical)
+      end
+  in
+    List.app validate policies
+  end
+
 fun discover_package package acc =
   let
     val name = HolbuildProject.package_name package
     val source_root = HolbuildProject.package_root package
     val artifact_root = HolbuildProject.package_artifact_root package
+    val policies = HolbuildProject.package_action_policies package
     val members =
       map (fn member => HolbuildProject.abs_under source_root member)
         (HolbuildProject.package_members package)
+    val sources =
+      List.foldl
+        (fn (member, acc) =>
+            if is_dir member then scan_dir name source_root artifact_root policies member acc
+            else if is_readable member then scan_file name source_root artifact_root policies member acc
+            else raise Error ("member does not exist: " ^ member))
+        acc
+        members
+    val _ = validate_action_policies name policies sources
   in
-    List.foldl
-      (fn (member, acc) =>
-          if is_dir member then scan_dir name source_root artifact_root member acc
-          else if is_readable member then scan_file name source_root artifact_root member acc
-          else raise Error ("member does not exist: " ^ member))
-      acc
-      members
+    sources
   end
 
 fun discover (project : HolbuildProject.t) =

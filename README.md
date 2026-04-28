@@ -22,6 +22,7 @@ This prototype is intentionally small:
   local `.sig`/`.sml` companion pairs
 - includes project `load "Module"` SML/SIG dependencies in build plans and internal load manifests
 - rejects source-level `use "file"` in project build actions; declare/load project modules instead
+- supports per-action policy for explicit extra inputs, cache disabling, and always-rerun actions
 - computes prototype source/resolved-dependency input keys for planned actions
 - schedules build actions serially by default or in DAG-ready parallel order with `-jN`
 - executes simple theory-script builds into project `.holbuild/` without Holmake
@@ -119,6 +120,10 @@ members = ["src", "examples"]
 git = "https://github.com/acme/foo"
 rev = "abc123"
 
+[actions.MyTheory]
+extra_inputs = ["data/table.txt"]
+cache = false
+
 [run]
 heap = "build/main.heap"
 loads = ["MyProjectLib"]
@@ -164,9 +169,22 @@ prototype also writes auxiliary `HOLFileSys` remap copies under `.hol/objs` for
 path-sensitive internal loads while preserving canonical artifacts in the project
 layout.
 
-Theory scripts are modeled as pure build actions for now: no user-specified side
-effects are part of the v1 contract. A future manifest schema may mark selected
-files as always re-execute or explicitly impure.
+Theory scripts are modeled as pure build actions by default: no user-specified
+side effects are part of the default v1 contract. If a real action has declared
+non-source inputs or must not be cached/skipped, make that explicit:
+
+```toml
+[actions.MyTheory]
+extra_inputs = ["data/table.txt"]
+cache = false
+always_reexecute = true
+# impure = true is shorthand for no cache and always re-execute
+```
+
+`extra_inputs` are hashed exactly and included in the action key. `cache = false`
+disables global-cache restore/publish for that action. `always_reexecute = true`
+prevents local up-to-date skipping and checkpoint replay for that action. These
+are escape hatches, not ambient include/search paths.
 
 Incremental correctness is action-key based. `holbuild` does not use
 `hol buildheap` as its default build primitive; it builds contexts directly by

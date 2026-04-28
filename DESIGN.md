@@ -109,6 +109,35 @@ The same token pass found non-script examples and libraries with literal/dynamic
 effects. A root-HOL manifest should classify such tooling/examples/tests
 explicitly instead of treating them as pure cacheable theory-script actions.
 
+A first root-HOL manifest should therefore start with the stable pure theory and
+library package roots that already obey project-mode constraints, and push
+non-build tooling/examples/tests behind explicit package/action boundaries. A
+sketch:
+
+```toml
+[project]
+name = "HOL"
+version = "bootstrap"
+
+[build]
+members = [
+  "src/bool", "src/num", "src/list", "src/pair",
+  "src/pred_set", "src/finite_maps", "src/integer",
+]
+
+[actions.SomeGeneratedTheory]
+extra_inputs = ["path/to/generated-input"]
+cache = false
+
+[actions.SomeImpureSelftest]
+impure = true
+```
+
+This is deliberately not a Holmakefile translation. Historical directories that
+need dynamic `use`, generated files, external solvers, or process/file-system side
+effects should either be modeled with explicit action policy or stay outside the
+initial project-mode root package until their inputs and outputs are declared.
+
 ## Source model
 
 Standard theory convention:
@@ -127,10 +156,25 @@ A theory target owns the logical artifacts:
 .holbuild/obj/src/FooTheory.ui
 ```
 
-Theory scripts are modeled as pure build actions in v1: no user-specified side
-effects are part of the contract. Future manifests may add explicit escape
-hatches such as `always_reexecute`, `extra_inputs`, `extra_outputs`, or
-`cache = false`.
+Theory scripts are modeled as pure build actions by default in v1: no
+user-specified side effects are part of the default contract. The manifest can
+mark exceptions explicitly:
+
+```toml
+[actions.FooTheory]
+extra_inputs = ["data/table.txt"]
+cache = false
+always_reexecute = true
+impure = true
+```
+
+`extra_inputs` are package-root-relative paths whose exact bytes are hashed into
+the action key. `cache = false` disables global-cache restore/publish for the
+action. `always_reexecute = true` disables local up-to-date skipping and dirty
+checkpoint replay for the action. `impure = true` is a conservative shorthand for
+no cache and always re-execute. These fields are intended for audited exceptions
+such as generated data or tool/example side effects; they are not include paths
+and do not make arbitrary `use "file"` directives resolvable.
 
 ## Dependency resolution
 
@@ -225,7 +269,7 @@ input_key = hash(
   source package id + relative path,
   source content hash,
   resolved dependency input/output keys,
-  relevant manifest fields,
+  relevant manifest action policy and extra input hashes,
   HOL/toolchain/base-state key,
   platform/ML-system facts where relevant
 )

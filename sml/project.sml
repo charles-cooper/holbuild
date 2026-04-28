@@ -6,6 +6,16 @@ structure FS = OS.FileSys
 
 datatype heap = Heap of {name : string, output : string, objects : string list}
 
+datatype extra_input = ExtraInput of {path : string, absolute_path : string}
+
+datatype action_policy =
+  ActionPolicy of
+    { logical : string,
+      extra_inputs : extra_input list,
+      impure : bool,
+      cache : bool,
+      always_reexecute : bool }
+
 datatype dependency =
   Dependency of
     { name : string,
@@ -22,7 +32,8 @@ datatype package =
       root : string,
       manifest : string,
       members : string list,
-      artifact_root : string }
+      artifact_root : string,
+      action_policies : action_policy list }
 
 type t =
   { root : string,
@@ -34,7 +45,8 @@ type t =
     overrides : override list,
     run_heap : string option,
     run_loads : string list,
-    heaps : heap list }
+    heaps : heap list,
+    action_policies : action_policy list }
 
 exception Error of string
 
@@ -94,6 +106,12 @@ fun int_at table key =
       NONE => NONE
     | SOME (TOML.INTEGER n) => SOME n
     | SOME _ => die (key_text key ^ " must be an integer")
+
+fun bool_at table key =
+  case lookup table key of
+      NONE => NONE
+    | SOME (TOML.BOOL b) => SOME b
+    | SOME _ => die (key_text key ^ " must be a boolean")
 
 fun string_array_value value =
   case value of
@@ -176,10 +194,14 @@ fun validate_schema table =
 fun validate_dependency_table (name, table) =
   require_known_fields ("dependencies." ^ name) ["path", "manifest", "git", "rev"] table
 
+fun validate_action_table (logical, table) =
+  require_known_fields ("actions." ^ logical)
+    ["extra_inputs", "impure", "cache", "always_reexecute"] table
+
 fun validate_manifest_table table =
   let
     val _ = require_known_fields "holproject.toml"
-              ["holbuild", "project", "build", "dependencies", "run", "heap"] table
+              ["holbuild", "project", "build", "dependencies", "run", "heap", "actions"] table
     val _ = Option.app (require_known_fields "project" ["name", "version"])
               (table_field table ["project"])
     val _ = Option.app (require_known_fields "build" ["members"])
@@ -187,6 +209,7 @@ fun validate_manifest_table table =
     val _ = Option.app (require_known_fields "run" ["heap", "loads"])
               (table_field table ["run"])
     val _ = List.app validate_dependency_table (named_table_entries table ["dependencies"])
+    val _ = List.app validate_action_table (named_table_entries table ["actions"])
     fun validate_heap_entry value =
       case value of
           TOML.TABLE heap => require_known_fields "heap" ["name", "output", "objects"] heap
@@ -216,6 +239,24 @@ fun parse_dependency (name, table) =
       rev = string_field table "rev" }
 
 fun dependencies_at table = map parse_dependency (named_table_entries table ["dependencies"])
+
+fun parse_action_policy root (logical, table) =
+  let
+    fun extra path =
+      if Path.isAbsolute path then
+        die ("actions." ^ logical ^ ".extra_inputs must be package-root-relative: " ^ path)
+      else ExtraInput {path = path, absolute_path = Path.concat(root, path)}
+  in
+    ActionPolicy
+      { logical = logical,
+        extra_inputs = map extra (string_array_field table "extra_inputs"),
+        impure = Option.getOpt(bool_at table ["impure"], false),
+        cache = Option.getOpt(bool_at table ["cache"], true),
+        always_reexecute = Option.getOpt(bool_at table ["always_reexecute"], false) }
+  end
+
+fun action_policies_at root table =
+  map (parse_action_policy root) (named_table_entries table ["actions"])
 
 fun parse_override (name, table) =
   case string_field table "path" of
@@ -251,7 +292,8 @@ fun parse_at {manifest, root, overrides} =
       overrides = overrides,
       run_heap = Option.mapPartial (fn t => string_field t "heap") run,
       run_loads = from run (fn t => string_array_field t "loads") [],
-      heaps = heaps_at table }
+      heaps = heaps_at table,
+      action_policies = action_policies_at root table }
   end
 
 fun parse manifest =
@@ -288,6 +330,25 @@ fun package_name (Package {name, ...}) = name
 fun package_root (Package {root, ...}) = root
 fun package_members (Package {members, ...}) = members
 fun package_artifact_root (Package {artifact_root, ...}) = artifact_root
+fun package_action_policies (Package {action_policies, ...}) = action_policies
+
+fun action_policy_logical (ActionPolicy {logical, ...}) = logical
+fun action_extra_inputs (ActionPolicy {extra_inputs, ...}) = extra_inputs
+fun action_cache_enabled (ActionPolicy {impure, cache, always_reexecute, ...}) =
+  cache andalso not impure andalso not always_reexecute
+fun action_always_reexecute (ActionPolicy {impure, always_reexecute, ...}) =
+  impure orelse always_reexecute
+fun extra_input_path (ExtraInput {path, ...}) = path
+fun extra_input_absolute_path (ExtraInput {absolute_path, ...}) = absolute_path
+
+fun default_action_policy logical =
+  ActionPolicy {logical = logical, extra_inputs = [], impure = false,
+                cache = true, always_reexecute = false}
+
+fun action_policy_for policies logical =
+  case List.find (fn policy => action_policy_logical policy = logical) policies of
+      SOME policy => policy
+    | NONE => default_action_policy logical
 
 fun dependency_local_path ({root, overrides, ...} : t) (Dependency {name, path, ...}) =
   Option.map (abs_under root)
@@ -322,9 +383,10 @@ fun dependency_to_string project (dep as Dependency {name, path, manifest, git, 
 
 fun override_to_string (Override {name, path}) = name ^ " -> " ^ path
 
-fun project_package ({root, manifest, name, members, ...} : t) =
+fun project_package ({root, manifest, name, members, action_policies, ...} : t) =
   Package {name = Option.getOpt(name, "root"), root = root, manifest = manifest,
-           members = members, artifact_root = Path.concat(root, ".holbuild")}
+           members = members, artifact_root = Path.concat(root, ".holbuild"),
+           action_policies = action_policies}
 
 fun dependency_project (project : t) (dep as Dependency {name, ...}) =
   let
@@ -359,7 +421,8 @@ fun dependency_package artifact_parent project (dep as Dependency {name, ...}) =
     val artifact_root = Path.concat(Path.concat(artifact_parent, ".holbuild/deps"), name)
   in
     (Package {name = name, root = dep_root, manifest = dep_manifest,
-              members = #members dep_project, artifact_root = artifact_root},
+              members = #members dep_project, artifact_root = artifact_root,
+              action_policies = #action_policies dep_project},
      dep_project)
   end
 
@@ -390,7 +453,7 @@ fun packages (project : t) =
 fun describe (project : t) =
   let
     val {root, manifest, name, version, members, dependencies,
-         overrides, run_heap, run_loads, heaps} = project
+         overrides, run_heap, run_loads, heaps, action_policies} = project
     fun opt label value =
       case value of NONE => () | SOME s => print (label ^ s ^ "\n")
   in
@@ -403,7 +466,8 @@ fun describe (project : t) =
     List.app (fn override => print ("override: " ^ override_to_string override ^ "\n")) overrides;
     opt "run.heap: " run_heap;
     print ("run.loads: " ^ String.concatWith ", " run_loads ^ "\n");
-    List.app (fn heap => print ("heap: " ^ heap_to_string heap ^ "\n")) heaps
+    List.app (fn heap => print ("heap: " ^ heap_to_string heap ^ "\n")) heaps;
+    List.app (fn policy => print ("action: " ^ action_policy_logical policy ^ "\n")) action_policies
   end
 
 end

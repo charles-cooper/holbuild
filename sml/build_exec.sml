@@ -95,7 +95,10 @@ fun copy_rewriting_path {src, dst, old_path, new_path} =
 
 fun source_file node = #source_path (HolbuildBuildPlan.source_of node)
 fun source_artifacts node = #artifacts (HolbuildBuildPlan.source_of node)
+fun source_policy node = #policy (HolbuildBuildPlan.source_of node)
 fun logical_name node = HolbuildBuildPlan.logical_name node
+fun cache_enabled node = HolbuildProject.action_cache_enabled (source_policy node)
+fun always_reexecute node = HolbuildProject.action_always_reexecute (source_policy node)
 
 fun one_with_suffix suffix paths =
   case List.filter (has_suffix suffix) paths of
@@ -713,8 +716,12 @@ fun instrumented_source source_text start_offset checkpoints =
   HolbuildTheoryCheckpoints.instrument
     {source = source_text, start_offset = start_offset, checkpoints = checkpoints}
 
+fun replay_candidate project plan keys toolchain_key node checkpoints =
+  if always_reexecute node then NONE
+  else best_replay_candidate project plan keys toolchain_key node checkpoints
+
 fun write_theory_script tc project plan keys toolchain_key node source_text checkpoints staged_script preload =
-  case best_replay_candidate project plan keys toolchain_key node checkpoints of
+  case replay_candidate project plan keys toolchain_key node checkpoints of
       SOME {boundary, path, safe_name} =>
         let
           val _ = write_text staged_script (instrumented_source source_text boundary checkpoints)
@@ -762,7 +769,10 @@ fun build_theory tc project plan keys toolchain_key node source_text theorem_che
                                  old_path = staged_dat_reference stage node,
                                  new_path = data_path}
     val _ = copy_binary sml_path (hfs_remapped_path sml_path)
-    val _ = publish_theory_cache input_key (staged_dat_reference stage node) staged_sig staged_sml staged_dat
+    val _ =
+      if cache_enabled node then
+        publish_theory_cache input_key (staged_dat_reference stage node) staged_sig staged_sml staged_dat
+      else ()
   in
     write_local_theory_manifests plan node;
     remove_tree stage
@@ -821,6 +831,24 @@ fun dependency_context_lines plan keys toolchain_key node =
         ["dependency_context_key=" ^ dependency_context_key toolchain_key plan keys node]
     | _ => []
 
+fun bool_text true = "true"
+  | bool_text false = "false"
+
+fun action_policy_lines node =
+  let
+    val policy = source_policy node
+    val extra_inputs = HolbuildProject.action_extra_inputs policy
+    val extra_lines =
+      map (fn input =>
+             "extra_input=" ^ HolbuildProject.extra_input_path input ^ "@" ^
+             file_hash (HolbuildProject.extra_input_absolute_path input))
+          extra_inputs
+  in
+    ["cache=" ^ bool_text (HolbuildProject.action_cache_enabled policy),
+     "always_reexecute=" ^ bool_text (HolbuildProject.action_always_reexecute policy)] @
+    extra_lines
+  end
+
 fun theorem_boundary_line {safe_name, prefix_hash, context_path, end_of_proof_path, ...} =
   "theorem_boundary " ^ safe_name ^ " " ^ prefix_hash ^ " " ^
   context_path ^ " " ^ end_of_proof_path
@@ -840,6 +868,7 @@ fun metadata_text project plan keys input_key toolchain_key node theorem_checkpo
        "logical=" ^ #logical_name source,
        "source=" ^ #relative_path source] @
       dependency_context_lines plan keys toolchain_key node @
+      action_policy_lines node @
       checkpoint_lines project node @
       theorem_boundary_lines theorem_checkpoints @
       map output_hash_line (output_paths project node)
@@ -871,10 +900,11 @@ fun build_theory_node tc project plan keys toolchain_key node input_key =
     val theorem_checkpoints = theory_checkpoints_for_node tc project node input_key source_text
     val stage = stage_dir project input_key
   in
-    if up_to_date project plan keys input_key toolchain_key node theorem_checkpoints then
+    if not (always_reexecute node) andalso
+       up_to_date project plan keys input_key toolchain_key node theorem_checkpoints then
       (remove_tree stage;
        print (HolbuildBuildPlan.logical_name node ^ " is up to date\n"))
-    else if materialize_theory_cache tc project plan input_key node then
+    else if cache_enabled node andalso materialize_theory_cache tc project plan input_key node then
       (remove_tree stage;
        write_metadata project plan keys input_key toolchain_key node theorem_checkpoints)
     else
@@ -889,12 +919,14 @@ fun build_node tc project plan keys toolchain_key node =
         HolbuildSourceIndex.TheoryScript =>
           build_theory_node tc project plan keys toolchain_key node input_key
       | HolbuildSourceIndex.Sml =>
-          if up_to_date project plan keys input_key toolchain_key node [] then
+          if not (always_reexecute node) andalso
+             up_to_date project plan keys input_key toolchain_key node [] then
             print (HolbuildBuildPlan.logical_name node ^ " is up to date\n")
           else (build_sml_like plan node ".uo";
                 write_metadata project plan keys input_key toolchain_key node [])
       | HolbuildSourceIndex.Sig =>
-          if up_to_date project plan keys input_key toolchain_key node [] then
+          if not (always_reexecute node) andalso
+             up_to_date project plan keys input_key toolchain_key node [] then
             print (HolbuildBuildPlan.logical_name node ^ " is up to date\n")
           else (build_sml_like plan node ".ui";
                 write_metadata project plan keys input_key toolchain_key node [])

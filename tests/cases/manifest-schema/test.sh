@@ -100,6 +100,36 @@ branch = "main"
 TOML
 expect_context_failure bad_dependency "unknown field in dependencies.dep: branch"
 
+make_project bad_action_field
+cat > "$tmpdir/bad_action_field/holproject.toml" <<'TOML'
+[project]
+name = "bad_action_field"
+
+[actions.FooTheory]
+extra_input = ["foo.dat"]
+TOML
+expect_context_failure bad_action_field "unknown field in actions.FooTheory: extra_input"
+
+make_project bad_action_type
+cat > "$tmpdir/bad_action_type/holproject.toml" <<'TOML'
+[project]
+name = "bad_action_type"
+
+[actions.FooTheory]
+cache = "no"
+TOML
+expect_context_failure bad_action_type "cache must be a boolean"
+
+make_project bad_action_abs_input
+cat > "$tmpdir/bad_action_abs_input/holproject.toml" <<'TOML'
+[project]
+name = "bad_action_abs_input"
+
+[actions.FooTheory]
+extra_inputs = ["/tmp/generated.dat"]
+TOML
+expect_context_failure bad_action_abs_input "extra_inputs must be package-root-relative"
+
 make_project bad_config
 cat > "$tmpdir/bad_config/holproject.toml" <<'TOML'
 [project]

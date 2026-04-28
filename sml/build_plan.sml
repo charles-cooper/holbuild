@@ -167,6 +167,15 @@ fun plan sources targets =
 
 fun kind_name source = HolbuildSourceIndex.kind_string (#kind source)
 
+fun readable path = OS.FileSys.access(path, [OS.FileSys.A_READ]) handle OS.SysErr _ => false
+
+fun file_hash path =
+  if readable path then SHA1_ML.sha1_file {filename = path}
+  else raise Error ("extra input not found: " ^ path)
+
+fun bool_text true = "true"
+  | bool_text false = "false"
+
 fun hash_text text =
   let
     val tmp = OS.FileSys.tmpName ()
@@ -192,6 +201,13 @@ fun action_text toolchain_key nodes keys node =
       map (fn dep => package dep ^ ":" ^ logical_name dep ^ "@" ^ lookup_key keys dep)
         (direct_project_deps nodes node)
     val external_deps = map (fn name => "HOL:" ^ name ^ "@" ^ toolchain_key) (direct_external_theories nodes node)
+    val policy = #policy source
+    val extra_inputs = HolbuildProject.action_extra_inputs policy
+    val extra_input_lines =
+      map (fn input =>
+             "extra_input=" ^ HolbuildProject.extra_input_path input ^ "@" ^
+             file_hash (HolbuildProject.extra_input_absolute_path input))
+          extra_inputs
     val lines =
       ["holbuild-action-v1",
        "toolchain=" ^ toolchain_key,
@@ -199,7 +215,10 @@ fun action_text toolchain_key nodes keys node =
        "package=" ^ #package source,
        "logical=" ^ #logical_name source,
        "source=" ^ #relative_path source,
-       "source-sha1=" ^ source_hash] @
+       "source-sha1=" ^ source_hash,
+       "cache=" ^ bool_text (HolbuildProject.action_cache_enabled policy),
+       "always_reexecute=" ^ bool_text (HolbuildProject.action_always_reexecute policy)] @
+      extra_input_lines @
       map (fn dep => "dep=" ^ dep) (project_deps @ external_deps)
   in
     String.concatWith "\n" lines ^ "\n"
