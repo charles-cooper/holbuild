@@ -14,16 +14,16 @@ This prototype is intentionally small:
 - establishes a shared project context for `build`, `run`, and `repl`
 - reuses HOL's existing SML TOML parser from `$HOLDIR/tools/Holmake/toml`
 - accepts logical build targets such as `MyTheory`, not object filenames such as `MyTheory.uo`
-- owns source discovery and maps outputs to project-level `.hol/`
+- owns source discovery and maps outputs to project-level `.holbuild/`
 - extracts simple theory dependencies from source text and orders dry-run build plans
 - parses transitive dependency manifests and local `.holconfig.toml` path overrides
-- materializes dependency plans under project `.hol/deps/<package>/`
+- materializes dependency plans under project `.holbuild/deps/<package>/`
 - rejects duplicate logical theory/module names across the resolved graph, except
   local `.sig`/`.sml` companion pairs
 - includes project `load "Module"` SML/SIG dependencies in build plans and internal load manifests
 - computes prototype source/resolved-dependency input keys for planned actions
 - schedules build actions serially by default or in DAG-ready parallel order with `-jN`
-- executes simple theory-script builds into project `.hol/` without Holmake
+- executes simple theory-script builds into project `.holbuild/` without Holmake
 - records local action metadata and skips unchanged actions
 - publishes/restores simple theory semantic artifacts through the global cache
 - includes the explicit HOL base state/toolchain in prototype action keys
@@ -96,7 +96,7 @@ and for the build phase of `heap` targets; the default is `-j1`. `cache gc` uses
 does not require a HOL toolchain.
 
 See `DESIGN.md` for the intended long-term model: manifest-based package
-resolution, project-local `.hol/` materialization, action-key invalidation, and
+resolution, project-local `.holbuild/` materialization, action-key invalidation, and
 an optional global cache that never changes build semantics.
 
 ## Example `holproject.toml`
@@ -150,7 +150,10 @@ object filenames as targets. `holbuild build MyTheory` is the intended shape.
 
 `holbuild` should produce the same logical artifacts as Holmake (`.uo`, `.ui`,
 `.dat`, generated theory files, etc.) while allowing their physical storage to
-move under a project-level `.hol/` directory. `.uo` and `.ui` files are internal
+move under a project-level `.holbuild/` directory. The top-level directory is not
+`.hol/` because Holmake/HOL tooling already uses `.hol` conventions. Any
+`.hol/objs` directories written by holbuild are nested compatibility remap copies
+inside `.holbuild/`, not the project state root. `.uo` and `.ui` files are internal
 ML artifacts; users should request logical targets only. The prototype rejects
 ambiguous graphs where two sources export the same logical theory/module name;
 the intended exception is a same-package `.sig`/`.sml` companion pair. The
@@ -167,7 +170,7 @@ Incremental correctness is action-key based. `holbuild` does not use
 loading resolved ancestors and saving PolyML checkpoints at syntactic boundaries:
 dependencies loaded, AST-derived theorem end-of-proof/context boundaries for
 modern theorem declarations, and successor-ready final context, stored locally
-under `.hol/checkpoints/`. When a script is dirty but a previous theorem-context
+under `.holbuild/checkpoints/`. When a script is dirty but a previous theorem-context
 prefix still matches exactly, holbuild can replay from that checkpoint instead
 of from the dependency-loaded state. Explicit
 `holbuild heap NAME` targets build their declared logical objects, load the
@@ -175,12 +178,12 @@ generated theory modules, and save the requested heap with PolyML SaveState.
 
 The optional global cache stores simple theory semantic artifacts by action key:
 `Theory.sig`, a path-rebased `Theory.sml` template, and `Theory.dat`. On a cache
-hit, holbuild materializes those artifacts into local `.hol/`, writes local load
+hit, holbuild materializes those artifacts into local `.holbuild/`, writes local load
 manifests, and recreates local checkpoints from the generated theory module.
 `holbuild cache gc` removes stale temporary entries, stale action manifests, and
 old unreferenced blobs after 7 days by default.
 
-`holbuild run` and `holbuild repl` generate `.hol/holbuild-run-context.sml`
+`holbuild run` and `holbuild repl` generate `.holbuild/holbuild-run-context.sml`
 in the project root before loading `[run].loads` and user-supplied arguments.
 
 `hol debug` is deliberately out of scope for this prototype.

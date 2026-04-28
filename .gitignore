@@ -1,4 +1,5 @@
 bin/holbuild
+.holbuild/
 .hol/
 .holconfig.toml
 .agent-files/

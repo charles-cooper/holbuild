@@ -37,15 +37,15 @@ SML
 
 (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build BTheory)
 
-akey_before=$(grep '^input_key=' "$project/.hol/dep/invalidate/src/AScript.sml.key")
-bkey_before=$(grep '^input_key=' "$project/.hol/dep/invalidate/src/BScript.sml.key")
+akey_before=$(grep '^input_key=' "$project/.holbuild/dep/invalidate/src/AScript.sml.key")
+bkey_before=$(grep '^input_key=' "$project/.holbuild/dep/invalidate/src/BScript.sml.key")
 
 printf '\n(* comment-only edit still invalidates v1 input key *)\n' >> "$project/src/AScript.sml"
 rebuild_log=$tmpdir/rebuild.log
 (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build BTheory) > "$rebuild_log"
 
-akey_after=$(grep '^input_key=' "$project/.hol/dep/invalidate/src/AScript.sml.key")
-bkey_after=$(grep '^input_key=' "$project/.hol/dep/invalidate/src/BScript.sml.key")
+akey_after=$(grep '^input_key=' "$project/.holbuild/dep/invalidate/src/AScript.sml.key")
+bkey_after=$(grep '^input_key=' "$project/.holbuild/dep/invalidate/src/BScript.sml.key")
 
 [[ "$akey_before" != "$akey_after" ]] || { echo "A input key did not change" >&2; exit 1; }
 [[ "$bkey_before" != "$bkey_after" ]] || { echo "B input key did not change after dependency key changed" >&2; exit 1; }

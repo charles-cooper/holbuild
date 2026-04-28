@@ -23,7 +23,7 @@ members = ["src"]
 
 [[heap]]
 name = "main"
-output = ".hol/heap/main.save"
+output = ".holbuild/heap/main.save"
 objects = ["ATheory"]
 TOML
 cat > "$project/src/AScript.sml" <<'SML'
@@ -34,4 +34,4 @@ val _ = export_theory();
 SML
 
 (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" -j2 heap main)
-require_file "$project/.hol/heap/main.save"
+require_file "$project/.holbuild/heap/main.save"

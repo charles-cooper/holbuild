@@ -104,7 +104,7 @@ fun classify package source_root artifact_root abs_path =
 fun is_dir path = FS.isDir path handle OS.SysErr _ => false
 fun is_readable path = FS.access(path, [FS.A_READ]) handle OS.SysErr _ => false
 
-fun skip_dir name = name = ".hol" orelse name = ".git" orelse name = "_build"
+fun skip_dir name = name = ".holbuild" orelse name = ".hol" orelse name = ".git" orelse name = "_build"
 
 fun list_dir path =
   let

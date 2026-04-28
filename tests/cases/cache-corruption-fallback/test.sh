@@ -38,33 +38,33 @@ dat_blob=$(awk '/^blob dat / {print $3}' "$manifest")
 [[ -n "$dat_blob" ]] || { echo "could not find dat blob in cache manifest" >&2; exit 1; }
 
 printf 'corrupt dat blob\n' > "$HOLBUILD_CACHE/blobs/$dat_blob"
-rm -rf "$project/.hol"
+rm -rf "$project/.holbuild"
 corrupt_blob_log=$tmpdir/corrupt-blob.log
 (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$corrupt_blob_log" 2>&1
 require_grep "cache entry unusable" "$corrupt_blob_log"
-require_file "$project/.hol/obj/src/ATheory.dat"
+require_file "$project/.holbuild/obj/src/ATheory.dat"
 
-rm -rf "$project/.hol"
+rm -rf "$project/.holbuild"
 repaired_blob_log=$tmpdir/repaired-blob.log
 (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$repaired_blob_log" 2>&1
 require_grep "ATheory restored from cache" "$repaired_blob_log"
 
 printf 'not a holbuild cache manifest\n' > "$manifest"
-rm -rf "$project/.hol"
+rm -rf "$project/.holbuild"
 corrupt_manifest_log=$tmpdir/corrupt-manifest.log
 (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$corrupt_manifest_log" 2>&1
 require_grep "cache entry unusable" "$corrupt_manifest_log"
-require_file "$project/.hol/obj/src/ATheory.dat"
+require_file "$project/.holbuild/obj/src/ATheory.dat"
 
 awk '{ if ($1 == "blob" && $2 == "sig") print "blob sig not-a-sha1"; else print }' "$manifest" > "$manifest.tmp"
 mv "$manifest.tmp" "$manifest"
-rm -rf "$project/.hol"
+rm -rf "$project/.holbuild"
 invalid_hash_log=$tmpdir/invalid-hash.log
 (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$invalid_hash_log" 2>&1
 require_grep "invalid sig blob hash" "$invalid_hash_log"
-require_file "$project/.hol/obj/src/ATheory.dat"
+require_file "$project/.holbuild/obj/src/ATheory.dat"
 
-rm -rf "$project/.hol"
+rm -rf "$project/.holbuild"
 repaired_manifest_log=$tmpdir/repaired-manifest.log
 (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$repaired_manifest_log" 2>&1
 require_grep "ATheory restored from cache" "$repaired_manifest_log"

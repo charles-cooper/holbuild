@@ -207,13 +207,13 @@ fun theory_outputs node =
   end
 
 fun stage_dir (project : HolbuildProject.t) input_key =
-  Path.concat(Path.concat(#root project, ".hol/stage"), input_key)
+  Path.concat(Path.concat(#root project, ".holbuild/stage"), input_key)
 
 fun staged_theory_file stage node ext = Path.concat(Path.concat(stage, ".hol/objs"), logical_name node ^ ext)
 fun staged_dat_reference stage node = Path.concat(stage, logical_name node ^ ".dat")
 
 fun checkpoint_base (project : HolbuildProject.t) node =
-  Path.concat(Path.concat(Path.concat(#root project, ".hol/checkpoints"),
+  Path.concat(Path.concat(Path.concat(#root project, ".holbuild/checkpoints"),
                           HolbuildBuildPlan.package node),
               HolbuildBuildPlan.relative_path node)
 
@@ -224,7 +224,7 @@ fun remove_tree path =
   ignore (OS.Process.system ("rm -rf " ^ HolbuildToolchain.quote path))
 
 fun project_lock_path (project : HolbuildProject.t) =
-  Path.concat(Path.concat(#root project, ".hol/locks"), "project.lock")
+  Path.concat(Path.concat(#root project, ".holbuild/locks"), "project.lock")
 
 fun project_lock_owner_path lock = Path.concat(lock, "owner")
 
@@ -579,7 +579,7 @@ fun materialize_theory_cache tc project plan input_key node =
 fun metadata_path (project : HolbuildProject.t) node =
   let
     val source = HolbuildBuildPlan.source_of node
-    val base = Path.concat(Path.concat(#root project, ".hol/dep"), #package source)
+    val base = Path.concat(Path.concat(#root project, ".holbuild/dep"), #package source)
   in
     Path.concat(base, #relative_path source ^ ".key")
   end
@@ -1035,7 +1035,7 @@ fun write_heap_loader plan output path =
 
 fun export_heap tc (project : HolbuildProject.t) plan output =
   let
-    val stage = Path.concat(Path.concat(#root project, ".hol/stage"), "heap")
+    val stage = Path.concat(Path.concat(#root project, ".holbuild/stage"), "heap")
     val loader = Path.concat(stage, "holbuild-save-heap.sml")
   in
     ensure_dir stage;

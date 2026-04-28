@@ -10,8 +10,8 @@ and cacheable builds that never require users to reason about the cache.
 - Build targets are logical names, not files: `FooTheory`, not `FooTheory.uo`.
 - `.uo` and `.ui` are internal ML load artifacts. Users must never request them.
 - Project mode is manifest based. `Holmakefile` semantics are not interpreted.
-- The source tree is user-owned; build products live under project `.hol/`.
-- The cache is an optional accelerator. Local `.hol/` is the authoritative
+- The source tree is user-owned; build products live under project `.holbuild/`.
+- The cache is an optional accelerator. Local `.holbuild/` is the authoritative
   materialized build view.
 - When unsure, rebuild. A bad cache hit is worse than a missed cache hit.
 
@@ -87,11 +87,11 @@ src/FooScript.sml -> FooTheory
 A theory target owns the logical artifacts:
 
 ```text
-.hol/gen/src/FooTheory.sml
-.hol/gen/src/FooTheory.sig
-.hol/obj/src/FooTheory.dat
-.hol/obj/src/FooTheory.uo
-.hol/obj/src/FooTheory.ui
+.holbuild/gen/src/FooTheory.sml
+.holbuild/gen/src/FooTheory.sig
+.holbuild/obj/src/FooTheory.dat
+.holbuild/obj/src/FooTheory.uo
+.holbuild/obj/src/FooTheory.ui
 ```
 
 Theory scripts are modeled as pure build actions in v1: no user-specified side
@@ -137,7 +137,7 @@ The build scheduler runs over the resolved DAG inside one holbuild process.
 Actions become ready only after all direct project dependencies complete. Each
 action builds in a private staging directory and installs its own outputs/metadata;
 dependents are scheduled after successful completion. Separate holbuild processes
-must not concurrently mutate the same project `.hol/`; build and heap commands
+must not concurrently mutate the same project `.holbuild/`; build and heap commands
 take a coarse project write lock with an owner file for diagnostics. If the lock
 owner is on the same host and its recorded process no longer exists, holbuild
 removes the stale lock and retries. The default remains `-j1` because HOL/PolyML
@@ -147,10 +147,17 @@ export the heap serially from the explicit base state.
 
 ## Artifacts and local materialization
 
-Project `.hol/` is the complete local build view:
+Holmake and HOL tooling already use `.hol` conventions, especially `.hol/objs`
+for `HOLFileSys` remapped object paths. To avoid top-level collisions with
+Holmake-managed source trees, holbuild owns `.holbuild/` as its project-local
+state directory. Any `.hol/objs` directories written by holbuild are nested inside
+`.holbuild/` artifact directories as compatibility remap copies, not as the
+project root convention.
+
+Project `.holbuild/` is the complete local build view:
 
 ```text
-project/.hol/
+project/.holbuild/
   gen/          generated source/signature files
   obj/          local ML/theory artifacts
   dep/          action metadata and dependency facts
@@ -244,7 +251,7 @@ The cache should store semantic bundles and metadata. Local path-sensitive files
 are regenerated or rebased during materialization. The prototype currently
 publishes simple theory bundles containing `Theory.sig`, `Theory.dat`, and a
 `Theory.sml` template with the `.dat` load path replaced by a placeholder. On a
-cache hit, holbuild copies blobs into local `.hol/`, rewrites the template to the
+cache hit, holbuild copies blobs into local `.holbuild/`, rewrites the template to the
 canonical local `.dat` path, writes local `.uo/.ui` load manifests plus
 `HOLFileSys` remap copies, and recreates local
 `deps_loaded.save`/`final_context.save` checkpoints from the explicit HOL base
@@ -257,7 +264,7 @@ Materialization preference for v1:
 2. copy
 ```
 
-Avoid hardlinking cache blobs into project `.hol/`: even if cache blobs are meant
+Avoid hardlinking cache blobs into project `.holbuild/`: even if cache blobs are meant
 to be immutable, project outputs are the local materialized build view and should
 not be able to mutate global cache contents by accident. Build actions must never
 mutate installed cache-derived outputs in place. Write
@@ -302,8 +309,8 @@ uses a cache-local `locks/gc.lock` directory to avoid concurrent GC runs.
 PolyML heap checkpoints and `.save` files are local project artifacts for now:
 
 ```text
-.hol/heap/          optional user-requested exported heaps
-.hol/checkpoints/   local PolyML replay checkpoints
+.holbuild/heap/          optional user-requested exported heaps
+.holbuild/checkpoints/   local PolyML replay checkpoints
 ```
 
 Explicit heap targets are requested with `holbuild heap NAME` from `[[heap]]`
@@ -349,7 +356,7 @@ syntactic checkpoint:    if the action changed, where can replay resume?
 A holbuild checkpoint action keys replay eligibility by the exact source
 prefix/boundary identity, resolved dependency-context key, HOL/toolchain/base-state
 key, and checkpoint schema. Raw `.save` bytes are diagnostic only and must not be
-used as stable semantic keys. Checkpoints remain local under `.hol/checkpoints/`
+used as stable semantic keys. Checkpoints remain local under `.holbuild/checkpoints/`
 until their path/session sensitivity is understood well enough for sharing.
 
 The prototype currently instruments modern `Theorem ... Proof ... QED`

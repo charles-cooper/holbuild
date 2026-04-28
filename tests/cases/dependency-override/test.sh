@@ -55,12 +55,12 @@ SML
 
 (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build BTheory)
 
-require_file "$project/.hol/deps/dep/gen/src/ATheory.sig"
-require_file "$project/.hol/deps/dep/gen/src/ATheory.sml"
-require_file "$project/.hol/deps/dep/obj/src/ATheory.dat"
-require_file "$project/.hol/gen/src/BTheory.sig"
-require_file "$project/.hol/gen/src/BTheory.sml"
-require_file "$project/.hol/obj/src/BTheory.dat"
+require_file "$project/.holbuild/deps/dep/gen/src/ATheory.sig"
+require_file "$project/.holbuild/deps/dep/gen/src/ATheory.sml"
+require_file "$project/.holbuild/deps/dep/obj/src/ATheory.dat"
+require_file "$project/.holbuild/gen/src/BTheory.sig"
+require_file "$project/.holbuild/gen/src/BTheory.sml"
+require_file "$project/.holbuild/obj/src/BTheory.dat"
 
 second_log=$tmpdir/second.log
 (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build BTheory) > "$second_log"

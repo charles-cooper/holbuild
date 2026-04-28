@@ -77,8 +77,8 @@ if [[ -d "$HOLBUILD_CACHE/locks" ]] && find "$HOLBUILD_CACHE/locks" -mindepth 1 
 fi
 
 for project in "${projects[@]}"; do
-  require_file "$project/.hol/obj/src/ATheory.dat"
-  rm -rf "$project/.hol"
+  require_file "$project/.holbuild/obj/src/ATheory.dat"
+  rm -rf "$project/.holbuild"
 done
 
 run_parallel_builds restore "${projects[@]}"
@@ -86,5 +86,5 @@ run_parallel_builds restore "${projects[@]}"
 for project in "${projects[@]}"; do
   name=$(basename "$project")
   require_grep "ATheory restored from cache" "$tmpdir/restore-$name.log"
-  require_file "$project/.hol/obj/src/ATheory.dat"
+  require_file "$project/.holbuild/obj/src/ATheory.dat"
 done

@@ -35,7 +35,7 @@ first_log=$tmpdir/first.log
 (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$first_log" 2>&1 &
 first_pid=$!
 
-lock="$project/.hol/locks/project.lock"
+lock="$project/.holbuild/locks/project.lock"
 for _ in $(seq 1 100); do
   [[ -d "$lock" ]] && break
   sleep 0.05
@@ -56,7 +56,7 @@ require_grep "holbuild-project-lock-v1" "$second_log"
 
 wait "$first_pid"
 [[ ! -e "$lock" ]] || { echo "project lock survived successful build" >&2; exit 1; }
-require_file "$project/.hol/obj/src/ATheory.dat"
+require_file "$project/.holbuild/obj/src/ATheory.dat"
 
 third_log=$tmpdir/third.log
 (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$third_log" 2>&1

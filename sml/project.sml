@@ -324,7 +324,7 @@ fun override_to_string (Override {name, path}) = name ^ " -> " ^ path
 
 fun project_package ({root, manifest, name, members, ...} : t) =
   Package {name = Option.getOpt(name, "root"), root = root, manifest = manifest,
-           members = members, artifact_root = Path.concat(root, ".hol")}
+           members = members, artifact_root = Path.concat(root, ".holbuild")}
 
 fun dependency_project (project : t) (dep as Dependency {name, ...}) =
   let
@@ -356,7 +356,7 @@ fun dependency_package artifact_parent project (dep as Dependency {name, ...}) =
     val dep_project = dependency_project project dep
     val dep_root = valOf (dependency_local_path project dep)
     val dep_manifest = valOf (dependency_manifest project dep)
-    val artifact_root = Path.concat(Path.concat(artifact_parent, ".hol/deps"), name)
+    val artifact_root = Path.concat(Path.concat(artifact_parent, ".holbuild/deps"), name)
   in
     (Package {name = name, root = dep_root, manifest = dep_manifest,
               members = #members dep_project, artifact_root = artifact_root},

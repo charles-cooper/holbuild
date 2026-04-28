@@ -57,17 +57,17 @@ require_grep "Bar (sml" "$dry_log"
 require_grep "ATheory" "$dry_log"
 
 (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory)
-require_file "$project/.hol/obj/src/Foo.ui"
-require_file "$project/.hol/obj/src/Foo.uo"
-require_file "$project/.hol/obj/src/Bar.uo"
-require_file "$project/.hol/gen/src/ATheory.sml"
-require_file "$project/.hol/obj/src/ATheory.dat"
+require_file "$project/.holbuild/obj/src/Foo.ui"
+require_file "$project/.holbuild/obj/src/Foo.uo"
+require_file "$project/.holbuild/obj/src/Bar.uo"
+require_file "$project/.holbuild/gen/src/ATheory.sml"
+require_file "$project/.holbuild/obj/src/ATheory.dat"
 
-require_grep ".hol/obj/src/Foo" "$project/.hol/obj/src/Bar.uo"
-require_grep ".hol/obj/src/Bar" "$project/.hol/obj/src/ATheory.uo"
+require_grep ".holbuild/obj/src/Foo" "$project/.holbuild/obj/src/Bar.uo"
+require_grep ".holbuild/obj/src/Bar" "$project/.holbuild/obj/src/ATheory.uo"
 
 cat > "$tmpdir/load-internal-theory.sml" <<SML
-load "$project/.hol/obj/src/ATheory";
+load "$project/.holbuild/obj/src/ATheory";
 val _ = ATheory.a_thm;
 SML
 "$HOLDIR/bin/hol" run --noconfig --holstate "$HOLDIR/bin/hol.state" "$tmpdir/load-internal-theory.sml"

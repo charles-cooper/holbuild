@@ -48,16 +48,16 @@ val _ = export_theory();
 SML
 
 (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory)
-require_file "$project/.hol/checkpoints/replay/src/AScript.sml.a_thm_context.save"
-require_file "$project/.hol/checkpoints/replay/src/AScript.sml.a_thm_end_of_proof.save"
-require_file "$project/.hol/checkpoints/replay/src/AScript.sml.b_thm_context.save"
-require_file "$project/.hol/checkpoints/replay/src/AScript.sml.b_thm_end_of_proof.save"
-require_file "$project/.hol/checkpoints/replay/src/AScript.sml.c_thm_context.save"
-require_file "$project/.hol/checkpoints/replay/src/AScript.sml.c_thm_end_of_proof.save"
-require_grep "theorem_boundary a_thm" "$project/.hol/dep/replay/src/AScript.sml.key"
-require_grep "theorem_boundary c_thm" "$project/.hol/dep/replay/src/AScript.sml.key"
-require_grep "_end_of_proof.save" "$project/.hol/dep/replay/src/AScript.sml.key"
-require_grep "dependency_context_key=" "$project/.hol/dep/replay/src/AScript.sml.key"
+require_file "$project/.holbuild/checkpoints/replay/src/AScript.sml.a_thm_context.save"
+require_file "$project/.holbuild/checkpoints/replay/src/AScript.sml.a_thm_end_of_proof.save"
+require_file "$project/.holbuild/checkpoints/replay/src/AScript.sml.b_thm_context.save"
+require_file "$project/.holbuild/checkpoints/replay/src/AScript.sml.b_thm_end_of_proof.save"
+require_file "$project/.holbuild/checkpoints/replay/src/AScript.sml.c_thm_context.save"
+require_file "$project/.holbuild/checkpoints/replay/src/AScript.sml.c_thm_end_of_proof.save"
+require_grep "theorem_boundary a_thm" "$project/.holbuild/dep/replay/src/AScript.sml.key"
+require_grep "theorem_boundary c_thm" "$project/.holbuild/dep/replay/src/AScript.sml.key"
+require_grep "_end_of_proof.save" "$project/.holbuild/dep/replay/src/AScript.sml.key"
+require_grep "dependency_context_key=" "$project/.holbuild/dep/replay/src/AScript.sml.key"
 
 cat > "$tmpdir/check-proof-state.sml" <<'SML'
 val _ = proofManagerLib.b();
@@ -67,10 +67,10 @@ val _ =
     | _ => ();
 SML
 "$HOLDIR/bin/hol" run --noconfig \
-  --holstate "$project/.hol/checkpoints/replay/src/AScript.sml.b_thm_end_of_proof.save" \
+  --holstate "$project/.holbuild/checkpoints/replay/src/AScript.sml.b_thm_end_of_proof.save" \
   "$tmpdir/check-proof-state.sml"
 "$HOLDIR/bin/hol" run --noconfig \
-  --holstate "$project/.hol/checkpoints/replay/src/AScript.sml.c_thm_end_of_proof.save" \
+  --holstate "$project/.holbuild/checkpoints/replay/src/AScript.sml.c_thm_end_of_proof.save" \
   "$tmpdir/check-proof-state.sml"
 
 python3 - <<PY
@@ -83,9 +83,9 @@ PY
 replay_log=$tmpdir/replay.log
 (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$replay_log" 2>&1
 require_grep "ATheory replaying from checkpoint a_thm" "$replay_log"
-require_file "$project/.hol/gen/src/ATheory.sig"
-require_file "$project/.hol/gen/src/ATheory.sml"
-require_file "$project/.hol/obj/src/ATheory.dat"
+require_file "$project/.holbuild/gen/src/ATheory.sig"
+require_file "$project/.holbuild/gen/src/ATheory.sml"
+require_file "$project/.holbuild/obj/src/ATheory.dat"
 
 python3 - <<PY
 from pathlib import Path
@@ -100,8 +100,8 @@ if (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$failu
   exit 1
 fi
 require_grep "expected failure" "$failure_log"
-if [[ -e "$project/.hol/checkpoints/replay/src/AScript.sml.b_thm_context.save" || \
-      -e "$project/.hol/checkpoints/replay/src/AScript.sml.b_thm_end_of_proof.save" ]]; then
+if [[ -e "$project/.holbuild/checkpoints/replay/src/AScript.sml.b_thm_context.save" || \
+      -e "$project/.holbuild/checkpoints/replay/src/AScript.sml.b_thm_end_of_proof.save" ]]; then
   echo "stale b_thm checkpoint survived failed proof" >&2
   exit 1
 fi
