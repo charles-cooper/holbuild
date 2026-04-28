@@ -75,3 +75,10 @@ val _ = new_theory "B";
 val _ = export_theory();
 SML
 expect_build_failure mixed_cycle BTheory "dependency cycle: BTheory -> A -> BTheory"
+
+make_project unresolved_load
+cat > "$tmpdir/unresolved_load/src/A.sml" <<'SML'
+load "Missing";
+structure A = struct val x = 1 end
+SML
+expect_build_failure unresolved_load A "unresolved load Missing in cycles:src/A.sml"

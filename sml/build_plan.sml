@@ -41,6 +41,14 @@ fun selected_nodes nodes targets =
         List.concat (map find targets)
       end
 
+fun theory_name name =
+  let val suffix = "Theory"
+      val n = size name
+      val m = size suffix
+  in
+    n > m andalso String.substring(name, n - m, m) = suffix
+  end
+
 fun direct_dependency_names node =
   unique_strings (#theories (deps_of node) @ #loads (deps_of node))
 
@@ -76,7 +84,27 @@ fun direct_external_theories nodes node =
   let
     fun known name = not (null (nodes_named nodes name))
   in
-    List.filter (fn name => not (known name)) (direct_dependency_names node)
+    List.filter (fn name => not (known name)) (#theories (deps_of node))
+  end
+
+fun direct_unresolved_loads nodes node =
+  let
+    fun known name = not (null (nodes_named nodes name))
+    fun unresolved name = not (known name) andalso not (theory_name name)
+  in
+    List.filter unresolved (#loads (deps_of node))
+  end
+
+fun reject_unresolved_loads nodes plan =
+  let
+    fun check node =
+      case direct_unresolved_loads nodes node of
+          [] => ()
+        | load :: _ =>
+            raise Error ("unresolved load " ^ load ^ " in " ^
+                         package node ^ ":" ^ relative_path node)
+  in
+    List.app check plan
   end
 
 fun cycle_message path node =
@@ -99,8 +127,10 @@ fun topo_sort nodes roots =
         end
     val (_, _, order) =
       List.foldl (fn (root, state) => visit root state) ([], [], []) roots
+    val plan = rev order
   in
-    rev order
+    reject_unresolved_loads nodes plan;
+    plan
   end
 
 fun transitive_project_deps nodes node = topo_sort nodes (direct_project_deps nodes node)
