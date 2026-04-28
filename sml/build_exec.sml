@@ -161,7 +161,7 @@ fun load_project_line dep = "load " ^ HolbuildToolchain.sml_string dep ^ ";"
 
 fun project_preload_lines dep =
   case #kind (HolbuildBuildPlan.source_of dep) of
-      HolbuildSourceIndex.TheoryScript => use_generated_lines dep @ [fakeload_line (logical_name dep)]
+      HolbuildSourceIndex.TheoryScript => [load_project_line (load_stem dep)]
     | HolbuildSourceIndex.Sml => [load_project_line (load_stem dep)]
     | HolbuildSourceIndex.Sig => []
 
