@@ -21,6 +21,7 @@ This prototype is intentionally small:
 - rejects duplicate logical theory/module names across the resolved graph, except
   local `.sig`/`.sml` companion pairs
 - includes project `load "Module"` SML/SIG dependencies in build plans and internal load manifests
+- records generated theory ML dependencies from HOL theory metadata in internal load manifests
 - rejects source-level `use "file"` in project build actions; declare/load project modules instead
 - supports per-action policy for explicit logical dependencies/loadable modules, extra inputs, cache disabling, and always-rerun actions
 - computes prototype source/resolved-dependency input keys for planned actions

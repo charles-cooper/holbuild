@@ -194,9 +194,15 @@ fun write_preload plan node deps_loaded path =
     write_text path (String.concatWith "\n" lines ^ "\n")
   end
 
-fun write_final_context_loader {sig_path, sml_path, output, path} =
+fun mldep_report_lines NONE = []
+  | mldep_report_lines (SOME report_path) =
+      ["val holbuild_mldeps_out = TextIO.openOut " ^ HolbuildToolchain.sml_string report_path ^ ";",
+       "val _ = (List.app (fn s => TextIO.output(holbuild_mldeps_out, s ^ \"\\n\")) (Theory.current_ML_deps()); TextIO.closeOut holbuild_mldeps_out);"]
+
+fun write_final_context_loader {sig_path, sml_path, output, path, mldeps_report} =
   let
     val lines =
+      mldep_report_lines mldeps_report @
       ["use " ^ HolbuildToolchain.sml_string sig_path ^ ";",
        "use " ^ HolbuildToolchain.sml_string sml_path ^ ";",
        save_heap_line output]
@@ -403,14 +409,16 @@ fun cache_blob root path =
     hash
   end
 
-fun cache_manifest_text {input_key, sig_hash, sml_hash, dat_hash} =
+fun cache_manifest_text {input_key, sig_hash, sml_hash, dat_hash, mldeps} =
   String.concatWith "\n"
-    ["holbuild-cache-action-v1",
-     "input_key=" ^ input_key,
-     "kind=theory",
-     "blob sig " ^ sig_hash,
-     "blob sml-template " ^ sml_hash,
-     "blob dat " ^ dat_hash] ^ "\n"
+    (["holbuild-cache-action-v1",
+      "input_key=" ^ input_key,
+      "kind=theory",
+      "mldeps"] @
+     map (fn dep => "mldep " ^ dep) mldeps @
+     ["blob sig " ^ sig_hash,
+      "blob sml-template " ^ sml_hash,
+      "blob dat " ^ dat_hash]) ^ "\n"
 
 fun cache_manifest_lines text = String.tokens (fn c => c = #"\n") text
 
@@ -455,37 +463,52 @@ fun blob_from_manifest role blobs =
       SOME (_, hash) => hash
     | NONE => raise Error ("cache manifest missing blob role: " ^ role)
 
-fun parse_cache_manifest_line input_key line (saw_header, saw_input, saw_kind, blobs) =
+fun valid_mldep_name dep =
+  dep <> "" andalso all_chars (fn c => not (Char.isSpace c)) dep
+
+fun add_mldep dep deps =
+  if not (valid_mldep_name dep) then
+    raise Error ("cache manifest invalid mldep: " ^ dep)
+  else if List.exists (fn existing => existing = dep) deps then deps
+  else dep :: deps
+
+fun parse_cache_manifest_line input_key line (saw_header, saw_input, saw_kind, saw_mldeps, blobs, mldeps) =
   if line = "holbuild-cache-action-v1" then
     if saw_header then raise Error "cache manifest duplicate header"
-    else (true, saw_input, saw_kind, blobs)
+    else (true, saw_input, saw_kind, saw_mldeps, blobs, mldeps)
   else if line = "input_key=" ^ input_key then
     if saw_input then raise Error "cache manifest duplicate input key"
-    else (saw_header, true, saw_kind, blobs)
+    else (saw_header, true, saw_kind, saw_mldeps, blobs, mldeps)
   else if String.isPrefix "input_key=" line then
     raise Error "cache manifest input key mismatch"
   else if line = "kind=theory" then
     if saw_kind then raise Error "cache manifest duplicate kind"
-    else (saw_header, saw_input, true, blobs)
+    else (saw_header, saw_input, true, saw_mldeps, blobs, mldeps)
   else if String.isPrefix "kind=" line then
     raise Error "cache manifest unsupported kind"
+  else if line = "mldeps" then
+    if saw_mldeps then raise Error "cache manifest duplicate mldeps marker"
+    else (saw_header, saw_input, saw_kind, true, blobs, mldeps)
   else
     case String.tokens Char.isSpace line of
-        ["blob", role, hash] => (saw_header, saw_input, saw_kind, add_manifest_blob role hash blobs)
+        ["mldep", dep] => (saw_header, saw_input, saw_kind, saw_mldeps, blobs, add_mldep dep mldeps)
+      | ["blob", role, hash] => (saw_header, saw_input, saw_kind, saw_mldeps, add_manifest_blob role hash blobs, mldeps)
       | _ => raise Error ("cache manifest unknown line: " ^ line)
 
 fun cache_manifest_blobs_from_lines input_key lines =
   let
-    val (saw_header, saw_input, saw_kind, blobs) =
+    val (saw_header, saw_input, saw_kind, saw_mldeps, blobs, mldeps) =
       List.foldl (fn (line, state) => parse_cache_manifest_line input_key line state)
-                 (false, false, false, []) lines
+                 (false, false, false, false, [], []) lines
     val _ = if saw_header then () else raise Error "cache manifest missing header"
     val _ = if saw_input then () else raise Error "cache manifest missing input key"
     val _ = if saw_kind then () else raise Error "cache manifest missing kind"
+    val _ = if saw_mldeps then () else raise Error "cache manifest missing mldeps marker"
   in
     {sig_hash = blob_from_manifest "sig" blobs,
      sml_hash = blob_from_manifest "sml-template" blobs,
-     dat_hash = blob_from_manifest "dat" blobs}
+     dat_hash = blob_from_manifest "dat" blobs,
+     mldeps = rev mldeps}
   end
 
 fun cache_manifest_blobs root input_key =
@@ -494,7 +517,7 @@ fun cache_manifest_blobs root input_key =
 
 fun cache_entry_usable root input_key text =
   let
-    val {sig_hash, sml_hash, dat_hash} =
+    val {sig_hash, sml_hash, dat_hash, ...} =
       cache_manifest_blobs_from_lines input_key (cache_manifest_lines text)
   in
     file_hash_matches (HolbuildCache.blob_path root sig_hash) sig_hash andalso
@@ -513,7 +536,7 @@ fun copy_blob root hash dst =
     else raise Error ("cache blob missing or corrupt: " ^ hash)
   end
 
-fun publish_theory_cache input_key staged_dat_ref staged_sig staged_sml staged_dat =
+fun publish_theory_cache input_key staged_dat_ref staged_sig staged_sml staged_dat mldeps =
   let
     val root = cache_root ()
     val _ = HolbuildCache.ensure_layout root
@@ -526,7 +549,8 @@ fun publish_theory_cache input_key staged_dat_ref staged_sig staged_sml staged_d
         val sml_hash = cache_blob root template
         val dat_hash = cache_blob root staged_dat
         val manifest = cache_manifest_text {input_key = input_key, sig_hash = sig_hash,
-                                            sml_hash = sml_hash, dat_hash = dat_hash}
+                                            sml_hash = sml_hash, dat_hash = dat_hash,
+                                            mldeps = mldeps}
         val manifest_path = HolbuildCache.action_manifest root input_key
         val existing = current_metadata manifest_path
       in
@@ -546,12 +570,35 @@ fun publish_theory_cache input_key staged_dat_ref staged_sig staged_sml staged_d
     handle e => (cleanup (); warn ("could not publish cache entry: " ^ General.exnMessage e))
   end
 
-fun write_local_theory_manifests plan node =
+fun project_node_named plan name =
+  List.find (fn candidate => HolbuildBuildPlan.logical_name candidate = name) plan
+
+fun mldep_load_stem plan dep =
+  case project_node_named plan dep of
+      SOME node => load_stem node
+    | NONE => dep
+
+fun mldep_load_stems plan mldeps = unique_strings (map (mldep_load_stem plan) mldeps)
+
+fun read_mldeps_report path =
+  let
+    val deps = String.tokens (fn c => c = #"\n") (read_text path)
+    val _ =
+      List.app
+        (fn dep => if valid_mldep_name dep then ()
+                   else raise Error ("invalid generated theory ML dependency: " ^ dep))
+        deps
+  in
+    unique_strings deps
+  end
+
+fun write_local_theory_manifests plan node mldeps =
   let
     val {sig_path, sml_path, script_uo, theory_ui, theory_uo, ...} = theory_outputs node
     val deps = HolbuildBuildPlan.direct_project_deps plan node
     val theory_loads = HolbuildBuildPlan.direct_external_theories plan node @
-                       project_theory_load_stems deps
+                       project_theory_load_stems deps @
+                       mldep_load_stems plan mldeps
     val script_loads = direct_external_loads plan node @ project_load_stems deps
   in
     write_object_manifest theory_ui [sig_path];
@@ -573,7 +620,8 @@ fun save_cached_theory_checkpoints tc project base_context plan input_key node =
     ensure_parent final_context;
     write_preload plan node deps_loaded preload;
     write_final_context_loader {sig_path = sig_path, sml_path = sml_path,
-                                output = final_context, path = final_loader};
+                                output = final_context, path = final_loader,
+                                mldeps_report = NONE};
     run_hol_files tc stage base_context [preload, final_loader]
       "hol run failed while saving cached theory checkpoints";
     remove_tree stage
@@ -601,7 +649,7 @@ fun materialize_theory_cache tc project base_context plan input_key node =
     val manifest = HolbuildCache.action_manifest root input_key
     val _ = if file_exists manifest then () else raise Error "cache entry not found"
     val _ = FS.setTime (manifest, NONE) handle OS.SysErr _ => ()
-    val {sig_hash, sml_hash, dat_hash} = cache_manifest_blobs root input_key
+    val {sig_hash, sml_hash, dat_hash, mldeps} = cache_manifest_blobs root input_key
     val {sig_path, sml_path, data_path, ...} = theory_outputs node
     val template = FS.tmpName ()
     fun cleanup () = FS.remove template handle OS.SysErr _ => ()
@@ -613,7 +661,7 @@ fun materialize_theory_cache tc project base_context plan input_key node =
        copy_blob root sml_hash template;
        write_text sml_path (replace_all cache_sml_token data_path (read_text template));
        write_text (hfs_remapped_path sml_path) (read_text sml_path);
-       write_local_theory_manifests plan node;
+       write_local_theory_manifests plan node mldeps;
        save_cached_theory_checkpoints tc project base_context plan input_key node;
        print (logical_name node ^ " restored from cache\n");
        true)
@@ -702,7 +750,7 @@ fun dependency_context_key toolchain_key plan keys node =
   in
     HolbuildToolchain.hash_text
       (String.concatWith "\n"
-         (["holbuild-dependency-context-v2",
+         (["holbuild-dependency-context-v1",
            "toolchain_key=" ^ toolchain_key] @ project_lines @ theory_lines @ lib_lines) ^ "\n")
   end
 
@@ -789,6 +837,7 @@ fun build_theory tc project base_context plan keys toolchain_key node source_tex
     val staged_script = Path.concat(stage, Path.file (source_file node))
     val preload = Path.concat(stage, "holbuild-preload.sml")
     val final_loader = Path.concat(stage, "holbuild-save-final-context.sml")
+    val mldeps_report = Path.concat(stage, "holbuild-theory-mldeps.txt")
     val deps_loaded = deps_loaded_path project node
     val final_context = final_context_path project node
     val {sig_path, sml_path, data_path, script_uo, theory_ui, theory_uo} = theory_outputs node
@@ -803,7 +852,8 @@ fun build_theory tc project base_context plan keys toolchain_key node source_tex
                      theorem_checkpoints
     val _ = write_final_context_loader
               {sig_path = staged_sig, sml_path = staged_sml,
-               output = final_context, path = final_loader}
+               output = final_context, path = final_loader,
+               mldeps_report = SOME mldeps_report}
     val run_spec = write_theory_script tc project base_context plan keys toolchain_key node
                                     source_text theorem_checkpoints staged_script preload
     fun remove_theorem_checkpoint {context_path, end_of_proof_path, ...} =
@@ -833,12 +883,13 @@ fun build_theory tc project base_context plan keys toolchain_key node source_tex
                                  old_path = staged_dat_reference stage node,
                                  new_path = data_path}
     val _ = copy_binary sml_path (hfs_remapped_path sml_path)
+    val mldeps = read_mldeps_report mldeps_report
     val _ =
       if cache_enabled node then
-        publish_theory_cache input_key (staged_dat_reference stage node) staged_sig staged_sml staged_dat
+        publish_theory_cache input_key (staged_dat_reference stage node) staged_sig staged_sml staged_dat mldeps
       else ()
   in
-    write_local_theory_manifests plan node;
+    write_local_theory_manifests plan node mldeps;
     remove_tree stage
   end
 

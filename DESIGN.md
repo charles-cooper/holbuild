@@ -292,12 +292,15 @@ Path-sensitive files are generated or rebased for this local layout. In
 particular, `.uo`/`.ui` files and generated `Theory.sml` files may contain paths
 and should not be treated as portable semantic truth. Project SML/SIG modules are
 built as internal load manifests: `load "Module"` references are resolved against
-the project graph, not against ambient include paths. Source-level `use "file"`
-is rejected in project build actions in v1 because it is an arbitrary path/input
-outside the resolved package graph; declare a project module and `load` it
-instead. `.sml` files get a `.uo` plus an empty companion `.ui` unless a real
-`.sig` companion exists, and same-name signatures are implicit dependencies of
-their implementation. HOL's current
+the project graph, not against ambient include paths. Generated theory modules
+also get internal load manifests from HOL's recorded theory metadata
+(`Theory.current_ML_deps` / `Theory.add_ML_dependency`), so legitimate generated
+`local open ...` dependencies are preserved without parsing generated SML text.
+Source-level `use "file"` is rejected in project build actions in v1 because it
+is an arbitrary path/input outside the resolved package graph; declare a project
+module and `load` it instead. `.sml` files get a `.uo` plus an empty companion
+`.ui` unless a real `.sig` companion exists, and same-name signatures are
+implicit dependencies of their implementation. HOL's current
 `HOLFileSys` remaps `.uo`/`.ui` and files ending in
 `Theory.dat`/`.sml`/`.sig` through `.hol/objs`, so a project-level layout may
 need auxiliary internal load paths or rewritten non-semantic load copies while
