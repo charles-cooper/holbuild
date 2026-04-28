@@ -28,7 +28,7 @@ This prototype is intentionally small:
 - executes simple theory-script builds into project `.holbuild/` without Holmake
 - records local action metadata and skips unchanged actions
 - publishes/restores simple theory semantic artifacts through the global cache
-- includes the resolved base context/toolchain in prototype action keys
+- includes the resolved holbuild-produced base context/toolchain in prototype action keys
 - saves local theory checkpoints: dependencies-loaded, AST-derived theorem end-of-proof/context checkpoints for modern theorem declarations, and successor-ready final context
 - exports explicit project heap targets from `[[heap]]` entries using local SaveState
 - exposes `holbuild cache gc` with a 7-day default global-cache retention policy
@@ -37,9 +37,10 @@ This prototype is intentionally small:
 - delegates execution to `$HOLDIR/bin/hol run` / `hol repl` for now
 
 The external prototype requires a HOL checkout or installation via `HOLDIR` so it
-can reuse HOL tooling. User-project builds currently treat that installed HOL
-state as an external base context; root-HOL bootstrap is modeled separately in
-`DESIGN.md` and must not rebuild core theories from the configured full HOL heap.
+can reuse HOL tooling. The target design does not use configured HOL heaps such
+as `hol.state` as semantic build bases: build contexts should come from PolyML/no
+HOL state, predecessor checkpoints, or validated shared dependency state. Current
+code still has transitional hardwiring here; see `DESIGN.md`.
 
 ## Build
 
@@ -104,8 +105,8 @@ does not require a HOL toolchain.
 See `DESIGN.md` for the intended long-term model: manifest-based package
 resolution, project-local `.holbuild/` materialization, action-key invalidation,
 root-HOL migration through an explicit/default HOL manifest, and an optional
-global cache that never changes build semantics. A root-HOL manifest sketch lives
-under `examples/root-hol/`.
+global cache that can share validated dependency state without changing build
+semantics. A root-HOL manifest sketch lives under `examples/root-hol/`.
 
 ## Example `holproject.toml`
 
@@ -198,7 +199,7 @@ Incremental correctness is action-key based. `holbuild` does not use
 loading resolved ancestors and saving PolyML checkpoints at syntactic boundaries:
 dependencies loaded, AST-derived theorem end-of-proof/context boundaries for
 modern `Theorem ... Proof ... QED` declarations, and successor-ready final
-context, stored locally under `.holbuild/checkpoints/`. Simple theorem-producing
+context, materialized under `.holbuild/checkpoints/`. Simple theorem-producing
 forms such as `Theorem name = thm` still build normally but are not theorem
 checkpoint boundaries in v1. When a script is dirty but a previous theorem-context
 prefix still matches exactly, holbuild can replay from that checkpoint instead
@@ -207,9 +208,10 @@ of from the dependency-loaded state. Explicit
 generated theory modules, and save the requested heap with PolyML SaveState.
 
 The optional global cache stores simple theory semantic artifacts by action key:
-`Theory.sig`, a path-rebased `Theory.sml` template, and `Theory.dat`. On a cache
-hit, holbuild materializes those artifacts into local `.holbuild/`, writes local load
-manifests, and recreates local checkpoints from the generated theory module.
+`Theory.sig`, a path-rebased `Theory.sml` template, and `Theory.dat`. The target
+model also shares validated successor-ready dependency state. On a cache hit,
+holbuild materializes artifacts/checkpoints into local `.holbuild/`, writes local
+load manifests, and validates the restored state before dependents use it.
 `holbuild cache gc` removes stale temporary entries, stale action manifests, and
 old unreferenced blobs after 7 days by default.
 
