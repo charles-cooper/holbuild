@@ -80,8 +80,12 @@ require_file "$project/.holbuild/obj/src/ATheory.dat"
 require_grep ".holbuild/obj/src/Foo" "$project/.holbuild/obj/src/Bar.uo"
 require_grep ".holbuild/obj/src/Foo" "$project/.holbuild/obj/src/Baz.uo"
 require_grep "numLib" "$project/.holbuild/obj/src/Baz.uo"
-require_grep ".holbuild/obj/src/Bar" "$project/.holbuild/obj/src/ATheory.uo"
-require_grep ".holbuild/obj/src/Baz" "$project/.holbuild/obj/src/ATheory.uo"
+require_grep ".holbuild/obj/src/Bar" "$project/.holbuild/obj/src/AScript.uo"
+require_grep ".holbuild/obj/src/Baz" "$project/.holbuild/obj/src/AScript.uo"
+if grep -q ".holbuild/obj/src/Bar\|.holbuild/obj/src/Baz" "$project/.holbuild/obj/src/ATheory.uo"; then
+  echo "source-only project loads leaked into generated theory load manifest" >&2
+  exit 1
+fi
 
 cat > "$tmpdir/load-internal-theory.sml" <<SML
 load "$project/.holbuild/obj/src/ATheory";

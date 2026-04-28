@@ -247,7 +247,7 @@ fun action_text toolchain_key nodes keys node =
              file_hash (HolbuildProject.extra_input_absolute_path input))
           extra_inputs
     val lines =
-      ["holbuild-action-v1",
+      ["holbuild-action-v2",
        "toolchain=" ^ toolchain_key,
        "kind=" ^ kind_name source,
        "package=" ^ #package source,

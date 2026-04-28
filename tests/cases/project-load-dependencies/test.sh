@@ -73,7 +73,11 @@ require_file "$project/.holbuild/deps/lib/obj/src/Foo.uo"
 require_file "$project/.holbuild/obj/src/Bar.uo"
 require_file "$project/.holbuild/obj/src/ATheory.dat"
 require_grep ".holbuild/deps/lib/obj/src/Foo" "$project/.holbuild/obj/src/Bar.uo"
-require_grep ".holbuild/obj/src/Bar" "$project/.holbuild/obj/src/ATheory.uo"
+require_grep ".holbuild/obj/src/Bar" "$project/.holbuild/obj/src/AScript.uo"
+if grep -q ".holbuild/obj/src/Bar" "$project/.holbuild/obj/src/ATheory.uo"; then
+  echo "source-only cross-package load leaked into generated theory load manifest" >&2
+  exit 1
+fi
 
 cat > "$tmpdir/load-internal-theory.sml" <<SML
 load "$project/.holbuild/obj/src/ATheory";

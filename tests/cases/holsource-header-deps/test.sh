@@ -36,6 +36,18 @@ QED
 
 val _ = export_theory();
 SML
+cat > "$project/src/BScript.sml" <<'SML'
+Theory B
+Ancestors A
+
+Theorem two:
+  2 = 2
+Proof
+  simp[]
+QED
+
+val _ = export_theory();
+SML
 
 (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --dry-run ATheory) > "$tmpdir/dry.log"
 require_grep "external theories: arithmeticTheory, stringTheory" "$tmpdir/dry.log"
@@ -45,9 +57,18 @@ if grep -q "ignore_grammar\|qualified\|identifier" "$tmpdir/dry.log"; then
   exit 1
 fi
 
-(cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$tmpdir/build.log"
+(cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build BTheory) > "$tmpdir/build.log"
 require_file "$project/.holbuild/gen/src/ATheory.sml"
 require_file "$project/.holbuild/obj/src/ATheory.dat"
+require_file "$project/.holbuild/obj/src/BTheory.dat"
 require_grep "numLib" "$project/.holbuild/obj/src/AScript.uo"
-require_grep "numLib" "$project/.holbuild/obj/src/ATheory.uo"
+require_grep "arithmeticTheory" "$project/.holbuild/obj/src/ATheory.uo"
+if grep -q "numLib" "$project/.holbuild/obj/src/ATheory.uo"; then
+  echo "source Libs leaked into generated theory load manifest" >&2
+  exit 1
+fi
+if grep -q "numLib" "$project/.holbuild/obj/src/BTheory.uo"; then
+  echo "dependency source Libs leaked into dependent theory load manifest" >&2
+  exit 1
+fi
 require_grep "dependency_context_key=" "$project/.holbuild/dep/headerdeps/src/AScript.sml.key"

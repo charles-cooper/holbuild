@@ -155,6 +155,12 @@ fun unique_strings values = rev (List.foldl add_unique_string [] values)
 fun project_load_stems deps =
   unique_strings (map load_stem (List.filter loadable_project_dep deps))
 
+fun theory_project_dep dep =
+  #kind (HolbuildBuildPlan.source_of dep) = HolbuildSourceIndex.TheoryScript
+
+fun project_theory_load_stems deps =
+  unique_strings (map load_stem (List.filter theory_project_dep deps))
+
 fun fakeload_line name = "Meta.fakeload " ^ HolbuildToolchain.sml_string name ^ ";"
 
 fun load_project_line dep = "load " ^ HolbuildToolchain.sml_string dep ^ ";"
@@ -170,10 +176,15 @@ fun save_heap_line output =
   HolbuildToolchain.sml_string output ^
   ", length (PolyML.SaveState.showHierarchy()));"
 
+fun direct_external_loads plan node =
+  unique_strings
+    (HolbuildBuildPlan.direct_external_theories plan node @
+     HolbuildBuildPlan.direct_external_libs plan node)
+
 fun write_preload plan node deps_loaded path =
   let
-    val external_deps = HolbuildBuildPlan.closure_external_theories plan node
-    val external_libs = HolbuildBuildPlan.closure_external_libs plan node
+    val external_deps = HolbuildBuildPlan.direct_external_theories plan node
+    val external_libs = HolbuildBuildPlan.direct_external_libs plan node
     val project_deps = HolbuildBuildPlan.transitive_project_deps plan node
     val lines = map load_theory_line external_deps @
                 map load_project_line external_libs @
@@ -539,11 +550,13 @@ fun write_local_theory_manifests plan node =
   let
     val {sig_path, sml_path, script_uo, theory_ui, theory_uo, ...} = theory_outputs node
     val deps = HolbuildBuildPlan.direct_project_deps plan node
-    val external_libs = HolbuildBuildPlan.closure_external_libs plan node
+    val theory_loads = HolbuildBuildPlan.direct_external_theories plan node @
+                       project_theory_load_stems deps
+    val script_loads = direct_external_loads plan node @ project_load_stems deps
   in
     write_object_manifest theory_ui [sig_path];
-    write_object_manifest theory_uo (external_libs @ project_load_stems deps @ [sml_path]);
-    write_object_manifest script_uo (external_libs @ [source_file node])
+    write_object_manifest theory_uo (theory_loads @ [sml_path]);
+    write_object_manifest script_uo (script_loads @ [source_file node])
   end
 
 fun save_cached_theory_checkpoints tc project base_context plan input_key node =
@@ -679,16 +692,18 @@ fun theorem_checkpoint_specs project node boundaries =
 fun dependency_context_key toolchain_key plan keys node =
   let
     val project_deps = HolbuildBuildPlan.transitive_project_deps plan node
-    val external_deps = HolbuildBuildPlan.closure_external_theories plan node
+    val external_theories = HolbuildBuildPlan.direct_external_theories plan node
+    val external_libs = HolbuildBuildPlan.direct_external_libs plan node
     val project_lines = map (fn dep => "project " ^ HolbuildBuildPlan.key dep ^ " " ^
                                        HolbuildBuildPlan.input_key_for keys dep)
                             project_deps
-    val external_lines = map (fn dep => "external " ^ dep) external_deps
+    val theory_lines = map (fn dep => "external_theory " ^ dep) external_theories
+    val lib_lines = map (fn dep => "external_lib " ^ dep) external_libs
   in
     HolbuildToolchain.hash_text
       (String.concatWith "\n"
-         (["holbuild-dependency-context-v1",
-           "toolchain_key=" ^ toolchain_key] @ project_lines @ external_lines) ^ "\n")
+         (["holbuild-dependency-context-v2",
+           "toolchain_key=" ^ toolchain_key] @ project_lines @ theory_lines @ lib_lines) ^ "\n")
   end
 
 fun metadata_lines text = String.tokens (fn c => c = #"\n") text
@@ -845,9 +860,9 @@ fun build_sml_like plan node output_suffix =
   let
     val output = one_with_suffix output_suffix (#objects (source_artifacts node))
     val deps = HolbuildBuildPlan.direct_project_deps plan node
-    val external_libs = HolbuildBuildPlan.closure_external_libs plan node
+    val external_loads = direct_external_loads plan node
   in
-    write_object_manifest output (external_libs @ project_load_stems deps @ [source_file node]);
+    write_object_manifest output (external_loads @ project_load_stems deps @ [source_file node]);
     if output_suffix = ".uo" then write_empty_ui_if_needed plan node else ()
   end
 
@@ -1107,7 +1122,7 @@ fun build tc project plan toolchain_key jobs =
   end
 
 fun heap_external_theories plan =
-  unique_strings (List.concat (map (HolbuildBuildPlan.closure_external_theories plan) plan))
+  unique_strings (List.concat (map (HolbuildBuildPlan.direct_external_theories plan) plan))
 
 fun heap_theory_load_lines node =
   case #kind (HolbuildBuildPlan.source_of node) of
