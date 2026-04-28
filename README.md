@@ -44,6 +44,16 @@ make HOLDIR=/path/to/HOL test
 HOLBUILD_TEST_JOBS=16 make HOLDIR=/path/to/HOL test
 ```
 
+Optional install:
+
+```sh
+make HOLDIR=/path/to/HOL install
+```
+
+This installs only the `holbuild` executable to `$HOME/.local/bin/holbuild` by
+default. Override with `PREFIX`, `BINDIR`, or `DESTDIR` if needed. Runtime HOL
+selection still uses `--holdir PATH`, `HOLBUILD_HOLDIR`, or `HOLDIR`.
+
 The compiler loads HOL's existing SML TOML parser from `$(HOLDIR)` and embeds it
 in `bin/holbuild`. Tests live under `tests/cases/*/test.sh` so they can move into
 HOL's selftest layout with minimal reshaping; `tests/run.sh` is the repo-local

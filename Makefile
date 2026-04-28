@@ -1,7 +1,9 @@
 HOLDIR ?= $(HOLBUILD_HOLDIR)
 POLYC ?= polyc
+PREFIX ?= $(HOME)/.local
+BINDIR ?= $(PREFIX)/bin
 
-.PHONY: all test clean
+.PHONY: all install uninstall test clean
 
 all: bin/holbuild
 
@@ -9,6 +11,13 @@ bin/holbuild: sml/holbuild-script.sml sml/project.sml sml/source_index.sml sml/d
 	@test -n "$(HOLDIR)" || (echo "Set HOLDIR=/path/to/HOL or HOLBUILD_HOLDIR" >&2; exit 1)
 	@mkdir -p bin
 	HOLBUILD_HOLDIR="$(HOLDIR)" $(POLYC) -o $@ sml/holbuild-script.sml
+
+install: bin/holbuild
+	install -d "$(DESTDIR)$(BINDIR)"
+	install -m 755 bin/holbuild "$(DESTDIR)$(BINDIR)/holbuild"
+
+uninstall:
+	rm -f "$(DESTDIR)$(BINDIR)/holbuild"
 
 test: bin/holbuild
 	HOLDIR="$(HOLDIR)" tests/run.sh
