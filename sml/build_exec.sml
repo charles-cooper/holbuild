@@ -608,7 +608,10 @@ fun theorem_discovery_script {source_path, report_path} =
      "  case #parseDec holbuild_result () of",
      "      NONE => ()",
      "    | SOME (HOLSourceAST.HOLTheoremDecl {theorem_, id = (_, name), proof_, tac, stop, ...}) =>",
-     "        let val (tac_start, tac_end) = HOLSourceAST.expSpan tac in holbuild_emit_theorem name theorem_ stop tac_start tac_end (Option.isSome proof_); holbuild_loop () end",
+     "        let",
+     "          val (tac_start, tac_end) = HOLSourceAST.expSpan tac",
+     "          val has_attrs = case proof_ of SOME {attrs = SOME _, ...} => true | _ => false",
+     "        in holbuild_emit_theorem name theorem_ stop tac_start tac_end has_attrs; holbuild_loop () end",
      "    | SOME _ => holbuild_loop ();",
      "val _ = (holbuild_loop (); TextIO.closeOut holbuild_out);",
      ""]

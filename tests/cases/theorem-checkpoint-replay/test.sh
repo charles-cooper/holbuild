@@ -65,6 +65,14 @@ if grep -q "theorem_boundary simple_thm" "$project/.holbuild/dep/replay/src/AScr
   exit 1
 fi
 
+cat > "$tmpdir/check-fragmented-proof-state.sml" <<'SML'
+val _ = proofManagerLib.b();
+val _ = proofManagerLib.b();
+val _ =
+  case proofManagerLib.top_goals() of
+      [] => raise Fail "end-of-proof checkpoint has no multi-step goalfrag history"
+    | _ => ();
+SML
 cat > "$tmpdir/check-proof-state.sml" <<'SML'
 val _ = proofManagerLib.b();
 val _ =
@@ -74,7 +82,7 @@ val _ =
 SML
 "$HOLDIR/bin/hol" run --noconfig \
   --holstate "$project/.holbuild/checkpoints/replay/src/AScript.sml.b_thm_end_of_proof.save" \
-  "$tmpdir/check-proof-state.sml"
+  "$tmpdir/check-fragmented-proof-state.sml"
 "$HOLDIR/bin/hol" run --noconfig \
   --holstate "$project/.holbuild/checkpoints/replay/src/AScript.sml.c_thm_end_of_proof.save" \
   "$tmpdir/check-proof-state.sml"

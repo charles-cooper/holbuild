@@ -92,6 +92,23 @@ root HOL cannot rely on load-path order to distinguish two `FooTheory` or `Foo`
 modules. If historical layout contains such ambiguity, the transition has to make
 that identity explicit or keep the subtree outside project mode until resolved.
 
+A source audit of `$HOLDIR/src` with `HOLSourceParser` plus a
+comment/string-aware token pass parsed all 1166 non-generated `.sml` files and
+found 356 theory scripts. The scripts contain 23,179 modern
+`Theorem ... Proof ... QED` declarations, 1,701 simple `Theorem name = thm`
+declarations, 10 `Resume` declarations, and 7 `Finalise` declarations. Literal or
+dynamic `load`/`use` calls did not appear in theory scripts; older theorem APIs
+are present but much smaller in scripts (`store_thm`: 27 calls, `save_thm`: 23,
+`Q.store_thm`: 1). This makes AST-derived modern-theorem checkpointing the
+highest-value proof-navigation target for root HOL; simple theorem and
+`store_thm`-style declarations should remain ordinary build replay until there is
+an AST/proof-state model for them.
+
+The same token pass found non-script examples and libraries with literal/dynamic
+`load` calls, dynamic `use` calls, file writes, process calls, and other side
+effects. A root-HOL manifest should classify such tooling/examples/tests
+explicitly instead of treating them as pure cacheable theory-script actions.
+
 ## Source model
 
 Standard theory convention:
