@@ -23,8 +23,10 @@ members = ["src"]
 TOML
 cat > "$project/src/AScript.sml" <<'SML'
 Theory A
-Ancestors arithmetic
+Ancestors arithmetic string
 Libs numLib
+
+Type identifier = “:string”;
 
 Theorem add_one:
   1 + 1 = 2
@@ -36,8 +38,12 @@ val _ = export_theory();
 SML
 
 (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --dry-run ATheory) > "$tmpdir/dry.log"
-require_grep "external theories: arithmeticTheory" "$tmpdir/dry.log"
+require_grep "external theories: arithmeticTheory, stringTheory" "$tmpdir/dry.log"
 require_grep "external libs: numLib" "$tmpdir/dry.log"
+if grep -q "identifier" "$tmpdir/dry.log"; then
+  echo "HOLSource Type declaration was misclassified as a library" >&2
+  exit 1
+fi
 
 (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$tmpdir/build.log"
 require_file "$project/.holbuild/gen/src/ATheory.sml"

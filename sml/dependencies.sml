@@ -139,7 +139,7 @@ fun extract_string_args keyword tokens =
 fun header_stop_word word =
   List.exists (fn stop => stop = word)
     ["val", "fun", "open", "local", "structure", "signature", "datatype",
-     "type", "exception", "Definition", "Theorem", "Triviality", "Lemma",
+     "type", "exception", "Type", "Definition", "Theorem", "Triviality", "Lemma",
      "Corollary", "Datatype", "Overload", "Inductive", "CoInductive",
      "End", "Resume", "Finalise"]
 
