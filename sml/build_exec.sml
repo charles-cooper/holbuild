@@ -331,11 +331,18 @@ fun file_hash path = SHA1_ML.sha1_file {filename = path}
 
 fun current_metadata path = SOME (read_text path) handle IO.Io _ => NONE
 
-fun run_hol_files tc stage holstate files error_message =
+datatype hol_context = PolyBase | HolState of string
+
+fun hol_context_args context =
+  case context of
+      PolyBase => ["--poly"]
+    | HolState path => ["--holstate", path]
+
+fun run_hol_files tc stage context files error_message =
   let
     val status =
       HolbuildToolchain.run_in_dir stage
-        ([HolbuildToolchain.hol tc, "run", "--noconfig", "--holstate", holstate] @ files)
+        ([HolbuildToolchain.hol tc, "run", "--noconfig"] @ hol_context_args context @ files)
   in
     if HolbuildToolchain.success status then ()
     else raise Error error_message
@@ -528,7 +535,7 @@ fun save_cached_theory_checkpoints tc project plan input_key node =
     write_preload plan node deps_loaded preload;
     write_final_context_loader {sig_path = sig_path, sml_path = sml_path,
                                 output = final_context, path = final_loader};
-    run_hol_files tc stage (HolbuildToolchain.base_state tc) [preload, final_loader]
+    run_hol_files tc stage (HolState (HolbuildToolchain.base_state tc)) [preload, final_loader]
       "hol run failed while saving cached theory checkpoints";
     remove_tree stage
   end
@@ -624,7 +631,7 @@ fun discover_theorem_boundaries tc stage source_path source_text =
     val script = Path.concat(stage, "holbuild-discover-theorems.sml")
     val report_path = Path.concat(stage, "holbuild-theorems.tsv")
     val _ = write_text script (theorem_discovery_script {source_path = source_path, report_path = report_path})
-    val _ = run_hol_files tc stage (HolbuildToolchain.base_state tc) [script]
+    val _ = run_hol_files tc stage (HolState (HolbuildToolchain.base_state tc)) [script]
               "hol run failed while discovering theorem AST boundaries"
     val report = read_text report_path handle IO.Io _ => ""
   in
@@ -727,12 +734,12 @@ fun write_theory_script tc project plan keys toolchain_key node source_text chec
           val _ = write_text staged_script (instrumented_source source_text boundary checkpoints)
           val _ = print (logical_name node ^ " replaying from checkpoint " ^ safe_name ^ "\n")
         in
-          {holstate = path, files = [staged_script]}
+          {context = HolState path, files = [staged_script]}
         end
     | NONE =>
         (write_preload plan node (deps_loaded_path project node) preload;
          write_text staged_script (instrumented_source source_text 0 checkpoints);
-         {holstate = HolbuildToolchain.base_state tc, files = [preload, staged_script]})
+         {context = HolState (HolbuildToolchain.base_state tc), files = [preload, staged_script]})
 
 fun build_theory tc project plan keys toolchain_key node source_text theorem_checkpoints =
   let
@@ -758,7 +765,7 @@ fun build_theory tc project plan keys toolchain_key node source_text theorem_che
                output = final_context, path = final_loader}
     val run_spec = write_theory_script tc project plan keys toolchain_key node
                                     source_text theorem_checkpoints staged_script preload
-    val _ = run_hol_files tc stage (#holstate run_spec)
+    val _ = run_hol_files tc stage (#context run_spec)
               (#files run_spec @ [final_loader])
               "hol run failed while building theory script"
     val _ = copy_binary staged_dat data_path
@@ -1076,7 +1083,7 @@ fun export_heap tc (project : HolbuildProject.t) plan output =
     ensure_dir stage;
     ensure_parent output;
     write_heap_loader plan output loader;
-    run_hol_files tc stage (HolbuildToolchain.base_state tc) [loader]
+    run_hol_files tc stage (HolState (HolbuildToolchain.base_state tc)) [loader]
       ("hol run failed while exporting heap: " ^ output);
     remove_tree stage
   end
