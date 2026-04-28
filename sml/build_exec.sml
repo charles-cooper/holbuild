@@ -791,9 +791,25 @@ fun build_theory tc project base_context plan keys toolchain_key node source_tex
                output = final_context, path = final_loader}
     val run_spec = write_theory_script tc project base_context plan keys toolchain_key node
                                     source_text theorem_checkpoints staged_script preload
-    val _ = run_hol_files tc stage (#context run_spec)
-              (#files run_spec @ [final_loader])
-              "hol run failed while building theory script"
+    fun remove_theorem_checkpoint {context_path, end_of_proof_path, ...} =
+      (remove_file context_path; remove_file end_of_proof_path)
+    fun run_plain_after_checkpoint_failure msg =
+      let
+        val _ = print (logical_name node ^
+                       " checkpoint instrumentation failed; retrying without theorem checkpoints\n")
+        val _ = List.app remove_theorem_checkpoint theorem_checkpoints
+        val _ = write_preload plan node (deps_loaded_path project node) preload
+        val _ = write_text staged_script source_text
+      in
+        run_hol_files tc stage base_context [preload, staged_script, final_loader] msg
+      end
+    val _ =
+      run_hol_files tc stage (#context run_spec)
+        (#files run_spec @ [final_loader])
+        "hol run failed while building theory script"
+      handle Error msg =>
+        if null theorem_checkpoints then raise Error msg
+        else run_plain_after_checkpoint_failure msg
     val _ = copy_binary staged_dat data_path
     val _ = copy_binary staged_dat (hfs_remapped_path data_path)
     val _ = copy_binary staged_sig sig_path
