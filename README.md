@@ -48,11 +48,11 @@ The compiler loads HOL's existing SML TOML parser from `$(HOLDIR)` and embeds it
 in `bin/holbuild`. Tests live under `tests/cases/*/test.sh` so they can move into
 HOL's selftest layout with minimal reshaping; `tests/run.sh` is the repo-local
 runner and can run cases in parallel with `HOLBUILD_TEST_JOBS`. Current cases
-cover simple theory builds, package overrides, conservative invalidation,
-theorem checkpoint replay, logical-name conflict rejection, cache
-restoration/corruption/concurrency fallback, parallel diamonds, same-project
-write locking, explicit heaps, object-target rejection, manifest schema
-validation, and cache GC.
+cover simple theory builds, package overrides, cross-package SML load
+resolution, conservative invalidation, theorem checkpoint replay, logical-name
+conflict rejection, cache restoration/corruption/concurrency fallback, parallel
+diamonds, same-project write locking, explicit heaps, object-target rejection,
+manifest schema validation, and cache GC.
 
 ## Usage
 
