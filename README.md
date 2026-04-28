@@ -18,6 +18,8 @@ This prototype is intentionally small:
 - extracts simple theory dependencies from source text and orders dry-run build plans
 - parses transitive dependency manifests and local `.holconfig.toml` path overrides
 - materializes dependency plans under project `.hol/deps/<package>/`
+- rejects duplicate logical theory/module names across the resolved graph, except
+  local `.sig`/`.sml` companion pairs
 - includes project `load "Module"` SML/SIG dependencies in build plans and internal load manifests
 - computes prototype source/resolved-dependency input keys for planned actions
 - schedules build actions serially by default or in DAG-ready parallel order with `-jN`
@@ -125,8 +127,10 @@ path = "../foo-dev"
 
 The override changes only where the package is found locally. The package still
 needs its own `holproject.toml` or an explicit shim manifest from the consumer.
-Both `holproject.toml` and `.holconfig.toml` reject unknown fields in recognized
-tables so typos fail early.
+There is no `.holpath`, ambient `HOLPATH`, or user-facing include-path schema in
+project mode; dependency locations are resolved through manifests plus local
+overrides. Both `holproject.toml` and `.holconfig.toml` reject unknown fields in
+recognized tables so typos fail early.
 
 ## Notes
 
@@ -136,9 +140,12 @@ object filenames as targets. `holbuild build MyTheory` is the intended shape.
 `holbuild` should produce the same logical artifacts as Holmake (`.uo`, `.ui`,
 `.dat`, generated theory files, etc.) while allowing their physical storage to
 move under a project-level `.hol/` directory. `.uo` and `.ui` files are internal
-ML artifacts; users should request logical targets only. The prototype also
-writes auxiliary `HOLFileSys` remap copies under `.hol/objs` for path-sensitive
-internal loads while preserving canonical artifacts in the project layout.
+ML artifacts; users should request logical targets only. The prototype rejects
+ambiguous graphs where two sources export the same logical theory/module name;
+the intended exception is a same-package `.sig`/`.sml` companion pair. The
+prototype also writes auxiliary `HOLFileSys` remap copies under `.hol/objs` for
+path-sensitive internal loads while preserving canonical artifacts in the project
+layout.
 
 Theory scripts are modeled as pure build actions for now: no user-specified side
 effects are part of the v1 contract. A future manifest schema may mark selected

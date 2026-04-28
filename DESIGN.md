@@ -116,8 +116,13 @@ Important invariant:
 one logical theory/module name -> one resolved artifact in a build graph
 ```
 
-Two packages exporting different `FooTheory`s cannot safely coexist in one HOL
-process; `holbuild` should reject that graph rather than rely on load-path order.
+This rejection is intentional. HOL/PolyML process state has global theory and ML
+module names; two packages exporting different `FooTheory` or `Foo` modules
+cannot safely coexist by relying on load-path order. `holbuild` should reject the
+resolved graph before build execution instead of choosing whichever artifact
+happens to appear first. The only same-logical-name exception in v1 is a local
+`.sig`/`.sml` companion pair for the same package/module, which together describe
+one module artifact.
 
 ## Parallel builds
 
@@ -157,11 +162,12 @@ Path-sensitive files are generated or rebased for this local layout. In
 particular, `.uo`/`.ui` files and generated `Theory.sml` files may contain paths
 and should not be treated as portable semantic truth. Project SML/SIG modules are
 built as internal load manifests: `load "Module"` references are resolved against
-the project graph, `.sml` files get a `.uo` plus an empty companion `.ui` unless a
-real `.sig` companion exists, and same-name signatures are implicit dependencies
-of their implementation. HOL's current `HOLFileSys` remaps `.uo`/`.ui` and files
-ending in `Theory.dat`/`.sml`/`.sig` through `.hol/objs`, so a project-level
-layout may need auxiliary load paths or rewritten non-semantic load copies while
+the project graph, not against ambient include paths. `.sml` files get a `.uo`
+plus an empty companion `.ui` unless a real `.sig` companion exists, and same-name
+signatures are implicit dependencies of their implementation. HOL's current
+`HOLFileSys` remaps `.uo`/`.ui` and files ending in
+`Theory.dat`/`.sml`/`.sig` through `.hol/objs`, so a project-level layout may
+need auxiliary internal load paths or rewritten non-semantic load copies while
 preserving canonical artifacts.
 
 ## Invalidation and action keys
