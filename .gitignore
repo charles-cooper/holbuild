@@ -3,3 +3,5 @@ bin/holbuild
 .hol/
 .holconfig.toml
 .agent-files/
+
+.sandbox
