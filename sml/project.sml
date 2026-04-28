@@ -145,6 +145,19 @@ fun table_field table key =
 fun string_field table name = string_at table [name]
 fun string_array_field table name = string_array_at table [name]
 
+fun package_relative_path field path =
+  let
+    val has_parent_component =
+      List.exists (fn component => component = "..")
+        (String.tokens (fn c => c = #"/" orelse c = #"\\") path)
+  in
+    if Path.isAbsolute path orelse has_parent_component then
+      die (field ^ " must be package-root-relative: " ^ path)
+    else path
+  end
+
+fun package_relative_paths field paths = map (package_relative_path field) paths
+
 fun named_table_entries table key =
   case table_field table key of
       NONE => []
@@ -284,13 +297,19 @@ fun parse_at {manifest, root, overrides} =
     val build = table_field table ["build"]
     val run = table_field table ["run"]
     fun from opt f default = case opt of NONE => default | SOME t => f t
+    val members =
+      package_relative_paths "build.members"
+        (from build (fn t => string_array_field t "members") ["."])
+    val excludes =
+      package_relative_paths "build.exclude"
+        (from build (fn t => string_array_field t "exclude") [])
   in
     { root = root,
       manifest = manifest,
       name = Option.mapPartial (fn t => string_field t "name") project,
       version = Option.mapPartial (fn t => string_field t "version") project,
-      members = from build (fn t => string_array_field t "members") ["."],
-      excludes = from build (fn t => string_array_field t "exclude") [],
+      members = members,
+      excludes = excludes,
       dependencies = dependencies_at table,
       overrides = overrides,
       run_heap = Option.mapPartial (fn t => string_field t "heap") run,

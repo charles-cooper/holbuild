@@ -82,6 +82,26 @@ exclude = "selftest.sml"
 TOML
 expect_context_failure bad_exclude_type "exclude must be a string array"
 
+make_project absolute_member
+cat > "$tmpdir/absolute_member/holproject.toml" <<'TOML'
+[project]
+name = "absolute_member"
+
+[build]
+members = ["/tmp/src"]
+TOML
+expect_context_failure absolute_member "build.members must be package-root-relative: /tmp/src"
+
+make_project parent_exclude
+cat > "$tmpdir/parent_exclude/holproject.toml" <<'TOML'
+[project]
+name = "parent_exclude"
+
+[build]
+exclude = ["../generated/*"]
+TOML
+expect_context_failure parent_exclude "build.exclude must be package-root-relative: ../generated/\*"
+
 make_project no_paths_includes
 cat > "$tmpdir/no_paths_includes/holproject.toml" <<'TOML'
 [project]
