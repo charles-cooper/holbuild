@@ -111,8 +111,11 @@ explicitly instead of treating them as pure cacheable theory-script actions.
 
 A first root-HOL manifest should therefore start with the stable pure theory and
 library package roots that already obey project-mode constraints, and push
-non-build tooling/examples/tests behind explicit package/action boundaries. A
-sketch:
+non-build tooling/examples/tests behind explicit package/action boundaries.
+`examples/root-hol/holproject.toml` is the current sketch: it enumerates HOL
+`src/*` members, excludes selftests/examples/tool variants that collide on
+logical names, and dry-run planned 1461 HOL package nodes in the audited checkout.
+A smaller illustrative fragment:
 
 ```toml
 [project]
@@ -121,9 +124,10 @@ version = "bootstrap"
 
 [build]
 members = [
-  "src/bool", "src/num", "src/list", "src/pair",
+  "src/bool", "src/num", "src/list", "src/coretypes",
   "src/pred_set", "src/finite_maps", "src/integer",
 ]
+exclude = ["*/selftest.sml", "*/examples/*", "*/theory_tests/*"]
 
 [actions.SomeGeneratedTheory]
 extra_inputs = ["path/to/generated-input"]
@@ -134,11 +138,18 @@ impure = true
 ```
 
 This is deliberately not a Holmakefile translation. Historical directories that
-need dynamic `use`, generated files, external solvers, or process/file-system side
-effects should either be modeled with explicit action policy or stay outside the
-initial project-mode root package until their inputs and outputs are declared.
+need dynamic `use`, generated files, external solvers, process/file-system side
+effects, or platform-variant modules should either be modeled with explicit
+action policy / package boundaries or stay outside the initial project-mode root
+package until their inputs and outputs are declared.
 
 ## Source model
+
+`[build].members` admits package-root-relative source files or directories.
+`[build].exclude` is an explicit package-root-relative glob filter applied during
+source discovery. It is intended for excluding tests, examples, generated files,
+or platform variants from a package boundary; it does not add search paths or
+change dependency resolution.
 
 Standard theory convention:
 

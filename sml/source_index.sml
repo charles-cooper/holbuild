@@ -104,6 +104,23 @@ fun classify package source_root artifact_root policies abs_path =
 fun is_dir path = FS.isDir path handle OS.SysErr _ => false
 fun is_readable path = FS.access(path, [FS.A_READ]) handle OS.SysErr _ => false
 
+fun glob_match pattern text =
+  let
+    val pn = size pattern
+    val tn = size text
+    fun match p t =
+      if p = pn then t = tn
+      else
+        case String.sub(pattern, p) of
+            #"*" => match (p + 1) t orelse (t < tn andalso match p (t + 1))
+          | #"?" => t < tn andalso match (p + 1) (t + 1)
+          | c => t < tn andalso c = String.sub(text, t) andalso match (p + 1) (t + 1)
+  in
+    match 0 0
+  end
+
+fun excluded excludes rel = List.exists (fn pattern => glob_match pattern rel) excludes
+
 fun skip_dir name = name = ".holbuild" orelse name = ".hol" orelse name = ".git" orelse name = "_build"
 
 fun list_dir path =
@@ -117,19 +134,21 @@ fun list_dir path =
     loop [] handle e => (FS.closeDir stream; raise e)
   end
 
-fun scan_file package source_root artifact_root policies path acc =
-  case classify package source_root artifact_root policies path of
+fun scan_file package source_root artifact_root policies excludes path acc =
+  if excluded excludes (relative_path source_root path) then acc
+  else case classify package source_root artifact_root policies path of
       NONE => acc
     | SOME source => source :: acc
 
-fun scan_dir package source_root artifact_root policies path acc =
+fun scan_dir package source_root artifact_root policies excludes path acc =
   let
     fun scan_name (name, acc) =
       let val path' = join path name
       in
         if is_dir path' then
-          if skip_dir name then acc else scan_dir package source_root artifact_root policies path' acc
-        else if is_readable path' then scan_file package source_root artifact_root policies path' acc
+          if skip_dir name orelse excluded excludes (relative_path source_root path' ^ "/") then acc
+          else scan_dir package source_root artifact_root policies excludes path' acc
+        else if is_readable path' then scan_file package source_root artifact_root policies excludes path' acc
         else acc
       end
   in
@@ -197,14 +216,15 @@ fun discover_package package acc =
     val source_root = HolbuildProject.package_root package
     val artifact_root = HolbuildProject.package_artifact_root package
     val policies = HolbuildProject.package_action_policies package
+    val excludes = HolbuildProject.package_excludes package
     val members =
       map (fn member => HolbuildProject.abs_under source_root member)
         (HolbuildProject.package_members package)
     val sources =
       List.foldl
         (fn (member, acc) =>
-            if is_dir member then scan_dir name source_root artifact_root policies member acc
-            else if is_readable member then scan_file name source_root artifact_root policies member acc
+            if is_dir member then scan_dir name source_root artifact_root policies excludes member acc
+            else if is_readable member then scan_file name source_root artifact_root policies excludes member acc
             else raise Error ("member does not exist: " ^ member))
         acc
         members

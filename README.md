@@ -101,7 +101,8 @@ does not require a HOL toolchain.
 See `DESIGN.md` for the intended long-term model: manifest-based package
 resolution, project-local `.holbuild/` materialization, action-key invalidation,
 root-HOL migration through an explicit/default HOL manifest, and an optional
-global cache that never changes build semantics.
+global cache that never changes build semantics. A root-HOL manifest sketch lives
+under `examples/root-hol/`.
 
 ## Example `holproject.toml`
 
@@ -115,6 +116,7 @@ version = "0.1.0"
 
 [build]
 members = ["src", "examples"]
+exclude = ["*/selftest.sml", "*/examples/*"]
 
 [dependencies.foo]
 git = "https://github.com/acme/foo"
@@ -148,8 +150,10 @@ The override changes only where the package is found locally. The package still
 needs its own `holproject.toml` or an explicit shim manifest from the consumer.
 There is no `.holpath`, ambient `HOLPATH`, or user-facing include-path schema in
 project mode; dependency locations are resolved through manifests plus local
-overrides. Both `holproject.toml` and `.holconfig.toml` reject unknown fields in
-recognized tables so typos fail early.
+overrides. `[build].exclude` may explicitly remove package-root-relative globbed
+paths from source discovery; it is for keeping tests/tool variants out of a build
+package, not for changing load resolution. Both `holproject.toml` and
+`.holconfig.toml` reject unknown fields in recognized tables so typos fail early.
 
 ## Notes
 

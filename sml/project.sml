@@ -32,6 +32,7 @@ datatype package =
       root : string,
       manifest : string,
       members : string list,
+      excludes : string list,
       artifact_root : string,
       action_policies : action_policy list }
 
@@ -41,6 +42,7 @@ type t =
     name : string option,
     version : string option,
     members : string list,
+    excludes : string list,
     dependencies : dependency list,
     overrides : override list,
     run_heap : string option,
@@ -204,7 +206,7 @@ fun validate_manifest_table table =
               ["holbuild", "project", "build", "dependencies", "run", "heap", "actions"] table
     val _ = Option.app (require_known_fields "project" ["name", "version"])
               (table_field table ["project"])
-    val _ = Option.app (require_known_fields "build" ["members"])
+    val _ = Option.app (require_known_fields "build" ["members", "exclude"])
               (table_field table ["build"])
     val _ = Option.app (require_known_fields "run" ["heap", "loads"])
               (table_field table ["run"])
@@ -288,6 +290,7 @@ fun parse_at {manifest, root, overrides} =
       name = Option.mapPartial (fn t => string_field t "name") project,
       version = Option.mapPartial (fn t => string_field t "version") project,
       members = from build (fn t => string_array_field t "members") ["."],
+      excludes = from build (fn t => string_array_field t "exclude") [],
       dependencies = dependencies_at table,
       overrides = overrides,
       run_heap = Option.mapPartial (fn t => string_field t "heap") run,
@@ -329,6 +332,7 @@ fun dependency_name (Dependency {name, ...}) = name
 fun package_name (Package {name, ...}) = name
 fun package_root (Package {root, ...}) = root
 fun package_members (Package {members, ...}) = members
+fun package_excludes (Package {excludes, ...}) = excludes
 fun package_artifact_root (Package {artifact_root, ...}) = artifact_root
 fun package_action_policies (Package {action_policies, ...}) = action_policies
 
@@ -383,9 +387,10 @@ fun dependency_to_string project (dep as Dependency {name, path, manifest, git, 
 
 fun override_to_string (Override {name, path}) = name ^ " -> " ^ path
 
-fun project_package ({root, manifest, name, members, action_policies, ...} : t) =
+fun project_package ({root, manifest, name, members, excludes, action_policies, ...} : t) =
   Package {name = Option.getOpt(name, "root"), root = root, manifest = manifest,
-           members = members, artifact_root = Path.concat(root, ".holbuild"),
+           members = members, excludes = excludes,
+           artifact_root = Path.concat(root, ".holbuild"),
            action_policies = action_policies}
 
 fun dependency_project (project : t) (dep as Dependency {name, ...}) =
@@ -421,7 +426,8 @@ fun dependency_package artifact_parent project (dep as Dependency {name, ...}) =
     val artifact_root = Path.concat(Path.concat(artifact_parent, ".holbuild/deps"), name)
   in
     (Package {name = name, root = dep_root, manifest = dep_manifest,
-              members = #members dep_project, artifact_root = artifact_root,
+              members = #members dep_project, excludes = #excludes dep_project,
+              artifact_root = artifact_root,
               action_policies = #action_policies dep_project},
      dep_project)
   end
@@ -452,7 +458,7 @@ fun packages (project : t) =
 
 fun describe (project : t) =
   let
-    val {root, manifest, name, version, members, dependencies,
+    val {root, manifest, name, version, members, excludes, dependencies,
          overrides, run_heap, run_loads, heaps, action_policies} = project
     fun opt label value =
       case value of NONE => () | SOME s => print (label ^ s ^ "\n")
@@ -462,6 +468,7 @@ fun describe (project : t) =
     opt "name: " name;
     opt "version: " version;
     print ("members: " ^ String.concatWith ", " members ^ "\n");
+    print ("exclude: " ^ String.concatWith ", " excludes ^ "\n");
     List.app (fn dep => print ("dependency: " ^ dependency_to_string project dep ^ "\n")) dependencies;
     List.app (fn override => print ("override: " ^ override_to_string override ^ "\n")) overrides;
     opt "run.heap: " run_heap;

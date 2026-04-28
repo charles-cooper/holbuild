@@ -72,6 +72,16 @@ member = ["src"]
 TOML
 expect_context_failure typo_build "unknown field in build: member"
 
+make_project bad_exclude_type
+cat > "$tmpdir/bad_exclude_type/holproject.toml" <<'TOML'
+[project]
+name = "bad_exclude_type"
+
+[build]
+exclude = "selftest.sml"
+TOML
+expect_context_failure bad_exclude_type "exclude must be a string array"
+
 make_project no_paths_includes
 cat > "$tmpdir/no_paths_includes/holproject.toml" <<'TOML'
 [project]
