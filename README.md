@@ -37,10 +37,12 @@ This prototype is intentionally small:
 - delegates execution to `$HOLDIR/bin/hol run` / `hol repl` for now
 
 The external prototype requires a HOL checkout or installation via `HOLDIR` so it
-can reuse HOL tooling. The target design does not use configured HOL heaps such
-as `hol.state` as semantic build bases: build contexts should come from PolyML/no
-HOL state, predecessor checkpoints, or validated shared dependency state. Current
-code still has transitional hardwiring here; see `DESIGN.md`.
+can reuse HOL tooling. That is a host/tool dependency, not the target build's
+semantic state. The target design does not use configured/global HOL heaps such
+as `hol.state` as build bases: after `git pull`, `hol build` should rebuild or
+restore its needed bootstrap/checkpoint state hermetically under `.holbuild/`, not
+require a separate global HOL rebuild first. Current code still has transitional
+hardwiring here; see `DESIGN.md`.
 
 ## Build
 

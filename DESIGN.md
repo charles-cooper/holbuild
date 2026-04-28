@@ -11,8 +11,9 @@ and cacheable builds that never require users to reason about the cache.
 - `.uo` and `.ui` are internal ML load artifacts. Users must never request them.
 - Project mode is manifest based. `Holmakefile` semantics are not interpreted.
 - The source tree is user-owned; build products live under project `.holbuild/`.
-- Build actions do not use configured HOL heaps such as `hol.state` as semantic
-  bases. Contexts are produced by holbuild from PolyML/no-HOL state, predecessor
+- Build actions do not use configured/global HOL heaps such as `hol.state` as
+  semantic bases. A host tool state may run holbuild itself, but target build
+  contexts are produced by holbuild from declared sources, predecessor
   checkpoints, or validated shared dependency state.
 - The cache is an optional accelerator. Local `.holbuild/` is the authoritative
   materialized build view.
@@ -77,11 +78,19 @@ legacy `Holmakefile`.
 Root HOL should be built through holbuild's own model, using an in-tree or
 default HOL manifest. HOL is not permanently treated as an opaque legacy build.
 The prototype still requires `HOLDIR` so it can reuse HOL implementation pieces
-while the model is incubated, but `HOLDIR/bin/hol.state` is not a semantic build
-base. Root HOL and user dependencies should be ordinary manifest-resolved package
-nodes whose contexts are produced by holbuild. The initial context is PolyML/no
-HOL state plus declared bootstrap inputs; later actions start from predecessor
-checkpoints or validated shared dependency state.
+while the model is incubated. That is a host/tool dependency, not the semantic
+state of the target build. `HOLDIR/bin/hol.state` may be used to run holbuild's
+own helper code during the external prototype, but target package actions should
+not load it as their base context. Root HOL and user dependencies should be
+ordinary manifest-resolved package nodes whose contexts are produced by holbuild.
+The initial build context is a declared bootstrap context; later actions start
+from predecessor checkpoints or validated shared dependency state.
+
+Target workflow: after `git pull` in a HOL checkout, `hol build` should be able
+to rebuild any invalidated bootstrap/base context hermetically into the checkout's
+own `.holbuild/` state, or restore a validated equivalent from the global cache.
+It should not require the user to run a separate global HOL rebuild first, and it
+should not silently depend on a stale configured heap from before the pull.
 
 The root-HOL transition should be explicit rather than inferred from existing
 Holmakefiles. A plausible first in-tree/default manifest has package identity
@@ -125,7 +134,8 @@ logical names, and dry-run planned 1461 HOL package nodes in the audited checkou
 A follow-up regression test dry-runs that sketch against `$HOLDIR`. Attempting to
 source-build core theories against `$HOLDIR/bin/hol.state` is intentionally wrong:
 that state already contains those theories. Executable root-HOL bootstrap needs
-manifest-level base-context/checkpoint phases, not any configured HOL heap.
+manifest-level bootstrap/checkpoint phases that holbuild can rebuild or restore
+on demand, not any preconfigured global HOL heap.
 A smaller illustrative fragment:
 
 ```toml
