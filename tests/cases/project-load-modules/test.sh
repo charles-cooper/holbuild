@@ -20,6 +20,9 @@ name = "loadmods"
 
 [build]
 members = ["src"]
+
+[actions.Baz]
+deps = ["Foo"]
 TOML
 cat > "$project/src/Foo.sig" <<'SML'
 signature FOO = sig
@@ -38,11 +41,18 @@ structure Bar = struct
   val witness = Foo.value
 end
 SML
+cat > "$project/src/Baz.sml" <<'SML'
+structure Baz = struct
+  val witness = Foo.value
+end
+SML
 cat > "$project/src/AScript.sml" <<'SML'
 open HolKernel Parse boolLib bossLib;
 
 load "Bar";
+load "Baz";
 val _ = if Bar.witness then () else raise Fail "Bar did not load Foo";
+val _ = if Baz.witness then () else raise Fail "Baz did not load declared dep Foo";
 
 val _ = new_theory "A";
 val a_thm = store_thm("a_thm", ``T``, ACCEPT_TAC TRUTH);
@@ -54,17 +64,21 @@ dry_log=$tmpdir/dry.log
 require_grep "Foo (sig" "$dry_log"
 require_grep "Foo (sml" "$dry_log"
 require_grep "Bar (sml" "$dry_log"
+require_grep "Baz (sml" "$dry_log"
 require_grep "ATheory" "$dry_log"
 
 (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory)
 require_file "$project/.holbuild/obj/src/Foo.ui"
 require_file "$project/.holbuild/obj/src/Foo.uo"
 require_file "$project/.holbuild/obj/src/Bar.uo"
+require_file "$project/.holbuild/obj/src/Baz.uo"
 require_file "$project/.holbuild/gen/src/ATheory.sml"
 require_file "$project/.holbuild/obj/src/ATheory.dat"
 
 require_grep ".holbuild/obj/src/Foo" "$project/.holbuild/obj/src/Bar.uo"
+require_grep ".holbuild/obj/src/Foo" "$project/.holbuild/obj/src/Baz.uo"
 require_grep ".holbuild/obj/src/Bar" "$project/.holbuild/obj/src/ATheory.uo"
+require_grep ".holbuild/obj/src/Baz" "$project/.holbuild/obj/src/ATheory.uo"
 
 cat > "$tmpdir/load-internal-theory.sml" <<SML
 load "$project/.holbuild/obj/src/ATheory";

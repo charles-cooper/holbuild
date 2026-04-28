@@ -93,3 +93,12 @@ if (cd "$unknown_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) >
   exit 1
 fi
 require_grep "action policy references unknown target unknown_policy:MissingTheory" "$tmpdir/unknown.log"
+
+missing_dep_project="$tmpdir/missing_declared_dep"
+make_theory_project "$missing_dep_project" '[actions.ATheory]
+deps = ["Missing"]'
+if (cd "$missing_dep_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$tmpdir/missing-dep.log" 2>&1; then
+  echo "unresolved action dependency was accepted" >&2
+  exit 1
+fi
+require_grep "unresolved action dependency Missing" "$tmpdir/missing-dep.log"

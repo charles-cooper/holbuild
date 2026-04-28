@@ -34,4 +34,6 @@ EOF
 Last audit result: with the exclude list in this sketch, dry-run planning over
 an audited HOL checkout resolved 1461 HOL package nodes. Remaining work is to
 turn this planning boundary into executable bootstrap/tool phases and explicit
-action policies for generated or impure actions.
+action policies for generated, impure, or source-implicit dependency actions.
+Use `[actions.<logical>].deps` for explicit logical predecessors; do not infer
+Holmakefile ordering in project mode.

@@ -867,6 +867,8 @@ fun bool_text true = "true"
 fun action_policy_lines node =
   let
     val policy = source_policy node
+    val declared_dep_lines =
+      map (fn dep => "declared_dep=" ^ dep) (HolbuildProject.action_deps policy)
     val extra_inputs = HolbuildProject.action_extra_inputs policy
     val extra_lines =
       map (fn input =>
@@ -876,6 +878,7 @@ fun action_policy_lines node =
   in
     ["cache=" ^ bool_text (HolbuildProject.action_cache_enabled policy),
      "always_reexecute=" ^ bool_text (HolbuildProject.action_always_reexecute policy)] @
+    declared_dep_lines @
     extra_lines
   end
 

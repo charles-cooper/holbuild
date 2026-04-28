@@ -49,8 +49,12 @@ fun theory_name name =
     n > m andalso String.substring(name, n - m, m) = suffix
   end
 
+fun declared_dependency_names node =
+  HolbuildProject.action_deps (#policy (source_of node))
+
 fun direct_dependency_names node =
-  unique_strings (#theories (deps_of node) @ #loads (deps_of node))
+  unique_strings
+    (#theories (deps_of node) @ #loads (deps_of node) @ declared_dependency_names node)
 
 fun signature_companion_deps nodes node =
   case #kind (source_of node) of
@@ -95,16 +99,29 @@ fun direct_unresolved_loads nodes node =
     List.filter unresolved (#loads (deps_of node))
   end
 
+fun direct_unresolved_declared_deps nodes node =
+  let
+    fun known name = not (null (nodes_named nodes name))
+  in
+    List.filter (fn name => not (known name)) (declared_dependency_names node)
+  end
+
 fun reject_unresolved_loads nodes plan =
   let
-    fun check node =
+    fun check_loads node =
       case direct_unresolved_loads nodes node of
           [] => ()
         | load :: _ =>
             raise Error ("unresolved load " ^ load ^ " in " ^
                          package node ^ ":" ^ relative_path node)
+    fun check_declared_deps node =
+      case direct_unresolved_declared_deps nodes node of
+          [] => ()
+        | dep :: _ =>
+            raise Error ("unresolved action dependency " ^ dep ^ " in " ^
+                         package node ^ ":" ^ relative_path node)
   in
-    List.app check plan
+    List.app (fn node => (check_loads node; check_declared_deps node)) plan
   end
 
 fun reject_source_uses plan =
@@ -202,6 +219,8 @@ fun action_text toolchain_key nodes keys node =
         (direct_project_deps nodes node)
     val external_deps = map (fn name => "HOL:" ^ name ^ "@" ^ toolchain_key) (direct_external_theories nodes node)
     val policy = #policy source
+    val declared_deps = HolbuildProject.action_deps policy
+    val declared_dep_lines = map (fn dep => "declared_dep=" ^ dep) declared_deps
     val extra_inputs = HolbuildProject.action_extra_inputs policy
     val extra_input_lines =
       map (fn input =>
@@ -218,6 +237,7 @@ fun action_text toolchain_key nodes keys node =
        "source-sha1=" ^ source_hash,
        "cache=" ^ bool_text (HolbuildProject.action_cache_enabled policy),
        "always_reexecute=" ^ bool_text (HolbuildProject.action_always_reexecute policy)] @
+      declared_dep_lines @
       extra_input_lines @
       map (fn dep => "dep=" ^ dep) (project_deps @ external_deps)
   in

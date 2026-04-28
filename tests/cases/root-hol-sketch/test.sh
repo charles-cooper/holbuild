@@ -37,3 +37,12 @@ if grep -Eq 'source: HOL:.*/selftest\.sml|source: HOL:.*/examples/|source: HOL:.
   echo "root-HOL sketch included an excluded source" >&2
   exit 1
 fi
+
+(cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build KernelTypes) > "$tmpdir/kerneltypes.log"
+require_file "$project/.holbuild/deps/HOL/obj/src/0/KernelTypes.uo"
+require_file "$project/.holbuild/deps/HOL/obj/src/0/KernelTypes.ui"
+base_count=$(find "$project/.holbuild/checkpoints/_base" -name '*.save' | wc -l)
+if [[ "$base_count" -lt 1 ]]; then
+  echo "root-HOL SML probe did not create a project base checkpoint" >&2
+  exit 1
+fi

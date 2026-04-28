@@ -22,7 +22,7 @@ This prototype is intentionally small:
   local `.sig`/`.sml` companion pairs
 - includes project `load "Module"` SML/SIG dependencies in build plans and internal load manifests
 - rejects source-level `use "file"` in project build actions; declare/load project modules instead
-- supports per-action policy for explicit extra inputs, cache disabling, and always-rerun actions
+- supports per-action policy for explicit logical dependencies, extra inputs, cache disabling, and always-rerun actions
 - computes prototype source/resolved-dependency input keys for planned actions
 - schedules build actions serially by default or in DAG-ready parallel order with `-jN`
 - executes simple theory-script builds into project `.holbuild/` without Holmake
@@ -129,6 +129,7 @@ git = "https://github.com/acme/foo"
 rev = "abc123"
 
 [actions.MyTheory]
+deps = ["MyProjectLib"]
 extra_inputs = ["data/table.txt"]
 cache = false
 
@@ -185,16 +186,20 @@ non-source inputs or must not be cached/skipped, make that explicit:
 
 ```toml
 [actions.MyTheory]
+deps = ["MyProjectLib"]
 extra_inputs = ["data/table.txt"]
 cache = false
 always_reexecute = true
 # impure = true is shorthand for no cache and always re-execute
 ```
 
-`extra_inputs` are hashed exactly and included in the action key. `cache = false`
-disables global-cache restore/publish for that action. `always_reexecute = true`
-prevents local up-to-date skipping and checkpoint replay for that action. These
-are escape hatches, not ambient include/search paths.
+`deps` names additional logical project dependencies when source-level imports
+are insufficient or intentionally absent; every listed name must resolve in the
+manifest/source graph. `extra_inputs` are hashed exactly and included in the
+action key. `cache = false` disables global-cache restore/publish for that
+action. `always_reexecute = true` prevents local up-to-date skipping and
+checkpoint replay for that action. These are escape hatches, not ambient
+include/search paths.
 
 Incremental correctness is action-key based. `holbuild` does not use
 `hol buildheap` as its default build primitive; it builds contexts directly by
