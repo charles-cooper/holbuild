@@ -348,6 +348,29 @@ fun run_hol_files tc stage context files error_message =
     else raise Error error_message
   end
 
+fun project_base_context_path (project : HolbuildProject.t) toolchain_key =
+  Path.concat(Path.concat(Path.concat(#root project, ".holbuild/checkpoints"), "_base"),
+              toolchain_key ^ ".save")
+
+fun save_current_context_script output path = write_text path (save_heap_line output ^ "\n")
+
+fun ensure_project_base_context tc project toolchain_key =
+  let
+    val output = project_base_context_path project toolchain_key
+    val stage = Path.concat(Path.concat(#root project, ".holbuild/stage"), "base-" ^ toolchain_key)
+    val script = Path.concat(stage, "holbuild-save-base-context.sml")
+  in
+    if file_exists output then HolState output
+    else
+      (ensure_dir stage;
+       ensure_parent output;
+       save_current_context_script output script;
+       run_hol_files tc stage (HolState (HolbuildToolchain.base_state tc)) [script]
+         "hol run failed while saving project base context";
+       remove_tree stage;
+       HolState output)
+  end
+
 val cache_sml_token = "__HOLBUILD_THEORY_DAT_LOAD__"
 
 fun warn msg = TextIO.output(TextIO.stdErr, "holbuild: warning: " ^ msg ^ "\n")
@@ -520,7 +543,7 @@ fun write_local_theory_manifests plan node =
     write_object_manifest script_uo [source_file node]
   end
 
-fun save_cached_theory_checkpoints tc project plan input_key node =
+fun save_cached_theory_checkpoints tc project base_context plan input_key node =
   let
     val stage = stage_dir project input_key
     val preload = Path.concat(stage, "holbuild-cache-preload.sml")
@@ -535,7 +558,7 @@ fun save_cached_theory_checkpoints tc project plan input_key node =
     write_preload plan node deps_loaded preload;
     write_final_context_loader {sig_path = sig_path, sml_path = sml_path,
                                 output = final_context, path = final_loader};
-    run_hol_files tc stage (HolState (HolbuildToolchain.base_state tc)) [preload, final_loader]
+    run_hol_files tc stage base_context [preload, final_loader]
       "hol run failed while saving cached theory checkpoints";
     remove_tree stage
   end
@@ -556,7 +579,7 @@ fun remove_failed_cache_outputs project node =
     List.app remove_file paths
   end
 
-fun materialize_theory_cache tc project plan input_key node =
+fun materialize_theory_cache tc project base_context plan input_key node =
   let
     val root = cache_root ()
     val manifest = HolbuildCache.action_manifest root input_key
@@ -575,7 +598,7 @@ fun materialize_theory_cache tc project plan input_key node =
        write_text sml_path (replace_all cache_sml_token data_path (read_text template));
        write_text (hfs_remapped_path sml_path) (read_text sml_path);
        write_local_theory_manifests plan node;
-       save_cached_theory_checkpoints tc project plan input_key node;
+       save_cached_theory_checkpoints tc project base_context plan input_key node;
        print (logical_name node ^ " restored from cache\n");
        true)
   in
@@ -626,12 +649,12 @@ fun theorem_discovery_script {source_path, report_path} =
      "val _ = (holbuild_loop (); TextIO.closeOut holbuild_out);",
      ""]
 
-fun discover_theorem_boundaries tc stage source_path source_text =
+fun discover_theorem_boundaries tc stage base_context source_path source_text =
   let
     val script = Path.concat(stage, "holbuild-discover-theorems.sml")
     val report_path = Path.concat(stage, "holbuild-theorems.tsv")
     val _ = write_text script (theorem_discovery_script {source_path = source_path, report_path = report_path})
-    val _ = run_hol_files tc stage (HolState (HolbuildToolchain.base_state tc)) [script]
+    val _ = run_hol_files tc stage base_context [script]
               "hol run failed while discovering theorem AST boundaries"
     val report = read_text report_path handle IO.Io _ => ""
   in
@@ -727,7 +750,7 @@ fun replay_candidate project plan keys toolchain_key node checkpoints =
   if always_reexecute node then NONE
   else best_replay_candidate project plan keys toolchain_key node checkpoints
 
-fun write_theory_script tc project plan keys toolchain_key node source_text checkpoints staged_script preload =
+fun write_theory_script tc project base_context plan keys toolchain_key node source_text checkpoints staged_script preload =
   case replay_candidate project plan keys toolchain_key node checkpoints of
       SOME {boundary, path, safe_name} =>
         let
@@ -739,9 +762,9 @@ fun write_theory_script tc project plan keys toolchain_key node source_text chec
     | NONE =>
         (write_preload plan node (deps_loaded_path project node) preload;
          write_text staged_script (instrumented_source source_text 0 checkpoints);
-         {context = HolState (HolbuildToolchain.base_state tc), files = [preload, staged_script]})
+         {context = base_context, files = [preload, staged_script]})
 
-fun build_theory tc project plan keys toolchain_key node source_text theorem_checkpoints =
+fun build_theory tc project base_context plan keys toolchain_key node source_text theorem_checkpoints =
   let
     val input_key = HolbuildBuildPlan.input_key_for keys node
     val stage = stage_dir project input_key
@@ -763,7 +786,7 @@ fun build_theory tc project plan keys toolchain_key node source_text theorem_che
     val _ = write_final_context_loader
               {sig_path = staged_sig, sml_path = staged_sml,
                output = final_context, path = final_loader}
-    val run_spec = write_theory_script tc project plan keys toolchain_key node
+    val run_spec = write_theory_script tc project base_context plan keys toolchain_key node
                                     source_text theorem_checkpoints staged_script preload
     val _ = run_hol_files tc stage (#context run_spec)
               (#files run_spec @ [final_loader])
@@ -892,39 +915,39 @@ fun write_metadata project plan keys input_key toolchain_key node theorem_checkp
   write_text (metadata_path project node)
              (metadata_text project plan keys input_key toolchain_key node theorem_checkpoints)
 
-fun theory_checkpoints_for_node tc project node input_key source_text =
+fun theory_checkpoints_for_node tc project base_context node input_key source_text =
   let
     val stage = stage_dir project input_key
     val _ = ensure_dir stage
-    val boundaries = discover_theorem_boundaries tc stage (source_file node) source_text
+    val boundaries = discover_theorem_boundaries tc stage base_context (source_file node) source_text
   in
     theorem_checkpoint_specs project node boundaries
   end
 
-fun build_theory_node tc project plan keys toolchain_key node input_key =
+fun build_theory_node tc project base_context plan keys toolchain_key node input_key =
   let
     val source_text = read_text (source_file node)
-    val theorem_checkpoints = theory_checkpoints_for_node tc project node input_key source_text
+    val theorem_checkpoints = theory_checkpoints_for_node tc project base_context node input_key source_text
     val stage = stage_dir project input_key
   in
     if not (always_reexecute node) andalso
        up_to_date project plan keys input_key toolchain_key node theorem_checkpoints then
       (remove_tree stage;
        print (HolbuildBuildPlan.logical_name node ^ " is up to date\n"))
-    else if cache_enabled node andalso materialize_theory_cache tc project plan input_key node then
+    else if cache_enabled node andalso materialize_theory_cache tc project base_context plan input_key node then
       (remove_tree stage;
        write_metadata project plan keys input_key toolchain_key node theorem_checkpoints)
     else
-      (build_theory tc project plan keys toolchain_key node source_text theorem_checkpoints;
+      (build_theory tc project base_context plan keys toolchain_key node source_text theorem_checkpoints;
        write_metadata project plan keys input_key toolchain_key node theorem_checkpoints)
   end
 
-fun build_node tc project plan keys toolchain_key node =
+fun build_node tc project base_context plan keys toolchain_key node =
   let val input_key = HolbuildBuildPlan.input_key_for keys node
   in
     case #kind (HolbuildBuildPlan.source_of node) of
         HolbuildSourceIndex.TheoryScript =>
-          build_theory_node tc project plan keys toolchain_key node input_key
+          build_theory_node tc project base_context plan keys toolchain_key node input_key
       | HolbuildSourceIndex.Sml =>
           if not (always_reexecute node) andalso
              up_to_date project plan keys input_key toolchain_key node [] then
@@ -939,8 +962,8 @@ fun build_node tc project plan keys toolchain_key node =
                 write_metadata project plan keys input_key toolchain_key node [])
   end
 
-fun build_serial tc project plan keys toolchain_key =
-  List.app (build_node tc project plan keys toolchain_key) plan
+fun build_serial tc project base_context plan keys toolchain_key =
+  List.app (build_node tc project base_context plan keys toolchain_key) plan
 
 fun node_done done node = List.exists (fn k => k = HolbuildBuildPlan.key node) done
 
@@ -964,7 +987,7 @@ fun build_error_message e =
       Error msg => msg
     | _ => General.exnMessage e
 
-fun build_parallel tc project plan keys toolchain_key jobs =
+fun build_parallel tc project base_context plan keys toolchain_key jobs =
   let
     val mutex = Thread.Mutex.mutex ()
     val cv = Thread.ConditionVar.conditionVar ()
@@ -1020,7 +1043,7 @@ fun build_parallel tc project plan keys toolchain_key jobs =
           case next_work () of
               NONE => worker_exit ()
             | SOME node =>
-                ((build_node tc project plan keys toolchain_key node;
+                ((build_node tc project base_context plan keys toolchain_key node;
                   finish_success node;
                   loop ())
                  handle e => (finish_failure (build_error_message e); worker_exit ()))
@@ -1049,10 +1072,12 @@ fun build_parallel tc project plan keys toolchain_key jobs =
   end
 
 fun build tc project plan toolchain_key jobs =
-  let val keys = HolbuildBuildPlan.input_keys toolchain_key plan
+  let
+    val base_context = ensure_project_base_context tc project toolchain_key
+    val keys = HolbuildBuildPlan.input_keys toolchain_key plan
   in
-    if jobs <= 1 then build_serial tc project plan keys toolchain_key
-    else build_parallel tc project plan keys toolchain_key jobs
+    if jobs <= 1 then build_serial tc project base_context plan keys toolchain_key
+    else build_parallel tc project base_context plan keys toolchain_key jobs
   end
 
 fun heap_external_theories plan =
@@ -1077,13 +1102,15 @@ fun write_heap_loader plan output path =
 
 fun export_heap tc (project : HolbuildProject.t) plan output =
   let
+    val toolchain_key = HolbuildToolchain.toolchain_key tc
+    val base_context = ensure_project_base_context tc project toolchain_key
     val stage = Path.concat(Path.concat(#root project, ".holbuild/stage"), "heap")
     val loader = Path.concat(stage, "holbuild-save-heap.sml")
   in
     ensure_dir stage;
     ensure_parent output;
     write_heap_loader plan output loader;
-    run_hol_files tc stage (HolState (HolbuildToolchain.base_state tc)) [loader]
+    run_hol_files tc stage base_context [loader]
       ("hol run failed while exporting heap: " ^ output);
     remove_tree stage
   end

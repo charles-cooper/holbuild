@@ -39,6 +39,11 @@ require_file "$project/.holbuild/obj/src/ATheory.dat"
 require_file "$project/.holbuild/checkpoints/basic/src/AScript.sml.deps_loaded.save"
 require_file "$project/.holbuild/checkpoints/basic/src/AScript.sml.final_context.save"
 require_file "$project/.holbuild/dep/basic/src/AScript.sml.key"
+base_count=$(find "$project/.holbuild/checkpoints/_base" -name '*.save' | wc -l)
+if [[ "$base_count" -lt 1 ]]; then
+  echo "missing project base checkpoint" >&2
+  exit 1
+fi
 
 second_log=$tmpdir/second.log
 (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$second_log"
@@ -53,3 +58,8 @@ require_file "$project/.holbuild/gen/src/ATheory.sml"
 require_file "$project/.holbuild/obj/src/ATheory.dat"
 require_file "$project/.holbuild/checkpoints/basic/src/AScript.sml.deps_loaded.save"
 require_file "$project/.holbuild/checkpoints/basic/src/AScript.sml.final_context.save"
+base_count=$(find "$project/.holbuild/checkpoints/_base" -name '*.save' | wc -l)
+if [[ "$base_count" -lt 1 ]]; then
+  echo "missing restored project base checkpoint" >&2
+  exit 1
+fi
