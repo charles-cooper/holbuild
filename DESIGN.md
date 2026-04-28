@@ -359,10 +359,12 @@ key, and checkpoint schema. Raw `.save` bytes are diagnostic only and must not b
 used as stable semantic keys. Checkpoints remain local under `.holbuild/checkpoints/`
 until their path/session sensitivity is understood well enough for sharing.
 
-The prototype currently instruments modern `Theorem ... Proof ... QED`
-declarations by parsing the HOL source AST before expansion to ML. It uses the
-AST theorem/tactic spans to insert a theorem marker before expansion, then runs
-the proof through `proofManagerLib`/`goalFrag` fragments. The
+The prototype currently instruments AST `HOLTheoremDecl` declarations, i.e.
+modern goal/proof forms such as `Theorem ... Proof ... QED` (including proof
+attributes, with conservative whole-tactic fallback for attributed proofs). It
+parses the HOL source AST before expansion to ML, uses theorem/tactic spans to
+insert a theorem marker before expansion, then runs the proof through
+`proofManagerLib`/`goalFrag` fragments where possible. The
 `<thm>_end_of_proof.save` checkpoint is saved before `drop_all`, so it preserves
 proof-manager history for navigation; `<thm>_context.save` is saved after the
 expanded theorem declaration stores the theorem in the theory context. If a later
@@ -371,6 +373,13 @@ dependency context still matches, a dirty rebuild can load the nearest valid
 theorem-context checkpoint and replay only the suffix to `export_theory()`.
 End-of-proof checkpoints are proof-navigation states, not successor-ready
 contexts, and are not used for dependency replay.
+
+Other theorem-producing syntax, such as simple `Theorem name = thm` declarations,
+`store_thm` calls, `Resume`, or `Finalise`, is not checkpoint-instrumented in v1.
+Those declarations still execute during normal source builds/replays, but they do
+not produce theorem-context/end-of-proof checkpoints unless later modeled from the
+AST with correct proof-manager state. Do not add ad hoc text-scanned wrappers for
+these forms.
 
 ## Legacy transition
 

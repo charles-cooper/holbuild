@@ -170,8 +170,10 @@ Incremental correctness is action-key based. `holbuild` does not use
 `hol buildheap` as its default build primitive; it builds contexts directly by
 loading resolved ancestors and saving PolyML checkpoints at syntactic boundaries:
 dependencies loaded, AST-derived theorem end-of-proof/context boundaries for
-modern theorem declarations, and successor-ready final context, stored locally
-under `.holbuild/checkpoints/`. When a script is dirty but a previous theorem-context
+modern `Theorem ... Proof ... QED` declarations, and successor-ready final
+context, stored locally under `.holbuild/checkpoints/`. Simple theorem-producing
+forms such as `Theorem name = thm` still build normally but are not theorem
+checkpoint boundaries in v1. When a script is dirty but a previous theorem-context
 prefix still matches exactly, holbuild can replay from that checkpoint instead
 of from the dependency-loaded state. Explicit
 `holbuild heap NAME` targets build their declared logical objects, load the

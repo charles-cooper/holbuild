@@ -26,6 +26,8 @@ open HolKernel Parse boolLib bossLib;
 
 val _ = new_theory "A";
 
+Theorem simple_thm = TRUTH;
+
 Theorem a_thm:
   T
 Proof
@@ -58,6 +60,10 @@ require_grep "theorem_boundary a_thm" "$project/.holbuild/dep/replay/src/AScript
 require_grep "theorem_boundary c_thm" "$project/.holbuild/dep/replay/src/AScript.sml.key"
 require_grep "_end_of_proof.save" "$project/.holbuild/dep/replay/src/AScript.sml.key"
 require_grep "dependency_context_key=" "$project/.holbuild/dep/replay/src/AScript.sml.key"
+if grep -q "theorem_boundary simple_thm" "$project/.holbuild/dep/replay/src/AScript.sml.key"; then
+  echo "simple Theorem = declaration should not create a goalfrag checkpoint" >&2
+  exit 1
+fi
 
 cat > "$tmpdir/check-proof-state.sml" <<'SML'
 val _ = proofManagerLib.b();
