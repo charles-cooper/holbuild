@@ -3,5 +3,7 @@ bin/holbuild
 .hol/
 .holconfig.toml
 .agent-files/
+scratch/
+scratchbuilds/
 
 .sandbox
