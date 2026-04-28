@@ -28,7 +28,7 @@ This prototype is intentionally small:
 - executes simple theory-script builds into project `.holbuild/` without Holmake
 - records local action metadata and skips unchanged actions
 - publishes/restores simple theory semantic artifacts through the global cache
-- includes the explicit HOL base state/toolchain in prototype action keys
+- includes the resolved base context/toolchain in prototype action keys
 - saves local theory checkpoints: dependencies-loaded, AST-derived theorem end-of-proof/context checkpoints for modern theorem declarations, and successor-ready final context
 - exports explicit project heap targets from `[[heap]]` entries using local SaveState
 - exposes `holbuild cache gc` with a 7-day default global-cache retention policy
@@ -36,7 +36,10 @@ This prototype is intentionally small:
 - treats `.uo`/`.ui` as internal ML artifacts, never user-requestable targets
 - delegates execution to `$HOLDIR/bin/hol run` / `hol repl` for now
 
-It requires an already-configured HOL checkout or installation.
+The external prototype requires a HOL checkout or installation via `HOLDIR` so it
+can reuse HOL tooling. User-project builds currently treat that installed HOL
+state as an external base context; root-HOL bootstrap is modeled separately in
+`DESIGN.md` and must not rebuild core theories from the configured full HOL heap.
 
 ## Build
 

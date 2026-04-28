@@ -73,8 +73,12 @@ legacy `Holmakefile`.
 
 Root HOL should be built through holbuild's own model, using an in-tree or
 default HOL manifest. HOL is not permanently treated as an opaque legacy build.
-The prototype still requires an already configured `HOLDIR` so it can reuse HOL
-implementation pieces while the model is incubated.
+The prototype still requires `HOLDIR` so it can reuse HOL implementation pieces
+while the model is incubated. For ordinary user projects, the installed HOL state
+is an external dependency/toolchain input. For root-HOL bootstrap, that configured
+HOL heap is not the build base: root HOL must start from an explicit base context
+such as PolyML/no HOL state or an earlier holbuild-produced checkpoint, then grow
+successor checkpoints through the build graph.
 
 The root-HOL transition should be explicit rather than inferred from existing
 Holmakefiles. A plausible first in-tree/default manifest has package identity
@@ -115,6 +119,10 @@ non-build tooling/examples/tests behind explicit package/action boundaries.
 `examples/root-hol/holproject.toml` is the current sketch: it enumerates HOL
 `src/*` members, excludes selftests/examples/tool variants that collide on
 logical names, and dry-run planned 1461 HOL package nodes in the audited checkout.
+A follow-up regression test dry-runs that sketch against `$HOLDIR`. Attempting to
+source-build core theories against `$HOLDIR/bin/hol.state` is intentionally wrong:
+that state already contains those theories. Executable root-HOL bootstrap needs
+manifest-level base-context/checkpoint phases, not a configured full HOL heap.
 A smaller illustrative fragment:
 
 ```toml
@@ -231,7 +239,7 @@ owner is on the same host and its recorded process no longer exists, holbuild
 removes the stale lock and retries. The default remains `-j1` because HOL/PolyML
 heaps can be memory-heavy and path-sensitive artifact installs need conservative
 discipline. Heap targets use `-j` for their declared object build phase, then
-export the heap serially from the explicit base state.
+export the heap serially from the resolved base context.
 
 ## Artifacts and local materialization
 
@@ -279,9 +287,9 @@ input_key = hash(
   logical target,
   source package id + relative path,
   source content hash,
-  resolved dependency input/output keys,
+  resolved dependency input keys,
   relevant manifest action policy and extra input hashes,
-  HOL/toolchain/base-state key,
+  HOL/toolchain/base-context key,
   platform/ML-system facts where relevant
 )
 ```
@@ -332,9 +340,9 @@ Cache lookup happens only after resolution and action-key computation.
 
 ```text
 if exact action key validates:
-  materialize into local .hol
+  materialize into local .holbuild/
 else:
-  build from source into local .hol
+  build from source into local .holbuild/
   optionally publish bundle to cache
 ```
 
@@ -342,11 +350,11 @@ The cache should store semantic bundles and metadata. Local path-sensitive files
 are regenerated or rebased during materialization. The prototype currently
 publishes simple theory bundles containing `Theory.sig`, `Theory.dat`, and a
 `Theory.sml` template with the `.dat` load path replaced by a placeholder. On a
-cache hit, holbuild copies blobs into local `.holbuild/`, rewrites the template to the
-canonical local `.dat` path, writes local `.uo/.ui` load manifests plus
+cache hit, holbuild copies blobs into local `.holbuild/`, rewrites the template
+to the canonical local `.dat` path, writes local `.uo/.ui` load manifests plus
 `HOLFileSys` remap copies, and recreates local
-`deps_loaded.save`/`final_context.save` checkpoints from the explicit HOL base
-state. Missing or corrupt cache entries warn and fall back to source build.
+`deps_loaded.save`/`final_context.save` checkpoints from the action's resolved
+base context. Missing or corrupt cache entries warn and fall back to source build.
 
 Materialization preference for v1:
 
@@ -407,15 +415,15 @@ PolyML heap checkpoints and `.save` files are local project artifacts for now:
 Explicit heap targets are requested with `holbuild heap NAME` from `[[heap]]`
 manifest entries. They are exported artifacts, not the normal incremental-build
 primitive: holbuild first builds the declared logical objects, then starts from
-the explicit HOL base state, loads generated theory modules in resolved
-build-graph order, and saves the requested heap with PolyML SaveState.
+the resolved base context, loads generated theory modules in resolved build-graph
+order, and saves the requested heap with PolyML SaveState.
 
 They are large, path/session/toolchain sensitive, and can create contention if
 shared globally. A future global checkpoint cache needs stricter validation,
 locking, and platform/toolchain/root keys. Until then, global cache stores
 semantic build artifacts only.
 
-`holbuild` should not use legacy `hol buildheap` as the normal incremental-build
+`holbuild` should not use `hol buildheap` as the normal incremental-build
 primitive. `buildheap` snapshots a process after loading a closure of `.uo`
 modules. In holbuild, loading ancestors in resolved topological order naturally
 constructs the same dependency context inside the build process; any checkpoint
@@ -445,7 +453,7 @@ syntactic checkpoint:    if the action changed, where can replay resume?
 ```
 
 A holbuild checkpoint action keys replay eligibility by the exact source
-prefix/boundary identity, resolved dependency-context key, HOL/toolchain/base-state
+prefix/boundary identity, resolved dependency-context key, HOL/toolchain/base-context
 key, and checkpoint schema. Raw `.save` bytes are diagnostic only and must not be
 used as stable semantic keys. Checkpoints remain local under `.holbuild/checkpoints/`
 until their path/session sensitivity is understood well enough for sharing.
