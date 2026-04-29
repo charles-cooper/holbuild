@@ -171,11 +171,40 @@ fun project_preload_lines dep =
     | HolbuildSourceIndex.Sml => [load_project_line (load_stem dep)]
     | HolbuildSourceIndex.Sig => []
 
-fun save_heap_line {share_common_data, output} =
-  (if share_common_data then "val _ = PolyML.shareCommonData PolyML.rootFunction;\n" else "") ^
-  "val _ = PolyML.SaveState.saveChild(" ^
-  HolbuildToolchain.sml_string output ^
-  ", length (PolyML.SaveState.showHierarchy()));"
+fun checkpoint_ok_path path = path ^ ".ok"
+
+fun remove_checkpoint path =
+  (remove_file (checkpoint_ok_path path); remove_file path)
+
+fun save_heap_line {label, share_common_data, output} =
+  let val default_share = if share_common_data then "true" else "false"
+  in
+    String.concatWith "\n"
+      ["val _ = let",
+       "  val holbuild_checkpoint_path = " ^ HolbuildToolchain.sml_string output,
+       "  val holbuild_checkpoint_label = " ^ HolbuildToolchain.sml_string label,
+       "  val holbuild_checkpoint_default_share = " ^ default_share,
+       "  fun holbuild_checkpoint_bool name = case OS.Process.getEnv name of SOME \"1\" => SOME true | SOME \"true\" => SOME true | SOME \"yes\" => SOME true | SOME \"0\" => SOME false | SOME \"false\" => SOME false | SOME \"no\" => SOME false | _ => NONE",
+       "  fun holbuild_checkpoint_remove path = OS.FileSys.remove path handle _ => ()",
+       "  fun holbuild_checkpoint_write_ok path = let val out = TextIO.openOut path in TextIO.output(out, \"holbuild-checkpoint-ok-v1\\n\"); TextIO.closeOut out end",
+       "  fun holbuild_checkpoint_seconds (a, b) = Time.toReal (Time.-(b, a))",
+       "  fun holbuild_checkpoint_fmt t = Real.fmt (StringCvt.FIX (SOME 3)) t",
+       "  fun holbuild_checkpoint_bool_text true = \"true\" | holbuild_checkpoint_bool_text false = \"false\"",
+       "  val holbuild_checkpoint_share = Option.getOpt(holbuild_checkpoint_bool \"HOLBUILD_SHARE_COMMON_DATA\", holbuild_checkpoint_default_share)",
+       "  val holbuild_checkpoint_timing = Option.getOpt(holbuild_checkpoint_bool \"HOLBUILD_CHECKPOINT_TIMING\", false)",
+       "  val holbuild_checkpoint_ok = holbuild_checkpoint_path ^ \".ok\"",
+       "  val holbuild_checkpoint_depth = length (PolyML.SaveState.showHierarchy())",
+       "  val holbuild_checkpoint_t0 = Time.now()",
+       "  val _ = holbuild_checkpoint_remove holbuild_checkpoint_ok",
+       "  val _ = holbuild_checkpoint_remove holbuild_checkpoint_path",
+       "  val _ = if holbuild_checkpoint_share then PolyML.shareCommonData PolyML.rootFunction else ()",
+       "  val holbuild_checkpoint_t1 = Time.now()",
+       "  val _ = PolyML.SaveState.saveChild(holbuild_checkpoint_path, holbuild_checkpoint_depth)",
+       "  val holbuild_checkpoint_t2 = Time.now()",
+       "  val _ = holbuild_checkpoint_write_ok holbuild_checkpoint_ok",
+       "  val _ = if holbuild_checkpoint_timing then TextIO.output(TextIO.stdErr, String.concat [\"holbuild checkpoint kind=\", holbuild_checkpoint_label, \" share=\", holbuild_checkpoint_bool_text holbuild_checkpoint_share, \" depth=\", Int.toString holbuild_checkpoint_depth, \" share_s=\", holbuild_checkpoint_fmt (holbuild_checkpoint_seconds (holbuild_checkpoint_t0, holbuild_checkpoint_t1)), \" save_s=\", holbuild_checkpoint_fmt (holbuild_checkpoint_seconds (holbuild_checkpoint_t1, holbuild_checkpoint_t2)), \" size=\", Position.toString (OS.FileSys.fileSize holbuild_checkpoint_path), \" path=\", holbuild_checkpoint_path, \"\\n\"]) else ()",
+       "in () end;"]
+  end
 
 fun direct_external_loads plan node =
   unique_strings
@@ -190,7 +219,8 @@ fun write_preload plan node deps_loaded path =
     val lines = map load_theory_line external_deps @
                 map load_project_line external_libs @
                 List.concat (map project_preload_lines project_deps) @
-                [save_heap_line {share_common_data = true, output = deps_loaded}]
+                [save_heap_line {label = "deps_loaded", share_common_data = true,
+                                 output = deps_loaded}]
   in
     write_text path (String.concatWith "\n" lines ^ "\n")
   end
@@ -206,7 +236,8 @@ fun write_final_context_loader {sig_path, sml_path, output, path, mldeps_report}
       mldep_report_lines mldeps_report @
       ["use " ^ HolbuildToolchain.sml_string sig_path ^ ";",
        "use " ^ HolbuildToolchain.sml_string sml_path ^ ";",
-       save_heap_line {share_common_data = true, output = output}]
+       save_heap_line {label = "final_context", share_common_data = true,
+                       output = output}]
   in
     write_text path (String.concatWith "\n" lines ^ "\n")
   end
@@ -347,6 +378,8 @@ fun with_project_lock project command f =
 
 fun file_exists path = FS.access(path, [FS.A_READ]) handle OS.SysErr _ => false
 
+fun checkpoint_exists path = file_exists path andalso file_exists (checkpoint_ok_path path)
+
 fun file_hash path = SHA1_ML.sha1_file {filename = path}
 
 fun current_metadata path = SOME (read_text path) handle IO.Io _ => NONE
@@ -373,7 +406,8 @@ fun project_base_context_path (project : HolbuildProject.t) toolchain_key =
               toolchain_key ^ ".save")
 
 fun save_current_context_script output path =
-  write_text path (save_heap_line {share_common_data = false, output = output} ^ "\n")
+  write_text path (save_heap_line {label = "base", share_common_data = false,
+                                   output = output} ^ "\n")
 
 fun ensure_project_base_context tc project toolchain_key =
   let
@@ -381,7 +415,7 @@ fun ensure_project_base_context tc project toolchain_key =
     val stage = Path.concat(Path.concat(#root project, ".holbuild/stage"), "base-" ^ toolchain_key)
     val script = Path.concat(stage, "holbuild-save-base-context.sml")
   in
-    if file_exists output then HolState output
+    if checkpoint_exists output then HolState output
     else
       (ensure_dir stage;
        ensure_parent output;
@@ -640,7 +674,9 @@ fun remove_failed_cache_outputs project node =
        theory_ui, hfs_remapped_path theory_ui,
        theory_uo, hfs_remapped_path theory_uo,
        deps_loaded_path project node,
-       final_context_path project node]
+       checkpoint_ok_path (deps_loaded_path project node),
+       final_context_path project node,
+       checkpoint_ok_path (final_context_path project node)]
   in
     List.app remove_file paths
   end
@@ -786,7 +822,7 @@ fun replay_candidates old_boundaries checkpoints =
     (fn checkpoint =>
         case List.find (fn old => same_boundary old checkpoint) old_boundaries of
             SOME old =>
-              if file_exists (#context_path old) then
+              if checkpoint_exists (#context_path old) then
                 SOME {boundary = #boundary checkpoint, path = #context_path old,
                       safe_name = #safe_name checkpoint}
               else NONE
@@ -859,7 +895,7 @@ fun build_theory tc project base_context plan keys toolchain_key node source_tex
     val run_spec = write_theory_script tc project base_context plan keys toolchain_key node
                                     source_text theorem_checkpoints staged_script preload
     fun remove_theorem_checkpoint {context_path, end_of_proof_path, ...} =
-      (remove_file context_path; remove_file end_of_proof_path)
+      (remove_checkpoint context_path; remove_checkpoint end_of_proof_path)
     fun run_plain_after_checkpoint_failure msg =
       let
         val _ = print (logical_name node ^
@@ -930,7 +966,11 @@ fun output_paths project node =
   in
     case #kind (HolbuildBuildPlan.source_of node) of
         HolbuildSourceIndex.TheoryScript =>
-          deps_loaded_path project node :: final_context_path project node :: base
+          deps_loaded_path project node ::
+          checkpoint_ok_path (deps_loaded_path project node) ::
+          final_context_path project node ::
+          checkpoint_ok_path (final_context_path project node) ::
+          base
       | _ => base
   end
 
@@ -1189,7 +1229,8 @@ fun write_heap_loader plan output path =
     val lines =
       map load_theory_line (heap_external_theories plan) @
       List.concat (map heap_theory_load_lines plan) @
-      [save_heap_line {share_common_data = false, output = output}]
+      [save_heap_line {label = "heap", share_common_data = false,
+                       output = output}]
   in
     write_text path (String.concatWith "\n" lines ^ "\n")
   end

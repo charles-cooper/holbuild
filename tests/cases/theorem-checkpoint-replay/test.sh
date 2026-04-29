@@ -51,11 +51,17 @@ SML
 
 (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory)
 require_file "$project/.holbuild/checkpoints/replay/src/AScript.sml.a_thm_context.save"
+require_file "$project/.holbuild/checkpoints/replay/src/AScript.sml.a_thm_context.save.ok"
 require_file "$project/.holbuild/checkpoints/replay/src/AScript.sml.a_thm_end_of_proof.save"
+require_file "$project/.holbuild/checkpoints/replay/src/AScript.sml.a_thm_end_of_proof.save.ok"
 require_file "$project/.holbuild/checkpoints/replay/src/AScript.sml.b_thm_context.save"
+require_file "$project/.holbuild/checkpoints/replay/src/AScript.sml.b_thm_context.save.ok"
 require_file "$project/.holbuild/checkpoints/replay/src/AScript.sml.b_thm_end_of_proof.save"
+require_file "$project/.holbuild/checkpoints/replay/src/AScript.sml.b_thm_end_of_proof.save.ok"
 require_file "$project/.holbuild/checkpoints/replay/src/AScript.sml.c_thm_context.save"
+require_file "$project/.holbuild/checkpoints/replay/src/AScript.sml.c_thm_context.save.ok"
 require_file "$project/.holbuild/checkpoints/replay/src/AScript.sml.c_thm_end_of_proof.save"
+require_file "$project/.holbuild/checkpoints/replay/src/AScript.sml.c_thm_end_of_proof.save.ok"
 require_grep "theorem_boundary a_thm" "$project/.holbuild/dep/replay/src/AScript.sml.key"
 require_grep "theorem_boundary c_thm" "$project/.holbuild/dep/replay/src/AScript.sml.key"
 require_grep "_end_of_proof.save" "$project/.holbuild/dep/replay/src/AScript.sml.key"
@@ -105,6 +111,22 @@ SML
   --holstate "$project/.holbuild/checkpoints/replay/src/AScript.sml.c_thm_end_of_proof.save" \
   "$tmpdir/check-proof-state.sml"
 
+rm "$project/.holbuild/checkpoints/replay/src/AScript.sml.a_thm_context.save.ok"
+python3 - <<PY
+from pathlib import Path
+path = Path("$project/src/AScript.sml")
+text = path.read_text()
+path.write_text(text.replace('Theorem b_thm:', '(* missing-ok edit after a_thm *)\nTheorem b_thm:'))
+PY
+
+missing_ok_log=$tmpdir/missing-ok-replay.log
+(cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$missing_ok_log" 2>&1
+if grep -q "replaying from checkpoint" "$missing_ok_log"; then
+  echo "replayed from checkpoint without .ok marker" >&2
+  exit 1
+fi
+require_file "$project/.holbuild/checkpoints/replay/src/AScript.sml.a_thm_context.save.ok"
+
 python3 - <<PY
 from pathlib import Path
 path = Path("$project/src/AScript.sml")
@@ -133,7 +155,9 @@ if (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$failu
 fi
 require_grep "expected failure" "$failure_log"
 if [[ -e "$project/.holbuild/checkpoints/replay/src/AScript.sml.b_thm_context.save" || \
-      -e "$project/.holbuild/checkpoints/replay/src/AScript.sml.b_thm_end_of_proof.save" ]]; then
+      -e "$project/.holbuild/checkpoints/replay/src/AScript.sml.b_thm_context.save.ok" || \
+      -e "$project/.holbuild/checkpoints/replay/src/AScript.sml.b_thm_end_of_proof.save" || \
+      -e "$project/.holbuild/checkpoints/replay/src/AScript.sml.b_thm_end_of_proof.save.ok" ]]; then
   echo "stale b_thm checkpoint survived failed proof" >&2
   exit 1
 fi

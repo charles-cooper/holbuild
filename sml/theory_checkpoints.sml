@@ -118,9 +118,16 @@ val runtime_load_lines =
 val runtime_theorem_state_lines =
   ["val holbuild_theorem_info = ref NONE : (string * string * string * string * bool * int) option ref;",
    "val holbuild_context_info = ref NONE : (string * int) option ref;",
-   "fun holbuild_delete path = if OS.FileSys.access(path, []) then OS.FileSys.remove path else ();",
-   "fun holbuild_begin_theorem (name, tactic_text, context_path, end_path, has_attrs) = let val depth = length (PolyML.SaveState.showHierarchy()) in holbuild_delete context_path; holbuild_delete end_path; holbuild_theorem_info := SOME (name, tactic_text, context_path, end_path, has_attrs, depth); holbuild_context_info := SOME (context_path, depth) end;",
-   "fun holbuild_save_theorem_context () = case !holbuild_context_info of NONE => () | SOME (context_path, depth) => (holbuild_context_info := NONE; PolyML.SaveState.saveChild(context_path, depth));"]
+   "fun holbuild_env_bool name = case OS.Process.getEnv name of SOME \"1\" => SOME true | SOME \"true\" => SOME true | SOME \"yes\" => SOME true | SOME \"0\" => SOME false | SOME \"false\" => SOME false | SOME \"no\" => SOME false | _ => NONE;",
+   "fun holbuild_bool_text true = \"true\" | holbuild_bool_text false = \"false\";",
+   "fun holbuild_seconds (a, b) = Time.toReal (Time.-(b, a));",
+   "fun holbuild_fmt_time t = Real.fmt (StringCvt.FIX (SOME 3)) t;",
+   "fun holbuild_delete_file path = OS.FileSys.remove path handle _ => ();",
+   "fun holbuild_delete_checkpoint path = (holbuild_delete_file (path ^ \".ok\"); holbuild_delete_file path);",
+   "fun holbuild_write_checkpoint_ok path = let val out = TextIO.openOut (path ^ \".ok\") in TextIO.output(out, \"holbuild-checkpoint-ok-v1\\n\"); TextIO.closeOut out end;",
+   "fun holbuild_save_checkpoint label default_share path depth = let val share = Option.getOpt(holbuild_env_bool \"HOLBUILD_SHARE_COMMON_DATA\", default_share) val timing = Option.getOpt(holbuild_env_bool \"HOLBUILD_CHECKPOINT_TIMING\", false) val t0 = Time.now() val _ = holbuild_delete_checkpoint path val _ = if share then PolyML.shareCommonData PolyML.rootFunction else () val t1 = Time.now() val _ = PolyML.SaveState.saveChild(path, depth) val t2 = Time.now() val _ = holbuild_write_checkpoint_ok path val _ = if timing then TextIO.output(TextIO.stdErr, String.concat [\"holbuild checkpoint kind=\", label, \" share=\", holbuild_bool_text share, \" depth=\", Int.toString depth, \" share_s=\", holbuild_fmt_time (holbuild_seconds (t0, t1)), \" save_s=\", holbuild_fmt_time (holbuild_seconds (t1, t2)), \" size=\", Position.toString (OS.FileSys.fileSize path), \" path=\", path, \"\\n\"]) else () in () end;",
+   "fun holbuild_begin_theorem (name, tactic_text, context_path, end_path, has_attrs) = let val depth = length (PolyML.SaveState.showHierarchy()) in holbuild_delete_checkpoint context_path; holbuild_delete_checkpoint end_path; holbuild_theorem_info := SOME (name, tactic_text, context_path, end_path, has_attrs, depth); holbuild_context_info := SOME (context_path, depth) end;",
+   "fun holbuild_save_theorem_context () = case !holbuild_context_info of NONE => () | SOME (context_path, depth) => (holbuild_context_info := NONE; holbuild_save_checkpoint \"theorem_context\" false context_path depth);"]
 
 val runtime_tactic_parse_lines =
   ["fun holbuild_parse_tactic s = let",
@@ -236,7 +243,7 @@ val runtime_prover_lines =
    "          val _ = proofManagerLib.set_goalfrag g",
    "          val _ = if has_attrs orelse tactic_text = \"\" then (proofManagerLib.expand tac; ()) else holbuild_run_steps (holbuild_steps tactic_text)",
    "          val th = proofManagerLib.top_thm()",
-   "          val _ = PolyML.SaveState.saveChild(end_path, checkpoint_depth)",
+   "          val _ = holbuild_save_checkpoint \"end_of_proof\" false end_path checkpoint_depth",
    "          val _ = proofManagerLib.drop_all()",
    "        in th end",
    "        handle e => (holbuild_theorem_info := NONE; holbuild_context_info := NONE; holbuild_drop_all(); raise e);",
