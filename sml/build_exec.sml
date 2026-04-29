@@ -401,12 +401,9 @@ fun file_hash path = SHA1_ML.sha1_file {filename = path}
 
 fun current_metadata path = SOME (read_text path) handle IO.Io _ => NONE
 
-datatype hol_context = PolyBase | HolState of string
+datatype hol_context = HolState of string
 
-fun hol_context_args context =
-  case context of
-      PolyBase => ["--poly"]
-    | HolState path => ["--holstate", path]
+fun hol_context_args (HolState path) = ["--holstate", path]
 
 fun run_hol_files tc stage context files error_message =
   let
@@ -418,30 +415,7 @@ fun run_hol_files tc stage context files error_message =
     else raise Error error_message
   end
 
-fun project_base_context_path (project : HolbuildProject.t) toolchain_key =
-  Path.concat(Path.concat(Path.concat(#root project, ".holbuild/checkpoints"), "_base"),
-              toolchain_key ^ ".save")
-
-fun save_current_context_script output path =
-  write_text path (save_heap_line {label = "base", share_common_data = false,
-                                   output = output} ^ "\n")
-
-fun ensure_project_base_context tc project toolchain_key =
-  let
-    val output = project_base_context_path project toolchain_key
-    val stage = Path.concat(Path.concat(#root project, ".holbuild/stage"), "base-" ^ toolchain_key)
-    val script = Path.concat(stage, "holbuild-save-base-context.sml")
-  in
-    if checkpoint_exists output then HolState output
-    else
-      (ensure_dir stage;
-       ensure_parent output;
-       save_current_context_script output script;
-       run_hol_files tc stage (HolState (HolbuildToolchain.base_state tc)) [script]
-         "hol run failed while saving project base context";
-       remove_tree stage;
-       HolState output)
-  end
+fun toolchain_base_context tc = HolState (HolbuildToolchain.base_state tc)
 
 val cache_sml_token = "__HOLBUILD_THEORY_DAT_LOAD__"
 
@@ -1304,9 +1278,7 @@ fun build_parallel options tc project base_context plan keys toolchain_key jobs 
 
 fun build (options : build_options) tc project plan toolchain_key jobs =
   let
-    val base_context =
-      if #skip_checkpoints options then HolState (HolbuildToolchain.base_state tc)
-      else ensure_project_base_context tc project toolchain_key
+    val base_context = toolchain_base_context tc
     val keys = HolbuildBuildPlan.input_keys (build_config_lines options) toolchain_key plan
   in
     if jobs <= 1 then build_serial options tc project base_context plan keys toolchain_key
@@ -1336,8 +1308,7 @@ fun write_heap_loader plan output path =
 
 fun export_heap tc (project : HolbuildProject.t) plan output =
   let
-    val toolchain_key = HolbuildToolchain.toolchain_key tc
-    val base_context = ensure_project_base_context tc project toolchain_key
+    val base_context = toolchain_base_context tc
     val stage = Path.concat(Path.concat(#root project, ".holbuild/stage"), "heap")
     val loader = Path.concat(stage, "holbuild-save-heap.sml")
   in

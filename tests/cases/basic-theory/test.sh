@@ -35,7 +35,6 @@ first_log=$tmpdir/first.log
 (cd "$project" && \
   HOLBUILD_CHECKPOINT_TIMING=1 HOLBUILD_SHARE_COMMON_DATA=0 \
   "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$first_log" 2>&1
-require_grep "holbuild checkpoint kind=base share=false" "$first_log"
 require_grep "holbuild checkpoint kind=deps_loaded share=false" "$first_log"
 require_grep "holbuild checkpoint kind=final_context share=false" "$first_log"
 
@@ -47,10 +46,8 @@ require_file "$project/.holbuild/checkpoints/basic/src/AScript.sml.deps_loaded.s
 require_file "$project/.holbuild/checkpoints/basic/src/AScript.sml.final_context.save"
 require_file "$project/.holbuild/checkpoints/basic/src/AScript.sml.final_context.save.ok"
 require_file "$project/.holbuild/dep/basic/src/AScript.sml.key"
-base_count=$(find "$project/.holbuild/checkpoints/_base" -name '*.save' | wc -l)
-base_ok_count=$(find "$project/.holbuild/checkpoints/_base" -name '*.save.ok' | wc -l)
-if [[ "$base_count" -lt 1 || "$base_ok_count" -lt 1 ]]; then
-  echo "missing project base checkpoint" >&2
+if find "$project/.holbuild/checkpoints/_base" -name '*.save' -o -name '*.save.ok' 2>/dev/null | grep -q .; then
+  echo "unexpected project base checkpoint" >&2
   exit 1
 fi
 
@@ -69,10 +66,8 @@ require_file "$project/.holbuild/checkpoints/basic/src/AScript.sml.deps_loaded.s
 require_file "$project/.holbuild/checkpoints/basic/src/AScript.sml.deps_loaded.save.ok"
 require_file "$project/.holbuild/checkpoints/basic/src/AScript.sml.final_context.save"
 require_file "$project/.holbuild/checkpoints/basic/src/AScript.sml.final_context.save.ok"
-base_count=$(find "$project/.holbuild/checkpoints/_base" -name '*.save' | wc -l)
-base_ok_count=$(find "$project/.holbuild/checkpoints/_base" -name '*.save.ok' | wc -l)
-if [[ "$base_count" -lt 1 || "$base_ok_count" -lt 1 ]]; then
-  echo "missing restored project base checkpoint" >&2
+if find "$project/.holbuild/checkpoints/_base" -name '*.save' -o -name '*.save.ok' 2>/dev/null | grep -q .; then
+  echo "unexpected restored project base checkpoint" >&2
   exit 1
 fi
 

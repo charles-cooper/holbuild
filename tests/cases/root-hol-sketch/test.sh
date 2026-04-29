@@ -41,8 +41,7 @@ fi
 (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build KernelTypes) > "$tmpdir/kerneltypes.log"
 require_file "$project/.holbuild/deps/HOL/obj/src/0/KernelTypes.uo"
 require_file "$project/.holbuild/deps/HOL/obj/src/0/KernelTypes.ui"
-base_count=$(find "$project/.holbuild/checkpoints/_base" -name '*.save' | wc -l)
-if [[ "$base_count" -lt 1 ]]; then
-  echo "root-HOL SML probe did not create a project base checkpoint" >&2
+if find "$project/.holbuild/checkpoints/_base" -name '*.save' -o -name '*.save.ok' 2>/dev/null | grep -q .; then
+  echo "root-HOL SML probe created an unexpected project base checkpoint" >&2
   exit 1
 fi

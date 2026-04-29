@@ -78,12 +78,11 @@ legacy `Holmakefile`.
 Root HOL should be built through holbuild's own model, using an in-tree or
 default HOL manifest. HOL is not permanently treated as an opaque legacy build.
 The prototype still requires `HOLDIR` so it can reuse HOL implementation pieces
-while the model is incubated. That is a host/tool dependency, not the semantic
-state of the target build. During the transition, holbuild may seed a
-project-local base checkpoint from `HOLDIR/bin/hol.state`, keyed by the toolchain
-and stored under `.holbuild/checkpoints/_base/`, so target actions exercise
-checkpoint loading rather than using the configured heap directly. The target
-model replaces that seed with declared bootstrap contexts. Root HOL and user
+while the model is incubated. That is a host/tool dependency, not the final
+semantic state model. During the transition, holbuild starts target actions from
+`HOLDIR/bin/hol.state` directly and includes that heap in the toolchain key; it
+does not copy it into a project-local `_base` checkpoint. The target model
+replaces this configured seed with declared bootstrap contexts. Root HOL and user
 dependencies should be ordinary manifest-resolved package nodes whose contexts
 are produced by holbuild. The initial build context is a declared bootstrap
 context; later actions start from predecessor checkpoints or validated shared
