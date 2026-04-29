@@ -51,7 +51,7 @@ fun hash_text text =
     hash
   end
 
-fun file_hash path = (require_readable path; SHA1_ML.sha1_file {filename = path})
+fun file_hash path = (require_readable path; HolbuildHash.file_sha1 path)
 
 fun toolchain_key tc =
   hash_text

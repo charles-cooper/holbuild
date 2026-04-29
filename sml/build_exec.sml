@@ -420,7 +420,7 @@ fun file_exists path = FS.access(path, [FS.A_READ]) handle OS.SysErr _ => false
 
 fun checkpoint_exists path = file_exists path andalso file_exists (checkpoint_ok_path path)
 
-fun file_hash path = SHA1_ML.sha1_file {filename = path}
+fun file_hash path = HolbuildHash.file_sha1 path
 
 fun current_metadata path = SOME (read_text path) handle IO.Io _ => NONE
 
@@ -658,7 +658,7 @@ fun holfs_unmapped_theory_artifact path =
 fun generated_holdep_mldeps tc path =
   let
     val sigobj = Path.concat(#holdir tc, "sigobj")
-    val deps = HolbuildDependencies.holdep_deps [sigobj] (holfs_unmapped_theory_artifact path)
+    val deps = HolbuildDependencies.resolved_holdep_deps [sigobj] (holfs_unmapped_theory_artifact path)
   in
     unique_strings (map (generated_holdep_stem tc) deps)
   end

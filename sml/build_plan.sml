@@ -8,7 +8,7 @@ exception Error of string
 
 type node =
   { source : HolbuildSourceIndex.source,
-    deps : HolbuildDependencies.t,
+    deps : HolbuildDependencies.t option ref,
     external_dirs : string list }
 
 type t = node list
@@ -16,7 +16,12 @@ type t = node list
 type keyed_node = {node : node, input_key : string}
 
 fun source_of ({source, ...} : node) = source
-fun deps_of ({deps, ...} : node) = deps
+fun deps_of ({source, deps, ...} : node) =
+  case !deps of
+      SOME value => value
+    | NONE =>
+      let val value = HolbuildDependencies.extract (#source_path source)
+      in deps := SOME value; value end
 fun external_dirs_of ({external_dirs, ...} : node) = external_dirs
 fun logical_name node = #logical_name (source_of node)
 fun package node = #package (source_of node)
@@ -30,14 +35,6 @@ fun add_unique (value, values) = if member value values then values else value :
 fun unique_strings values = rev (List.foldl add_unique [] values)
 
 fun normalize_path path = Path.mkCanonical path handle Path.InvalidArc => path
-
-fun source_dir source = normalize_path (Path.dir (#source_path source))
-
-fun readable_dir path = FS.isDir path handle OS.SysErr _ => false
-
-fun dependency_includes holdir sources =
-  List.filter readable_dir
-    (unique_strings (map source_dir sources @ [normalize_path (Path.concat(holdir, "sigobj"))]))
 
 fun has_logical_name name node = logical_name node = name
 
@@ -74,45 +71,20 @@ fun direct_dependency_names node =
   unique_strings
     (#loads (deps_of node) @ declared_dependency_names node @ declared_load_names node)
 
-fun source_object_candidates node =
+fun unique_nodes nodes =
   let
-    val dir = source_dir (source_of node)
-    fun in_source_tree ext = normalize_path (Path.concat(dir, logical_name node ^ ext))
+    fun add (node, kept) =
+      if member (key node) (map key kept) then kept else node :: kept
   in
-    case #kind (source_of node) of
-        HolbuildSourceIndex.TheoryScript => [in_source_tree ".uo"]
-      | HolbuildSourceIndex.Sml => [in_source_tree ".uo"]
-      | HolbuildSourceIndex.Sig => [in_source_tree ".ui"]
+    rev (List.foldl add [] nodes)
   end
-
-fun holdep_project_dep candidate dep = member dep (source_object_candidates candidate)
 
 fun direct_holdep_project_deps nodes node =
   let
-    val deps = #holdep_deps (deps_of node)
+    val mentions = #holdep_mentions (deps_of node)
+    fun not_self candidate = key candidate <> key node
   in
-    List.filter
-      (fn candidate => key candidate <> key node andalso
-                       List.exists (holdep_project_dep candidate) deps)
-      nodes
-  end
-
-fun has_path_prefix prefix path =
-  let
-    val prefix' = normalize_path prefix
-    val path' = normalize_path path
-    val prefix_with_slash = if String.isSuffix "/" prefix' then prefix' else prefix' ^ "/"
-  in
-    path' = prefix' orelse String.isPrefix prefix_with_slash path'
-  end
-
-fun dep_stem dep =
-  let
-    val file = Path.file dep
-  in
-    if String.isSuffix ".uo" file then String.substring(file, 0, size file - 3)
-    else if String.isSuffix ".ui" file then String.substring(file, 0, size file - 3)
-    else file
+    unique_nodes (List.filter not_self (List.concat (map (nodes_named nodes) mentions)))
   end
 
 fun readable_path path = FS.access(path, [FS.A_READ]) handle OS.SysErr _ => false
@@ -123,12 +95,13 @@ fun external_load_available node name =
                readable_path (Path.concat(dir, name ^ ".ui")))
     (external_dirs_of node)
 
-fun holdep_external_dep node dep =
-  List.exists (fn dir => has_path_prefix dir dep) (external_dirs_of node) orelse
-  external_load_available node (dep_stem dep)
-
-fun holdep_external_names node =
-  unique_strings (map dep_stem (List.filter (holdep_external_dep node) (#holdep_deps (deps_of node))))
+fun holdep_external_names nodes node =
+  let
+    fun known name = not (null (nodes_named nodes name))
+    fun external name = not (known name) andalso external_load_available node name
+  in
+    unique_strings (List.filter external (#holdep_mentions (deps_of node)))
+  end
 
 fun raw_external_load_names nodes node =
   let
@@ -150,14 +123,6 @@ fun signature_companion_deps nodes node =
           nodes
     | _ => []
 
-fun unique_nodes nodes =
-  let
-    fun add (node, kept) =
-      if member (key node) (map key kept) then kept else node :: kept
-  in
-    rev (List.foldl add [] nodes)
-  end
-
 fun direct_project_deps nodes node =
   let
     fun candidates name = nodes_named nodes name
@@ -172,7 +137,7 @@ fun direct_project_deps nodes node =
 fun direct_external_theories nodes node =
   let
     fun known name = not (null (nodes_named nodes name))
-    val holdep_theories = List.filter theory_name (holdep_external_names node)
+    val holdep_theories = List.filter theory_name (holdep_external_names nodes node)
     val loaded_theories = List.filter theory_name (#loads (deps_of node))
   in
     unique_strings (List.filter (fn name => not (known name))
@@ -182,7 +147,7 @@ fun direct_external_theories nodes node =
 fun direct_external_libs nodes node =
   let
     fun known name = not (null (nodes_named nodes name))
-    val holdep_libs = List.filter (fn name => not (theory_name name)) (holdep_external_names node)
+    val holdep_libs = List.filter (fn name => not (theory_name name)) (holdep_external_names nodes node)
   in
     unique_strings
       (List.filter (fn name => not (known name))
@@ -205,15 +170,6 @@ fun direct_unresolved_declared_deps nodes node =
     List.filter (fn name => not (known name)) (declared_dependency_names node)
   end
 
-fun holdep_project_dep_any nodes dep =
-  List.exists (fn candidate => member dep (source_object_candidates candidate)) nodes
-
-fun unclassified_holdep_deps nodes node =
-  List.filter
-    (fn dep => not (holdep_project_dep_any nodes dep) andalso
-               not (holdep_external_dep node dep))
-    (#holdep_deps (deps_of node))
-
 fun reject_unresolved_loads nodes plan =
   let
     fun check_loads node =
@@ -228,15 +184,8 @@ fun reject_unresolved_loads nodes plan =
         | dep :: _ =>
             raise Error ("unresolved action dependency " ^ dep ^ " in " ^
                          package node ^ ":" ^ relative_path node)
-    fun check_holdep_deps node =
-      case unclassified_holdep_deps nodes node of
-          [] => ()
-        | dep :: _ =>
-            raise Error ("unresolved Holdep dependency " ^ dep ^ " in " ^
-                         package node ^ ":" ^ relative_path node ^
-                         "; add it to holproject.toml members or a dependency shim")
   in
-    List.app (fn node => (check_loads node; check_declared_deps node; check_holdep_deps node)) plan
+    List.app (fn node => (check_loads node; check_declared_deps node)) plan
   end
 
 fun reject_source_uses plan =
@@ -291,16 +240,15 @@ fun closure_external_libs nodes node =
     (List.concat (map (direct_external_libs nodes)
        (transitive_project_deps nodes node @ [node])))
 
-fun make_node includes external_dirs source =
+fun make_node external_dirs source =
   {source = source,
-   deps = HolbuildDependencies.extract {includes = includes} (#source_path source),
+   deps = ref NONE,
    external_dirs = external_dirs}
 
 fun plan holdir sources targets =
   let
     val external_dirs = [normalize_path (Path.concat(holdir, "sigobj"))]
-    val includes = dependency_includes holdir sources
-    val nodes = map (make_node includes external_dirs) sources
+    val nodes = map (make_node external_dirs) sources
     val roots = selected_nodes nodes targets
   in
     topo_sort nodes roots
@@ -311,7 +259,7 @@ fun kind_name source = HolbuildSourceIndex.kind_string (#kind source)
 fun readable path = OS.FileSys.access(path, [OS.FileSys.A_READ]) handle OS.SysErr _ => false
 
 fun file_hash path =
-  if readable path then SHA1_ML.sha1_file {filename = path}
+  if readable path then HolbuildHash.file_sha1 path
   else raise Error ("extra input not found: " ^ path)
 
 fun bool_text true = "true"
@@ -337,7 +285,7 @@ fun lookup_key keys dep =
 fun action_text config_lines toolchain_key nodes keys node =
   let
     val source = source_of node
-    val source_hash = SHA1_ML.sha1_file {filename = #source_path source}
+    val source_hash = HolbuildHash.file_sha1 (#source_path source)
     val project_deps =
       map (fn dep => package dep ^ ":" ^ logical_name dep ^ "@" ^ lookup_key keys dep)
         (direct_project_deps nodes node)

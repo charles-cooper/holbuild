@@ -10,7 +10,7 @@ datatype token = Word of string | StringLit of string | Symbol of char
 type t =
   { loads : string list,
     uses : string list,
-    holdep_deps : string list }
+    holdep_mentions : string list }
 
 fun has_suffix suffix s =
   let
@@ -45,7 +45,19 @@ fun normalize_dep_path source_path dep =
   normalize_path
     (if absolute_path dep then dep else Path.concat(Path.dir source_path, dep))
 
-fun holdep_deps includes path =
+fun holdep_mentions path =
+  let
+    val reader = HOLSource.fileToReader {quietOpen = false, print = fn _ => ()} path
+    val mentions = Holdep_tokens.reader_deps (path, #read reader)
+  in
+    sort_unique (Binarymap.foldl (fn (name, _, acc) => name :: acc) [] mentions)
+  end
+  handle Holdep_tokens.LEX_ERROR msg =>
+    raise Error ("Holdep failed for " ^ path ^ ": " ^ msg)
+       | e as IO.Io _ =>
+    raise Error ("Holdep failed for " ^ path ^ ": " ^ General.exnMessage e)
+
+fun resolved_holdep_deps includes path =
   let
     val {deps, ...} = Holdep.main {assumes = [], includes = includes,
                                    diag = fn _ => (), fname = path}
@@ -145,17 +157,17 @@ fun extract_string_args keyword tokens =
     loop tokens []
   end
 
-fun extract {includes} path =
+fun extract path =
   let
     val tokens = tokenize (read_all path)
     val loads = extract_string_args "load" tokens
     val uses = extract_string_args "use" tokens
   in
     {loads = sort_unique loads, uses = sort_unique uses,
-     holdep_deps = holdep_deps includes path}
+     holdep_mentions = holdep_mentions path}
   end
 
-fun describe ({loads, uses, holdep_deps} : t) =
+fun describe ({loads, uses, holdep_mentions} : t) =
   let
     fun line label values =
       case values of
@@ -164,7 +176,7 @@ fun describe ({loads, uses, holdep_deps} : t) =
   in
     line "loads" loads;
     line "uses" uses;
-    line "Holdep deps" holdep_deps
+    line "Holdep mentions" holdep_mentions
   end
 
 end
