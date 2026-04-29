@@ -171,7 +171,8 @@ fun project_preload_lines dep =
     | HolbuildSourceIndex.Sml => [load_project_line (load_stem dep)]
     | HolbuildSourceIndex.Sig => []
 
-fun save_heap_line output =
+fun save_heap_line {share_common_data, output} =
+  (if share_common_data then "val _ = PolyML.shareCommonData PolyML.rootFunction;\n" else "") ^
   "val _ = PolyML.SaveState.saveChild(" ^
   HolbuildToolchain.sml_string output ^
   ", length (PolyML.SaveState.showHierarchy()));"
@@ -189,7 +190,7 @@ fun write_preload plan node deps_loaded path =
     val lines = map load_theory_line external_deps @
                 map load_project_line external_libs @
                 List.concat (map project_preload_lines project_deps) @
-                [save_heap_line deps_loaded]
+                [save_heap_line {share_common_data = true, output = deps_loaded}]
   in
     write_text path (String.concatWith "\n" lines ^ "\n")
   end
@@ -205,7 +206,7 @@ fun write_final_context_loader {sig_path, sml_path, output, path, mldeps_report}
       mldep_report_lines mldeps_report @
       ["use " ^ HolbuildToolchain.sml_string sig_path ^ ";",
        "use " ^ HolbuildToolchain.sml_string sml_path ^ ";",
-       save_heap_line output]
+       save_heap_line {share_common_data = true, output = output}]
   in
     write_text path (String.concatWith "\n" lines ^ "\n")
   end
@@ -371,7 +372,8 @@ fun project_base_context_path (project : HolbuildProject.t) toolchain_key =
   Path.concat(Path.concat(Path.concat(#root project, ".holbuild/checkpoints"), "_base"),
               toolchain_key ^ ".save")
 
-fun save_current_context_script output path = write_text path (save_heap_line output ^ "\n")
+fun save_current_context_script output path =
+  write_text path (save_heap_line {share_common_data = false, output = output} ^ "\n")
 
 fun ensure_project_base_context tc project toolchain_key =
   let
@@ -1187,7 +1189,7 @@ fun write_heap_loader plan output path =
     val lines =
       map load_theory_line (heap_external_theories plan) @
       List.concat (map heap_theory_load_lines plan) @
-      [save_heap_line output]
+      [save_heap_line {share_common_data = false, output = output}]
   in
     write_text path (String.concatWith "\n" lines ^ "\n")
   end
