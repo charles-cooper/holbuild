@@ -132,6 +132,7 @@ version = "0.1.0"
 
 [build]
 members = ["src", "examples"]
+roots = ["src/MainScript.sml"]
 exclude = ["*/selftest.sml", "*/examples/*"]
 
 [dependencies.foo]
@@ -168,7 +169,12 @@ The override changes only where the package is found locally. The package still
 needs its own `holproject.toml` or an explicit shim manifest from the consumer.
 There is no `.holpath`, ambient `HOLPATH`, or user-facing include-path schema in
 project mode; dependency locations are resolved through manifests plus local
-overrides. `[build].exclude` may explicitly remove package-root-relative globbed
+overrides. `[build].roots` lists package-root-relative source paths for default
+entry points when `holbuild build` has no CLI target; root source paths are
+included even if they are outside `[build].members`. `[build].members` remains
+the source discovery scope. When roots are configured, no-target `build` warns
+about discoverable theory scripts outside the roots' dependency closure.
+`[build].exclude` may explicitly remove package-root-relative globbed
 paths from source discovery; it is for keeping tests/tool variants out of a build
 package, not for changing load resolution. Generated `*Theory.sml` and
 `*Theory.sig` files are ignored automatically. Both `holproject.toml` and

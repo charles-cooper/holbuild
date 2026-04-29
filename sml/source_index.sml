@@ -38,8 +38,12 @@ fun drop_suffix suffix s =
 
 fun join root rel = if rel = "" then root else Path.concat(root, rel)
 
+fun normalize_path path = Path.mkCanonical path handle Path.InvalidArc => path
+
 fun relative_path root path =
   let
+    val root = normalize_path root
+    val path = normalize_path path
     val root' = if has_suffix "/" root then root else root ^ "/"
   in
     if String.isPrefix root' path then String.extract(path, size root', NONE)
@@ -125,11 +129,12 @@ fun glob_match pattern text =
 
 fun excluded excludes rel = List.exists (fn pattern => glob_match pattern rel) excludes
 
-fun skip_dir name = name = ".holbuild" orelse name = ".hol" orelse name = ".git" orelse name = "_build"
+fun skip_dir name = String.isPrefix "." name orelse name = "_build"
 
 fun list_dir path =
   let
     val stream = FS.openDir path
+      handle OS.SysErr _ => raise Error ("could not read directory: " ^ path)
     fun loop acc =
       case FS.readDir stream of
           NONE => rev acc before FS.closeDir stream
@@ -138,11 +143,17 @@ fun list_dir path =
     loop [] handle e => (FS.closeDir stream; raise e)
   end
 
+fun list_dir_if_readable path = list_dir path handle Error _ => []
+
+fun has_source_path path sources =
+  let val path = normalize_path path
+  in List.exists (fn source : source => normalize_path (#source_path source) = path) sources end
+
 fun scan_file package source_root artifact_root policies excludes path acc =
   if excluded excludes (relative_path source_root path) then acc
   else case classify package source_root artifact_root policies path of
       NONE => acc
-    | SOME source => source :: acc
+    | SOME source => if has_source_path path acc then acc else source :: acc
 
 fun scan_dir package source_root artifact_root policies excludes path acc =
   let
@@ -150,13 +161,15 @@ fun scan_dir package source_root artifact_root policies excludes path acc =
       let val path' = join path name
       in
         if is_dir path' then
-          if skip_dir name orelse excluded excludes (relative_path source_root path' ^ "/") then acc
+          if skip_dir name orelse not (is_readable path') orelse
+             excluded excludes (relative_path source_root path' ^ "/") then acc
           else scan_dir package source_root artifact_root policies excludes path' acc
+        else if String.isPrefix "." name then acc
         else if is_readable path' then scan_file package source_root artifact_root policies excludes path' acc
         else acc
       end
   in
-    List.foldl scan_name acc (list_dir path)
+    List.foldl scan_name acc (list_dir_if_readable path)
   end
 
 fun compare_source (a : source, b : source) =
@@ -214,6 +227,25 @@ fun validate_action_policies package_name policies sources =
     List.app validate policies
   end
 
+fun root_candidates source_root root =
+  let
+    val exact = HolbuildProject.abs_under source_root root
+    val sml = exact ^ ".sml"
+  in
+    if is_dir exact orelse is_readable exact then [exact]
+    else if is_readable sml then [sml]
+    else []
+  end
+
+fun root_members package source_root =
+  List.concat (map (root_candidates source_root) (HolbuildProject.package_roots package))
+
+fun scan_member {missing_ok} name source_root artifact_root policies excludes (member, acc) =
+  if is_dir member then scan_dir name source_root artifact_root policies excludes member acc
+  else if is_readable member then scan_file name source_root artifact_root policies excludes member acc
+  else if missing_ok then acc
+  else raise Error ("member does not exist: " ^ member)
+
 fun discover_package package acc =
   let
     val name = HolbuildProject.package_name package
@@ -224,14 +256,17 @@ fun discover_package package acc =
     val members =
       map (fn member => HolbuildProject.abs_under source_root member)
         (HolbuildProject.package_members package)
+    val roots = root_members package source_root
     val sources =
       List.foldl
-        (fn (member, acc) =>
-            if is_dir member then scan_dir name source_root artifact_root policies excludes member acc
-            else if is_readable member then scan_file name source_root artifact_root policies excludes member acc
-            else raise Error ("member does not exist: " ^ member))
+        (scan_member {missing_ok = false} name source_root artifact_root policies excludes)
         acc
         members
+    val sources =
+      List.foldl
+        (scan_member {missing_ok = true} name source_root artifact_root policies excludes)
+        sources
+        roots
     val _ = validate_action_policies name policies sources
   in
     sources
@@ -279,5 +314,33 @@ fun select_targets sources targets =
       in
         List.concat (map find targets)
       end
+
+fun root_candidate_paths source_root root =
+  let
+    val exact = HolbuildProject.abs_under source_root root
+    val sml = exact ^ ".sml"
+  in
+    [relative_path source_root exact, relative_path source_root sml]
+  end
+
+fun source_matches_root package (source : source) root =
+  #package source = HolbuildProject.package_name package andalso
+  List.exists (fn rel => rel = #relative_path source)
+    (root_candidate_paths (HolbuildProject.package_root package) root)
+
+fun roots_for_package sources package =
+  map
+    (fn root =>
+       case List.filter (fn source => source_matches_root package source root) sources of
+           [] => raise Error ("unknown build root: " ^ HolbuildProject.package_name package ^ ":" ^ root)
+         | [source] => #logical_name source
+         | _ => raise Error ("ambiguous build root: " ^ HolbuildProject.package_name package ^ ":" ^ root))
+    (HolbuildProject.package_roots package)
+
+fun default_targets sources project =
+  List.concat
+    (map (roots_for_package sources)
+         (List.filter (fn package => not (null (HolbuildProject.package_roots package)))
+                      (HolbuildProject.packages project)))
 
 end

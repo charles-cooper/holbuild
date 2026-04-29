@@ -6,6 +6,8 @@ exception Error of string
 fun err msg = (TextIO.output(TextIO.stdErr, "holbuild: " ^ msg ^ "\n");
                OS.Process.exit OS.Process.failure)
 
+fun warn msg = TextIO.output(TextIO.stdErr, "holbuild: warning: " ^ msg ^ "\n")
+
 fun usage () = print
   "holbuild: experimental project-aware build frontend for HOL4\n\n\
   \Usage:\n\
@@ -73,6 +75,47 @@ fun reject_object_target target =
 
 fun reject_object_targets targets = List.app reject_object_target targets
 
+fun default_build_targets project index targets =
+  if null targets then HolbuildSourceIndex.default_targets index project else targets
+
+fun source_key source =
+  #package source ^ "\000" ^ #relative_path source ^ "\000" ^ #logical_name source
+
+fun key_member key keys = List.exists (fn k => k = key) keys
+
+fun rooted_package_names project =
+  map HolbuildProject.package_name
+    (List.filter (fn package => not (null (HolbuildProject.package_roots package)))
+                 (HolbuildProject.packages project))
+
+fun root_warning_source rooted_packages built_keys source =
+  #kind source = HolbuildSourceIndex.TheoryScript andalso
+  key_member (#package source) rooted_packages andalso
+  not (key_member (source_key source) built_keys)
+
+fun warn_unreachable_root_scripts project index plan =
+  let
+    val rooted_packages = rooted_package_names project
+    val built_keys = map (source_key o HolbuildBuildPlan.source_of) plan
+    val unreachable = List.filter (root_warning_source rooted_packages built_keys) index
+    fun describe source = #package source ^ ":" ^ #relative_path source ^ " (" ^ #logical_name source ^ ")"
+    val limit = 20
+    fun take (0, _) = []
+      | take (_, []) = []
+      | take (n, x :: xs) = x :: take (n - 1, xs)
+  in
+    case unreachable of
+        [] => ()
+      | _ =>
+        (warn (Int.toString (length unreachable) ^
+               " discoverable theory script(s) are not reachable from build.roots");
+         List.app (fn source => warn ("  unreachable: " ^ describe source))
+                  (take (limit, unreachable));
+         if length unreachable > limit then
+           warn ("  ... " ^ Int.toString (length unreachable - limit) ^ " more")
+         else ())
+  end
+
 fun positive_int label text =
   case Int.fromString text of
       SOME n => if n >= 1 then n else raise Error (label ^ " must be a positive integer")
@@ -127,9 +170,14 @@ fun build tc jobs args =
     val build_options = {skip_checkpoints = skip_checkpoints,
                          goalfrag = goalfrag,
                          tactic_timeout = tactic_timeout}
-    val _ = reject_object_targets targets
     val index = HolbuildSourceIndex.discover project
+    val requested_targets = targets
+    val targets = default_build_targets project index requested_targets
+    val _ = reject_object_targets targets
     val plan = HolbuildBuildPlan.plan (#holdir tc) index targets
+    val _ = if null requested_targets andalso not (null targets) then
+              warn_unreachable_root_scripts project index plan
+            else ()
     val toolchain_key = HolbuildToolchain.toolchain_key tc
   in
     if dry_run then HolbuildBuildPlan.describe (HolbuildBuildExec.build_config_lines build_options) toolchain_key plan

@@ -35,6 +35,7 @@ datatype package =
       manifest : string,
       members : string list,
       excludes : string list,
+      roots : string list,
       artifact_root : string,
       action_policies : action_policy list }
 
@@ -45,6 +46,7 @@ type t =
     version : string option,
     members : string list,
     excludes : string list,
+    roots : string list,
     dependencies : dependency list,
     overrides : override list,
     run_heap : string option,
@@ -147,6 +149,14 @@ fun table_field table key =
 fun string_field table name = string_at table [name]
 fun string_array_field table name = string_array_at table [name]
 
+fun string_array_field_opt table name =
+  case lookup table [name] of
+      NONE => NONE
+    | SOME value =>
+        case string_array_value value of
+            SOME xs => SOME xs
+          | NONE => die (name ^ " must be a string array")
+
 fun package_relative_path field path =
   let
     val has_parent_component =
@@ -221,7 +231,7 @@ fun validate_manifest_table table =
               ["holbuild", "project", "build", "dependencies", "run", "heap", "actions"] table
     val _ = Option.app (require_known_fields "project" ["name", "version"])
               (table_field table ["project"])
-    val _ = Option.app (require_known_fields "build" ["members", "exclude"])
+    val _ = Option.app (require_known_fields "build" ["members", "exclude", "roots"])
               (table_field table ["build"])
     val _ = Option.app (require_known_fields "run" ["heap", "loads"])
               (table_field table ["run"])
@@ -301,12 +311,13 @@ fun parse_at {manifest, root, overrides} =
     val build = table_field table ["build"]
     val run = table_field table ["run"]
     fun from opt f default = case opt of NONE => default | SOME t => f t
-    val members =
-      package_relative_paths "build.members"
-        (from build (fn t => string_array_field t "members") ["."])
-    val excludes =
-      package_relative_paths "build.exclude"
-        (from build (fn t => string_array_field t "exclude") [])
+    fun build_strings name default =
+      case build of
+          NONE => default
+        | SOME t => Option.getOpt(string_array_field_opt t name, default)
+    val members = package_relative_paths "build.members" (build_strings "members" ["."])
+    val excludes = package_relative_paths "build.exclude" (build_strings "exclude" [])
+    val roots = package_relative_paths "build.roots" (build_strings "roots" [])
   in
     { root = root,
       manifest = manifest,
@@ -314,6 +325,7 @@ fun parse_at {manifest, root, overrides} =
       version = Option.mapPartial (fn t => string_field t "version") project,
       members = members,
       excludes = excludes,
+      roots = roots,
       dependencies = dependencies_at table,
       overrides = overrides,
       run_heap = Option.mapPartial (fn t => string_field t "heap") run,
@@ -356,7 +368,9 @@ fun package_name (Package {name, ...}) = name
 fun package_root (Package {root, ...}) = root
 fun package_members (Package {members, ...}) = members
 fun package_excludes (Package {excludes, ...}) = excludes
+fun package_roots (Package {roots, ...}) = roots
 fun package_artifact_root (Package {artifact_root, ...}) = artifact_root
+fun build_roots ({roots, ...} : t) = roots
 fun package_action_policies (Package {action_policies, ...}) = action_policies
 
 fun action_policy_logical (ActionPolicy {logical, ...}) = logical
@@ -412,9 +426,9 @@ fun dependency_to_string project (dep as Dependency {name, path, manifest, git, 
 
 fun override_to_string (Override {name, path}) = name ^ " -> " ^ path
 
-fun project_package ({root, manifest, name, members, excludes, action_policies, ...} : t) =
+fun project_package ({root, manifest, name, members, excludes, roots, action_policies, ...} : t) =
   Package {name = Option.getOpt(name, "root"), root = root, manifest = manifest,
-           members = members, excludes = excludes,
+           members = members, excludes = excludes, roots = roots,
            artifact_root = Path.concat(root, ".holbuild"),
            action_policies = action_policies}
 
@@ -452,7 +466,7 @@ fun dependency_package artifact_parent project (dep as Dependency {name, ...}) =
   in
     (Package {name = name, root = dep_root, manifest = dep_manifest,
               members = #members dep_project, excludes = #excludes dep_project,
-              artifact_root = artifact_root,
+              roots = #roots dep_project, artifact_root = artifact_root,
               action_policies = #action_policies dep_project},
      dep_project)
   end
@@ -483,7 +497,7 @@ fun packages (project : t) =
 
 fun describe (project : t) =
   let
-    val {root, manifest, name, version, members, excludes, dependencies,
+    val {root, manifest, name, version, members, excludes, roots, dependencies,
          overrides, run_heap, run_loads, heaps, action_policies} = project
     fun opt label value =
       case value of NONE => () | SOME s => print (label ^ s ^ "\n")
@@ -494,6 +508,7 @@ fun describe (project : t) =
     opt "version: " version;
     print ("members: " ^ String.concatWith ", " members ^ "\n");
     print ("exclude: " ^ String.concatWith ", " excludes ^ "\n");
+    print ("roots: " ^ String.concatWith ", " roots ^ "\n");
     List.app (fn dep => print ("dependency: " ^ dependency_to_string project dep ^ "\n")) dependencies;
     List.app (fn override => print ("override: " ^ override_to_string override ^ "\n")) overrides;
     opt "run.heap: " run_heap;

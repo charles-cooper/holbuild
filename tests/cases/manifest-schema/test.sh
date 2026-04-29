@@ -38,9 +38,11 @@ name = "valid"
 
 [build]
 members = ["src"]
+roots = ["src/MainScript.sml"]
 TOML
 (cd "$tmpdir/valid" && "$HOLBUILD_BIN" --holdir "$HOLDIR" context) > "$tmpdir/valid.log"
 require_grep "name: valid" "$tmpdir/valid.log"
+require_grep "roots: src/MainScript.sml" "$tmpdir/valid.log"
 
 make_project bad_schema
 cat > "$tmpdir/bad_schema/holproject.toml" <<'TOML'
@@ -81,6 +83,16 @@ name = "bad_exclude_type"
 exclude = "selftest.sml"
 TOML
 expect_context_failure bad_exclude_type "exclude must be a string array"
+
+make_project bad_roots_type
+cat > "$tmpdir/bad_roots_type/holproject.toml" <<'TOML'
+[project]
+name = "bad_roots_type"
+
+[build]
+roots = "MainTheory"
+TOML
+expect_context_failure bad_roots_type "roots must be a string array"
 
 make_project absolute_member
 cat > "$tmpdir/absolute_member/holproject.toml" <<'TOML'
