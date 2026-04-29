@@ -169,7 +169,8 @@ There is no `.holpath`, ambient `HOLPATH`, or user-facing include-path schema in
 project mode; dependency locations are resolved through manifests plus local
 overrides. `[build].exclude` may explicitly remove package-root-relative globbed
 paths from source discovery; it is for keeping tests/tool variants out of a build
-package, not for changing load resolution. Both `holproject.toml` and
+package, not for changing load resolution. Generated `*Theory.sml` and
+`*Theory.sig` files are ignored automatically. Both `holproject.toml` and
 `.holconfig.toml` reject unknown fields in recognized tables so typos fail early.
 
 ## Notes

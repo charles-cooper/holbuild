@@ -172,9 +172,10 @@ package until their inputs, dependencies, and outputs are declared.
 
 `[build].members` admits package-root-relative source files or directories.
 `[build].exclude` is an explicit package-root-relative glob filter applied during
-source discovery. It is intended for excluding tests, examples, generated files,
-or platform variants from a package boundary; it does not add search paths or
-change dependency resolution.
+source discovery. It is intended for excluding tests, examples, or platform
+variants from a package boundary; it does not add search paths or change
+dependency resolution. Generated theory artifacts matching `*Theory.sml` and
+`*Theory.sig` are ignored by source discovery by default.
 
 Standard theory convention:
 

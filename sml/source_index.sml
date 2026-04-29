@@ -78,12 +78,16 @@ fun make_source package policies kind logical_name source_path relative_path art
    artifacts = artifacts,
    policy = HolbuildProject.action_policy_for policies logical_name}
 
+fun generated_theory_artifact file =
+  has_suffix "Theory.sml" file orelse has_suffix "Theory.sig" file
+
 fun classify package source_root artifact_root policies abs_path =
   let
     val rel = relative_path source_root abs_path
     val file = filename rel
   in
-    if has_suffix "Script.sml" file then
+    if generated_theory_artifact file then NONE
+    else if has_suffix "Script.sml" file then
       let
         val theory = drop_suffix "Script.sml" file ^ "Theory"
       in

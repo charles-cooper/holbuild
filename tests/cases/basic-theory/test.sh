@@ -30,6 +30,12 @@ val a_thm = store_thm("a_thm", ``T``, ACCEPT_TAC TRUTH);
 
 val _ = export_theory();
 SML
+cat > "$project/src/ATheory.sml" <<'SML'
+this source-tree generated theory artifact must be ignored by discovery
+SML
+cat > "$project/src/ATheory.sig" <<'SML'
+this source-tree generated theory artifact must be ignored by discovery
+SML
 
 first_log=$tmpdir/first.log
 (cd "$project" && \
