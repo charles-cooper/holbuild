@@ -1134,12 +1134,9 @@ fun write_metadata checkpoint_policy project plan keys input_key toolchain_key n
 fun root_package_name (project : HolbuildProject.t) = Option.getOpt(#name project, "root")
 
 fun checkpoint_policy_for_node ({skip_checkpoints, goalfrag, tactic_timeout} : build_options) project node =
-  let val local_root = HolbuildBuildPlan.package node = root_package_name project
-  in
-    CheckpointPolicy {checkpoint = local_root andalso not skip_checkpoints,
-                      goalfrag = goalfrag,
-                      tactic_timeout = if goalfrag then tactic_timeout else NONE}
-  end
+  CheckpointPolicy {checkpoint = not skip_checkpoints,
+                    goalfrag = goalfrag,
+                    tactic_timeout = if goalfrag then tactic_timeout else NONE}
 
 fun theory_checkpoints_for_node policy tc project base_context node input_key source_text =
   if not (goalfrag_enabled policy) then []

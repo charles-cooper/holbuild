@@ -520,12 +520,14 @@ theorem-context checkpoint and replay only the suffix to `export_theory()`.
 End-of-proof checkpoints are proof-navigation states, not successor-ready
 contexts, and are not used for dependency replay.
 
-Goal-fragment execution is separable from PolyML checkpoint creation. A build may
-run modern theorem proofs through the goalfrag/proof-manager path without saving
-`.save` files, e.g. for dependency packages or `--skip-checkpoints`; this keeps
-proof failures inspectable without retaining large checkpoint trees. Power users
-can opt out of goalfrag instrumentation with `--skip-goalfrag`, which also means
-no theorem-boundary checkpoints or tactic timeout enforcement for that build.
+Goal-fragment execution is separable from PolyML checkpoint creation. By default,
+holbuild retains checkpoints for all built packages, including dependencies, so
+ancestor builds have local incremental replay state. `--skip-checkpoints` runs
+modern theorem proofs through the goalfrag/proof-manager path without saving
+`.save` files; this is useful for disk-constrained semantic probes while keeping
+proof failures inspectable. Power users can opt out of goalfrag instrumentation
+with `--skip-goalfrag`, which also means no theorem-boundary checkpoints or tactic
+timeout enforcement for that build.
 
 When goalfrag is enabled, holbuild applies a tactic timeout to each goalfrag
 step, and to the conservative whole-tactic fallback used for attributed proofs.
