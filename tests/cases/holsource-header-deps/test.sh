@@ -24,9 +24,13 @@ TOML
 cat > "$project/src/AScript.sml" <<'SML'
 Theory A
 Ancestors arithmetic[qualified, ignore_grammar] string
-Libs numLib monadsyntax
+Libs numLib monadsyntax cv_transLib
 
 Type identifier = “:string”;
+
+Datatype:
+  colour = Red | Blue
+End
 
 val _ = Theory.add_ML_dependency "monadsyntax";
 
@@ -54,6 +58,7 @@ SML
 (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --dry-run ATheory) > "$tmpdir/dry.log"
 require_grep "external theories: .*arithmeticTheory" "$tmpdir/dry.log"
 require_grep "external theories: .*stringTheory" "$tmpdir/dry.log"
+require_grep "external libs: .*cv_transLib" "$tmpdir/dry.log"
 require_grep "external libs: .*monadsyntax" "$tmpdir/dry.log"
 require_grep "external libs: .*numLib" "$tmpdir/dry.log"
 if grep -q "ignore_grammar\|qualified\|identifier" "$tmpdir/dry.log"; then
@@ -67,13 +72,15 @@ require_file "$project/.holbuild/obj/src/ATheory.dat"
 require_file "$project/.holbuild/obj/src/BTheory.dat"
 require_grep "numLib" "$project/.holbuild/obj/src/AScript.uo"
 require_grep "monadsyntax" "$project/.holbuild/obj/src/AScript.uo"
+require_grep "cv_transLib" "$project/.holbuild/obj/src/AScript.uo"
 require_grep "arithmeticTheory" "$project/.holbuild/obj/src/ATheory.uo"
 require_grep "monadsyntax" "$project/.holbuild/obj/src/ATheory.uo"
-if grep -q "numLib" "$project/.holbuild/obj/src/ATheory.uo"; then
+require_grep "cv_primTheory" "$project/.holbuild/obj/src/ATheory.uo"
+if grep -q "numLib\|cv_transLib" "$project/.holbuild/obj/src/ATheory.uo"; then
   echo "source-only Libs leaked into generated theory load manifest" >&2
   exit 1
 fi
-if grep -q "numLib" "$project/.holbuild/obj/src/BTheory.uo"; then
+if grep -q "numLib\|cv_transLib" "$project/.holbuild/obj/src/BTheory.uo"; then
   echo "dependency source-only Libs leaked into dependent theory load manifest" >&2
   exit 1
 fi
@@ -83,7 +90,8 @@ rm -rf "$project/.holbuild"
 (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build BTheory) > "$tmpdir/cache.log"
 require_grep "ATheory restored from cache" "$tmpdir/cache.log"
 require_grep "monadsyntax" "$project/.holbuild/obj/src/ATheory.uo"
-if grep -q "numLib" "$project/.holbuild/obj/src/ATheory.uo"; then
+require_grep "cv_primTheory" "$project/.holbuild/obj/src/ATheory.uo"
+if grep -q "numLib\|cv_transLib" "$project/.holbuild/obj/src/ATheory.uo"; then
   echo "cache restore leaked source-only Libs into generated theory load manifest" >&2
   exit 1
 fi

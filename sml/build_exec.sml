@@ -607,6 +607,39 @@ fun mldep_load_stem plan dep =
 
 fun mldep_load_stems plan mldeps = unique_strings (map (mldep_load_stem plan) mldeps)
 
+fun drop_object_suffix path =
+  if has_suffix ".uo" path then String.substring(path, 0, size path - 3)
+  else if has_suffix ".ui" path then String.substring(path, 0, size path - 3)
+  else path
+
+fun same_path a b = Path.mkCanonical a = Path.mkCanonical b handle Path.InvalidArc => a = b
+
+fun generated_holdep_stem tc dep =
+  let
+    val stem = drop_object_suffix dep
+    val sigobj = Path.concat(#holdir tc, "sigobj")
+  in
+    if same_path (Path.dir stem) sigobj then Path.file stem else stem
+  end
+
+fun holfs_unmapped_theory_artifact path =
+  let
+    val {dir, file} = Path.splitDirFile path
+    val {dir = parent, file = leaf} = Path.splitDirFile dir
+  in
+    if leaf = "objs" andalso Path.file parent = ".hol" then
+      Path.concat(Path.dir parent, file)
+    else path
+  end
+
+fun generated_holdep_mldeps tc path =
+  let
+    val sigobj = Path.concat(#holdir tc, "sigobj")
+    val deps = HolbuildDependencies.holdep_deps [sigobj] (holfs_unmapped_theory_artifact path)
+  in
+    unique_strings (map (generated_holdep_stem tc) deps)
+  end
+
 fun read_mldeps_report path =
   let
     val deps = String.tokens (fn c => c = #"\n") (read_text path)
@@ -963,7 +996,8 @@ fun build_theory policy tc project base_context plan keys toolchain_key node sou
                                  old_path = staged_dat_reference stage node,
                                  new_path = data_path}
     val _ = copy_binary sml_path (hfs_remapped_path sml_path)
-    val mldeps = read_mldeps_report mldeps_report
+    val mldeps = unique_strings (read_mldeps_report mldeps_report @
+                                  generated_holdep_mldeps tc staged_sml)
     val _ =
       if cache_enabled node then
         publish_theory_cache input_key (staged_dat_reference stage node) staged_sig staged_sml staged_dat mldeps
