@@ -16,11 +16,20 @@ type t = node list
 type keyed_node = {node : node, input_key : string}
 
 fun source_of ({source, ...} : node) = source
+
+fun dependency_cache_path source =
+  case #objects (#artifacts source) of
+      object :: _ => object ^ ".deps"
+    | [] => #source_path source ^ ".holbuild-deps"
+
 fun deps_of ({source, deps, ...} : node) =
   case !deps of
       SOME value => value
     | NONE =>
-      let val value = HolbuildDependencies.extract (#source_path source)
+      let
+        val value = HolbuildDependencies.extract_cached
+                      {cache_path = dependency_cache_path source,
+                       source_path = #source_path source}
       in deps := SOME value; value end
 fun external_dirs_of ({external_dirs, ...} : node) = external_dirs
 fun logical_name node = #logical_name (source_of node)

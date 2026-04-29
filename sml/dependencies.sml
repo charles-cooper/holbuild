@@ -12,6 +12,9 @@ type t =
     uses : string list,
     holdep_mentions : string list }
 
+val cache_version = "holbuild-dependencies-cache-v1"
+val extractor_version = "holsource-fileToReader+holdep-tokens-v1"
+
 fun has_suffix suffix s =
   let
     val n = size s
@@ -157,7 +160,7 @@ fun extract_string_args keyword tokens =
     loop tokens []
   end
 
-fun extract path =
+fun extract_uncached path =
   let
     val tokens = tokenize (read_all path)
     val loads = extract_string_args "load" tokens
@@ -166,6 +169,77 @@ fun extract path =
     {loads = sort_unique loads, uses = sort_unique uses,
      holdep_mentions = holdep_mentions path}
   end
+
+fun line_value prefix line =
+  if String.isPrefix prefix line then SOME (String.extract(line, size prefix, NONE))
+  else NONE
+
+fun values prefix lines = List.mapPartial (line_value prefix) lines
+
+fun read_cache cache_path source_hash =
+  let
+    val text = read_all cache_path
+    val lines = String.tokens (fn c => c = #"\n") text
+  in
+    case lines of
+        version :: extractor :: hash_line :: rest =>
+          if version = cache_version andalso
+             extractor = "extractor=" ^ extractor_version andalso
+             hash_line = "source_sha1=" ^ source_hash then
+            SOME {loads = values "load=" rest,
+                  uses = values "use=" rest,
+                  holdep_mentions = values "mention=" rest}
+          else NONE
+      | _ => NONE
+  end
+  handle _ => NONE
+
+fun ensure_dir path =
+  if path = "" orelse path = "." then ()
+  else if OS.FileSys.access(path, []) handle OS.SysErr _ => false then ()
+  else (ensure_dir (Path.dir path); OS.FileSys.mkDir path handle OS.SysErr _ => ())
+
+fun ensure_parent path = ensure_dir (Path.dir path)
+
+fun cache_text source_hash ({loads, uses, holdep_mentions} : t) =
+  String.concatWith "\n"
+    ([cache_version,
+      "extractor=" ^ extractor_version,
+      "source_sha1=" ^ source_hash] @
+     map (fn value => "load=" ^ value) loads @
+     map (fn value => "use=" ^ value) uses @
+     map (fn value => "mention=" ^ value) holdep_mentions) ^ "\n"
+
+fun write_cache cache_path source_hash deps =
+  let
+    val tmp = cache_path ^ ".tmp"
+    val _ = ensure_parent cache_path
+    val out = TextIO.openOut tmp
+    val _ = (TextIO.output(out, cache_text source_hash deps); TextIO.closeOut out)
+            handle e => (TextIO.closeOut out; raise e)
+    val _ = OS.FileSys.remove cache_path handle OS.SysErr _ => ()
+    val _ = OS.FileSys.rename {old = tmp, new = cache_path}
+            handle e => (OS.FileSys.remove tmp handle OS.SysErr _ => (); raise e)
+  in
+    ()
+  end
+
+fun extract_cached {cache_path, source_path} =
+  let
+    val source_hash = HolbuildHash.file_sha1 source_path
+  in
+    case read_cache cache_path source_hash of
+        SOME deps => deps
+      | NONE =>
+          let
+            val deps = extract_uncached source_path
+            val _ = write_cache cache_path source_hash deps handle _ => ()
+          in
+            deps
+          end
+  end
+
+fun extract path = extract_uncached path
 
 fun describe ({loads, uses, holdep_mentions} : t) =
   let
