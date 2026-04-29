@@ -215,7 +215,7 @@ fun preload_lines plan node =
   let
     val external_deps = HolbuildBuildPlan.direct_external_theories plan node
     val external_libs = HolbuildBuildPlan.direct_external_libs plan node
-    val project_deps = HolbuildBuildPlan.transitive_project_deps plan node
+    val project_deps = HolbuildBuildPlan.direct_project_deps plan node
   in
     map load_theory_line external_deps @
     map load_project_line external_libs @
