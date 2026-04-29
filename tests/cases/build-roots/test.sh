@@ -22,7 +22,7 @@ cat > "$project/holproject.toml" <<'TOML'
 name = "build-roots"
 
 [build]
-members = ["src/DepScript.sml", "src/ExtraScript.sml"]
+members = ["src"]
 roots = ["src/MainScript.sml"]
 TOML
 cat > "$project/src/DepScript.sml" <<'SML'
@@ -58,6 +58,24 @@ SML
 
 (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" context) > "$tmpdir/context.log"
 require_grep "roots: src/MainScript.sml" "$tmpdir/context.log"
+
+missing_root=$tmpdir/missing-root
+mkdir -p "$missing_root/src"
+cat > "$missing_root/holproject.toml" <<'TOML'
+[project]
+name = "missing-root"
+
+[build]
+members = ["src/DepScript.sml"]
+roots = ["src/MainScript.sml"]
+TOML
+cp "$project/src/DepScript.sml" "$missing_root/src/DepScript.sml"
+cp "$project/src/MainScript.sml" "$missing_root/src/MainScript.sml"
+if (cd "$missing_root" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --dry-run) > "$tmpdir/missing-root.log" 2>&1; then
+  echo "root outside members unexpectedly succeeded" >&2
+  exit 1
+fi
+require_grep "unknown build root: missing-root:src/MainScript.sml" "$tmpdir/missing-root.log"
 
 (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build) > "$tmpdir/default.log" 2> "$tmpdir/default.err"
 require_grep "discoverable theory script(s) are not reachable from build.roots" "$tmpdir/default.err"

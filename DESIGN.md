@@ -173,12 +173,12 @@ package until their inputs, dependencies, and outputs are declared.
 
 `[build].members` admits package-root-relative source files or directories.
 `[build].roots` lists package-root-relative source paths for default entry
-points when `holbuild build` has no CLI target; root source paths are included in
-source discovery even if they are outside `[build].members`. This defines the
-package/project entry point without broadening the normal discovery scope. If
-`roots` is omitted, no-target `build` falls back to all discovered members for
-transition compatibility. When roots are configured, no-target `build` warns about
-discoverable theory scripts that are outside the roots' dependency closure.
+points when `holbuild build` has no CLI target; root source paths must be
+included by `[build].members`. This defines the package/project entry point
+inside the declared source discovery boundary. If `roots` is omitted, no-target
+`build` falls back to all discovered members for transition compatibility. When
+roots are configured, no-target `build` warns about discoverable theory scripts
+that are outside the roots' dependency closure.
 `[build].exclude` is an explicit package-root-relative
 glob filter applied during source discovery. It is intended for excluding tests,
 examples, or platform variants from a package boundary; it does not add search

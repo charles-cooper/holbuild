@@ -227,23 +227,9 @@ fun validate_action_policies package_name policies sources =
     List.app validate policies
   end
 
-fun root_candidates source_root root =
-  let
-    val exact = HolbuildProject.abs_under source_root root
-    val sml = exact ^ ".sml"
-  in
-    if is_dir exact orelse is_readable exact then [exact]
-    else if is_readable sml then [sml]
-    else []
-  end
-
-fun root_members package source_root =
-  List.concat (map (root_candidates source_root) (HolbuildProject.package_roots package))
-
-fun scan_member {missing_ok} name source_root artifact_root policies excludes (member, acc) =
+fun scan_member name source_root artifact_root policies excludes (member, acc) =
   if is_dir member then scan_dir name source_root artifact_root policies excludes member acc
   else if is_readable member then scan_file name source_root artifact_root policies excludes member acc
-  else if missing_ok then acc
   else raise Error ("member does not exist: " ^ member)
 
 fun discover_package package acc =
@@ -256,17 +242,11 @@ fun discover_package package acc =
     val members =
       map (fn member => HolbuildProject.abs_under source_root member)
         (HolbuildProject.package_members package)
-    val roots = root_members package source_root
     val sources =
       List.foldl
-        (scan_member {missing_ok = false} name source_root artifact_root policies excludes)
+        (scan_member name source_root artifact_root policies excludes)
         acc
         members
-    val sources =
-      List.foldl
-        (scan_member {missing_ok = true} name source_root artifact_root policies excludes)
-        sources
-        roots
     val _ = validate_action_policies name policies sources
   in
     sources
