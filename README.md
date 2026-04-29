@@ -31,6 +31,7 @@ This prototype is intentionally small:
 - publishes/restores simple theory semantic artifacts through the global cache
 - includes the resolved holbuild-produced base context/toolchain in prototype action keys
 - saves local theory checkpoints: dependencies-loaded, AST-derived theorem end-of-proof/context checkpoints for modern theorem declarations, and successor-ready final context
+- keeps goalfrag proof execution separate from checkpoint retention; `--skip-checkpoints` avoids theory `.save` files, `--skip-goalfrag` opts out of theorem instrumentation, and `--tactic-timeout SECONDS` controls the default 2.5s per-tactic goalfrag timeout (`0` disables it)
 - exports explicit project heap targets from `[[heap]]` entries using local SaveState
 - exposes `holbuild cache gc` with a 7-day default global-cache retention policy
 - does not delegate build semantics to Holmake
@@ -80,6 +81,8 @@ validation, and cache GC.
 export HOLBUILD_HOLDIR=/path/to/HOL
 bin/holbuild build MyTheory
 bin/holbuild -j4 build MyTheory
+bin/holbuild build --skip-checkpoints MyTheory
+bin/holbuild build --tactic-timeout 5 MyTheory
 ```
 
 Useful inspection/maintenance commands:
@@ -101,7 +104,11 @@ bin/holbuild heap main
 
 `--holdir PATH` can be used instead of `HOLBUILD_HOLDIR` at runtime for HOL
 commands. `-jN`, `-j N`, or `--jobs N` controls build parallelism for `build`
-and for the build phase of `heap` targets; the default is `-j1`. `cache gc` uses
+and for the build phase of `heap` targets; the default is `-j1`.
+`--skip-checkpoints` disables retained theory checkpoint `.save`/`.ok` files
+without disabling goalfrag proof execution. `--skip-goalfrag` opts out of modern
+theorem instrumentation. `--tactic-timeout SECONDS` sets the per-tactic goalfrag
+timeout; the default is 2.5 seconds, and `0` disables the timeout. `cache gc` uses
 `$HOLBUILD_CACHE`, `$XDG_CACHE_HOME/holbuild`, or `$HOME/.cache/holbuild` and
 does not require a HOL toolchain.
 

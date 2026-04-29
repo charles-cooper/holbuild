@@ -111,6 +111,22 @@ SML
   --holstate "$project/.holbuild/checkpoints/replay/src/AScript.sml.c_thm_end_of_proof.save" \
   "$tmpdir/check-proof-state.sml"
 
+skip_goalfrag_project=$tmpdir/skip-goalfrag-project
+mkdir -p "$skip_goalfrag_project/src"
+cp "$project/holproject.toml" "$skip_goalfrag_project/holproject.toml"
+cp "$project/src/AScript.sml" "$skip_goalfrag_project/src/AScript.sml"
+(cd "$skip_goalfrag_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --skip-goalfrag ATheory)
+require_file "$skip_goalfrag_project/.holbuild/checkpoints/replay/src/AScript.sml.deps_loaded.save"
+require_file "$skip_goalfrag_project/.holbuild/checkpoints/replay/src/AScript.sml.final_context.save"
+if grep -q "theorem_boundary a_thm" "$skip_goalfrag_project/.holbuild/dep/replay/src/AScript.sml.key"; then
+  echo "--skip-goalfrag should not create theorem boundaries" >&2
+  exit 1
+fi
+if find "$skip_goalfrag_project/.holbuild/checkpoints/replay/src" -name '*_thm_context.save' -print -quit | grep -q .; then
+  echo "--skip-goalfrag created theorem checkpoints" >&2
+  exit 1
+fi
+
 rm "$project/.holbuild/checkpoints/replay/src/AScript.sml.a_thm_context.save.ok"
 python3 - <<PY
 from pathlib import Path
@@ -159,5 +175,31 @@ if [[ -e "$project/.holbuild/checkpoints/replay/src/AScript.sml.b_thm_context.sa
       -e "$project/.holbuild/checkpoints/replay/src/AScript.sml.b_thm_end_of_proof.save" || \
       -e "$project/.holbuild/checkpoints/replay/src/AScript.sml.b_thm_end_of_proof.save.ok" ]]; then
   echo "stale b_thm checkpoint survived failed proof" >&2
+  exit 1
+fi
+
+timeout_project=$tmpdir/timeout-project
+mkdir -p "$timeout_project/src"
+cp "$project/holproject.toml" "$timeout_project/holproject.toml"
+cat > "$timeout_project/src/AScript.sml" <<'SML'
+open HolKernel Parse boolLib bossLib;
+val _ = new_theory "A";
+fun loop_tac g = loop_tac g;
+Theorem timeout_thm:
+  T
+Proof
+  loop_tac
+QED
+val _ = export_theory();
+SML
+
+timeout_log=$tmpdir/timeout.log
+if (cd "$timeout_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --tactic-timeout 0.1 ATheory) > "$timeout_log" 2>&1; then
+  echo "expected looping tactic to time out" >&2
+  exit 1
+fi
+require_grep "tactic timed out while building ATheory" "$timeout_log"
+if grep -q "retrying without theorem checkpoints" "$timeout_log"; then
+  echo "timed out goalfrag proof retried plain source" >&2
   exit 1
 fi

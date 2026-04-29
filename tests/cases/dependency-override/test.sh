@@ -58,6 +58,10 @@ SML
 require_file "$project/.holbuild/deps/dep/gen/src/ATheory.sig"
 require_file "$project/.holbuild/deps/dep/gen/src/ATheory.sml"
 require_file "$project/.holbuild/deps/dep/obj/src/ATheory.dat"
+if find "$project/.holbuild/checkpoints/dep" -name '*.save' -print -quit 2>/dev/null | grep -q .; then
+  echo "dependency package should not create retained checkpoints by default" >&2
+  exit 1
+fi
 require_file "$project/.holbuild/gen/src/BTheory.sig"
 require_file "$project/.holbuild/gen/src/BTheory.sml"
 require_file "$project/.holbuild/obj/src/BTheory.dat"

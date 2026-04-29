@@ -113,10 +113,20 @@ fun runtime_lines lines =
 val runtime_load_lines =
   ["load \"HOLSourceParser\";",
    "load \"TacticParse\";",
-   "load \"smlExecute\";"]
+   "load \"smlExecute\";",
+   "load \"smlTimeout\";"]
 
-val runtime_theorem_state_lines =
-  ["val holbuild_theorem_info = ref NONE : (string * string * string * string * bool * int) option ref;",
+fun option_real_sml NONE = "NONE : real option"
+  | option_real_sml (SOME r) = "SOME " ^ Real.toString r
+
+fun option_string_sml NONE = "NONE : string option"
+  | option_string_sml (SOME s) = "SOME " ^ HolbuildToolchain.sml_string s
+
+fun runtime_theorem_state_lines {checkpoint_enabled, tactic_timeout, timeout_marker} =
+  ["val holbuild_checkpoint_enabled = " ^ (if checkpoint_enabled then "true" else "false") ^ ";",
+   "val holbuild_tactic_timeout = " ^ option_real_sml tactic_timeout ^ ";",
+   "val holbuild_tactic_timeout_marker = " ^ option_string_sml timeout_marker ^ ";",
+   "val holbuild_theorem_info = ref NONE : (string * string * string * string * bool * int) option ref;",
    "val holbuild_context_info = ref NONE : (string * int) option ref;",
    "fun holbuild_env_bool name = case OS.Process.getEnv name of SOME \"1\" => SOME true | SOME \"true\" => SOME true | SOME \"yes\" => SOME true | SOME \"0\" => SOME false | SOME \"false\" => SOME false | SOME \"no\" => SOME false | _ => NONE;",
    "fun holbuild_bool_text true = \"true\" | holbuild_bool_text false = \"false\";",
@@ -125,8 +135,11 @@ val runtime_theorem_state_lines =
    "fun holbuild_delete_file path = OS.FileSys.remove path handle _ => ();",
    "fun holbuild_delete_checkpoint path = (holbuild_delete_file (path ^ \".ok\"); holbuild_delete_file path);",
    "fun holbuild_write_checkpoint_ok path = let val out = TextIO.openOut (path ^ \".ok\") in TextIO.output(out, \"holbuild-checkpoint-ok-v1\\n\"); TextIO.closeOut out end;",
-   "fun holbuild_save_checkpoint label default_share path depth = let val share = Option.getOpt(holbuild_env_bool \"HOLBUILD_SHARE_COMMON_DATA\", default_share) val timing = Option.getOpt(holbuild_env_bool \"HOLBUILD_CHECKPOINT_TIMING\", false) val t0 = Time.now() val _ = holbuild_delete_checkpoint path val _ = if share then PolyML.shareCommonData PolyML.rootFunction else () val t1 = Time.now() val _ = PolyML.SaveState.saveChild(path, depth) val t2 = Time.now() val _ = holbuild_write_checkpoint_ok path val _ = if timing then TextIO.output(TextIO.stdErr, String.concat [\"holbuild checkpoint kind=\", label, \" share=\", holbuild_bool_text share, \" depth=\", Int.toString depth, \" share_s=\", holbuild_fmt_time (holbuild_seconds (t0, t1)), \" save_s=\", holbuild_fmt_time (holbuild_seconds (t1, t2)), \" size=\", Position.toString (OS.FileSys.fileSize path), \" path=\", path, \"\\n\"]) else () in () end;",
-   "fun holbuild_begin_theorem (name, tactic_text, context_path, end_path, has_attrs) = let val depth = length (PolyML.SaveState.showHierarchy()) in holbuild_delete_checkpoint context_path; holbuild_delete_checkpoint end_path; holbuild_theorem_info := SOME (name, tactic_text, context_path, end_path, has_attrs, depth); holbuild_context_info := SOME (context_path, depth) end;",
+   "fun holbuild_write_timeout_marker label seconds = case holbuild_tactic_timeout_marker of NONE => () | SOME path => let val out = TextIO.openOut path in TextIO.output(out, String.concat [label, \"\\t\", Real.toString seconds, \"\\n\"]); TextIO.closeOut out end;",
+   "fun holbuild_timeout_message label seconds = String.concat [\"holbuild tactic timeout after \", Real.toString seconds, \"s: \", label];",
+   "fun holbuild_with_tactic_timeout label f x = case holbuild_tactic_timeout of NONE => f x | SOME seconds => (smlTimeout.timeout seconds f x handle smlTimeout.FunctionTimeout => (holbuild_write_timeout_marker label seconds; raise Fail (holbuild_timeout_message label seconds)));",
+   "fun holbuild_save_checkpoint label default_share path depth = if not holbuild_checkpoint_enabled then () else let val share = Option.getOpt(holbuild_env_bool \"HOLBUILD_SHARE_COMMON_DATA\", default_share) val timing = Option.getOpt(holbuild_env_bool \"HOLBUILD_CHECKPOINT_TIMING\", false) val t0 = Time.now() val _ = holbuild_delete_checkpoint path val _ = if share then PolyML.shareCommonData PolyML.rootFunction else () val t1 = Time.now() val _ = PolyML.SaveState.saveChild(path, depth) val t2 = Time.now() val _ = holbuild_write_checkpoint_ok path val _ = if timing then TextIO.output(TextIO.stdErr, String.concat [\"holbuild checkpoint kind=\", label, \" share=\", holbuild_bool_text share, \" depth=\", Int.toString depth, \" share_s=\", holbuild_fmt_time (holbuild_seconds (t0, t1)), \" save_s=\", holbuild_fmt_time (holbuild_seconds (t1, t2)), \" size=\", Position.toString (OS.FileSys.fileSize path), \" path=\", path, \"\\n\"]) else () in () end;",
+   "fun holbuild_begin_theorem (name, tactic_text, context_path, end_path, has_attrs) = let val depth = length (PolyML.SaveState.showHierarchy()) in if holbuild_checkpoint_enabled then (holbuild_delete_checkpoint context_path; holbuild_delete_checkpoint end_path) else (); holbuild_theorem_info := SOME (name, tactic_text, context_path, end_path, has_attrs, depth); holbuild_context_info := SOME (context_path, depth) end;",
    "fun holbuild_save_theorem_context () = case !holbuild_context_info of NONE => () | SOME (context_path, depth) => (holbuild_context_info := NONE; holbuild_save_checkpoint \"theorem_context\" false context_path depth);"]
 
 val runtime_tactic_parse_lines =
@@ -223,11 +236,13 @@ val runtime_step_plan_lines =
    "in holbuild_merge_select_steps (assign frags 0 []) [] end;"]
 
 val runtime_fragment_execution_lines =
-  ["fun holbuild_step (\"open\", text) = let val ftac = if String.isPrefix \"open_nth_goal \" text then goalFrag.open_nth_goal (Option.valOf (Int.fromString (String.extract(text, 14, NONE)))) else if String.isPrefix \"open_split_lt \" text then goalFrag.open_split_lt (Option.valOf (Int.fromString (String.extract(text, 14, NONE)))) else case text of \"open_paren\" => goalFrag.open_paren | \"open_then1\" => goalFrag.open_then1 | \"open_first\" => goalFrag.open_first | \"open_repeat\" => goalFrag.open_repeat | \"open_tacs_to_lt\" => goalFrag.open_tacs_to_lt | \"open_null_ok\" => goalFrag.open_null_ok | \"open_last_goal\" => goalFrag.open_last_goal | \"open_head_goal\" => goalFrag.open_head_goal | \"open_select_lt\" => goalFrag.open_select_lt | \"open_first_lt\" => goalFrag.open_first_lt | _ => raise Fail (\"unknown open frag: \" ^ text) in proofManagerLib.ef ftac; () end",
-   "  | holbuild_step (\"mid\", text) = let val ftac = case text of \"next_first\" => goalFrag.next_first | \"next_tacs_to_lt\" => goalFrag.next_tacs_to_lt | \"next_split_lt\" => goalFrag.next_split_lt | \"next_select_lt\" => goalFrag.next_select_lt | _ => raise Fail (\"unknown mid frag: \" ^ text) in proofManagerLib.ef ftac; () end",
-   "  | holbuild_step (\"close\", text) = let val ftac = case text of \"close_paren\" => goalFrag.close_paren | \"close_first\" => goalFrag.close_first | \"close_repeat\" => goalFrag.close_repeat | \"close_first_lt\" => goalFrag.close_first_lt | _ => raise Fail (\"unknown close frag: \" ^ text) in proofManagerLib.ef ftac; () end",
-   "  | holbuild_step (\"expand\", text) = if smlExecute.quse_string (\"proofManagerLib.ef(goalFrag.expand(\" ^ text ^ \"));\") then () else raise Fail (\"tactic fragment failed: \" ^ text)",
-   "  | holbuild_step (\"expand_list\", text) = if smlExecute.quse_string (\"proofManagerLib.ef(goalFrag.expand_list(\" ^ text ^ \"));\") then () else raise Fail (\"list tactic fragment failed: \" ^ text)",
+  ["fun holbuild_apply_ftac label ftac = holbuild_with_tactic_timeout label (fn () => (proofManagerLib.ef ftac; ())) ();",
+   "fun holbuild_eval_step label program fail_msg = holbuild_with_tactic_timeout label (fn () => if smlExecute.quse_string program then () else raise Fail fail_msg) ();",
+   "fun holbuild_step (\"open\", text) = let val ftac = if String.isPrefix \"open_nth_goal \" text then goalFrag.open_nth_goal (Option.valOf (Int.fromString (String.extract(text, 14, NONE)))) else if String.isPrefix \"open_split_lt \" text then goalFrag.open_split_lt (Option.valOf (Int.fromString (String.extract(text, 14, NONE)))) else case text of \"open_paren\" => goalFrag.open_paren | \"open_then1\" => goalFrag.open_then1 | \"open_first\" => goalFrag.open_first | \"open_repeat\" => goalFrag.open_repeat | \"open_tacs_to_lt\" => goalFrag.open_tacs_to_lt | \"open_null_ok\" => goalFrag.open_null_ok | \"open_last_goal\" => goalFrag.open_last_goal | \"open_head_goal\" => goalFrag.open_head_goal | \"open_select_lt\" => goalFrag.open_select_lt | \"open_first_lt\" => goalFrag.open_first_lt | _ => raise Fail (\"unknown open frag: \" ^ text) in holbuild_apply_ftac text ftac end",
+   "  | holbuild_step (\"mid\", text) = let val ftac = case text of \"next_first\" => goalFrag.next_first | \"next_tacs_to_lt\" => goalFrag.next_tacs_to_lt | \"next_split_lt\" => goalFrag.next_split_lt | \"next_select_lt\" => goalFrag.next_select_lt | _ => raise Fail (\"unknown mid frag: \" ^ text) in holbuild_apply_ftac text ftac end",
+   "  | holbuild_step (\"close\", text) = let val ftac = case text of \"close_paren\" => goalFrag.close_paren | \"close_first\" => goalFrag.close_first | \"close_repeat\" => goalFrag.close_repeat | \"close_first_lt\" => goalFrag.close_first_lt | _ => raise Fail (\"unknown close frag: \" ^ text) in holbuild_apply_ftac text ftac end",
+   "  | holbuild_step (\"expand\", text) = holbuild_eval_step text (\"proofManagerLib.ef(goalFrag.expand(\" ^ text ^ \"));\") (\"tactic fragment failed: \" ^ text)",
+   "  | holbuild_step (\"expand_list\", text) = holbuild_eval_step text (\"proofManagerLib.ef(goalFrag.expand_list(\" ^ text ^ \"));\") (\"list tactic fragment failed: \" ^ text)",
    "  | holbuild_step (typ, _) = raise Fail (\"unknown fragment type: \" ^ typ);",
    "fun holbuild_run_steps [] = ()",
    "  | holbuild_run_steps ((_, typ, text) :: rest) = (holbuild_step (typ, text); holbuild_run_steps rest);"]
@@ -241,7 +256,7 @@ val runtime_prover_lines =
    "        let",
    "          val _ = holbuild_theorem_info := NONE",
    "          val _ = proofManagerLib.set_goalfrag g",
-   "          val _ = if has_attrs orelse tactic_text = \"\" then (proofManagerLib.expand tac; ()) else holbuild_run_steps (holbuild_steps tactic_text)",
+   "          val _ = if has_attrs orelse tactic_text = \"\" then holbuild_with_tactic_timeout name (fn () => (proofManagerLib.expand tac; ())) () else holbuild_run_steps (holbuild_steps tactic_text)",
    "          val th = proofManagerLib.top_thm()",
    "          val _ = holbuild_save_checkpoint \"end_of_proof\" false end_path checkpoint_depth",
    "          val _ = proofManagerLib.drop_all()",
@@ -249,11 +264,11 @@ val runtime_prover_lines =
    "        handle e => (holbuild_theorem_info := NONE; holbuild_context_info := NONE; holbuild_drop_all(); raise e);",
    "val _ = Tactical.set_prover holbuild_goalfrag_prover;"]
 
-fun runtime_prelude [] = ""
-  | runtime_prelude _ =
+fun runtime_prelude _ [] = ""
+  | runtime_prelude config _ =
       runtime_lines
         (runtime_load_lines @
-         runtime_theorem_state_lines @
+         runtime_theorem_state_lines config @
          runtime_tactic_parse_lines @
          runtime_fragment_structure_lines @
          runtime_fragment_name_lines @
@@ -261,8 +276,10 @@ fun runtime_prelude [] = ""
          runtime_fragment_execution_lines @
          runtime_prover_lines)
 
-fun instrument ({source, start_offset, checkpoints} :
-                {source : string, start_offset : int, checkpoints : checkpoint list}) =
+fun instrument ({source, start_offset, checkpoints, save_checkpoints, tactic_timeout, timeout_marker} :
+                {source : string, start_offset : int, checkpoints : checkpoint list,
+                 save_checkpoints : bool, tactic_timeout : real option,
+                 timeout_marker : string option}) =
   let
     val n = size source
     fun source_slice i j = String.substring(source, i, j - i)
@@ -282,7 +299,11 @@ fun instrument ({source, start_offset, checkpoints} :
                  source_slice pos theorem_start ::
                  acc)
   in
-    runtime_prelude active_checkpoints ^ loop start_offset checkpoints []
+    runtime_prelude {checkpoint_enabled = save_checkpoints,
+                     tactic_timeout = tactic_timeout,
+                     timeout_marker = timeout_marker}
+                    active_checkpoints ^
+    loop start_offset checkpoints []
   end
 
 end

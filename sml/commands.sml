@@ -10,7 +10,7 @@ fun usage () = print
   "holbuild: experimental project-aware build frontend for HOL4\n\n\
   \Usage:\n\
   \  holbuild [--holdir PATH] [-jN] context\n\
-  \  holbuild [--holdir PATH] [-jN] build [--dry-run] [TARGET ...]\n\
+  \  holbuild [--holdir PATH] [-jN] build [--dry-run] [--skip-checkpoints] [--skip-goalfrag] [--tactic-timeout SECONDS] [TARGET ...]\n\
   \  holbuild [--holdir PATH] [-jN] heap NAME\n\
   \  holbuild [--holdir PATH] run [ARG ...]\n\
   \  holbuild [--holdir PATH] repl [ARG ...]\n\
@@ -18,15 +18,38 @@ fun usage () = print
   \HOLDIR is found from --holdir, HOLBUILD_HOLDIR, or HOLDIR for HOL commands.\n\
   \-j/--jobs controls build parallelism and defaults to 1.\n"
 
+fun nonnegative_real label text =
+  case Real.fromString text of
+      SOME n =>
+        if n >= 0.0 then n
+        else raise Error (label ^ " must be a non-negative number")
+    | NONE => raise Error (label ^ " must be a non-negative number")
+
+fun tactic_timeout_value text =
+  let val seconds = nonnegative_real "--tactic-timeout" text
+  in if seconds <= 0.0 then NONE else SOME seconds end
+
 fun split_flags args =
   let
-    fun loop dry rest =
+    fun loop dry skip_checkpoints goalfrag tactic_timeout rest =
       case rest of
-          [] => (dry, [])
-        | "--dry-run" :: xs => loop true xs
-        | x :: xs => let val (d, ys) = loop dry xs in (d, x :: ys) end
+          [] => ({dry_run = dry, skip_checkpoints = skip_checkpoints,
+                  goalfrag = goalfrag, tactic_timeout = tactic_timeout}, [])
+        | "--dry-run" :: xs => loop true skip_checkpoints goalfrag tactic_timeout xs
+        | "--skip-checkpoints" :: xs => loop dry true goalfrag tactic_timeout xs
+        | "--skip-goalfrag" :: xs => loop dry skip_checkpoints false tactic_timeout xs
+        | "--tactic-timeout" :: seconds :: xs =>
+            loop dry skip_checkpoints goalfrag (tactic_timeout_value seconds) xs
+        | "--tactic-timeout" :: [] => raise Error "--tactic-timeout requires SECONDS"
+        | x :: xs =>
+            if String.isPrefix "--tactic-timeout=" x then
+              loop dry skip_checkpoints goalfrag
+                   (tactic_timeout_value (String.extract (x, size "--tactic-timeout=", NONE))) xs
+            else
+              let val (flags, ys) = loop dry skip_checkpoints goalfrag tactic_timeout xs
+              in (flags, x :: ys) end
   in
-    loop false args
+    loop false false true (SOME 2.5) args
   end
 
 fun has_suffix suffix s =
@@ -91,16 +114,19 @@ fun context () = HolbuildProject.describe (load_project ())
 fun build tc jobs args =
   let
     val project = load_project ()
-    val (dry_run, targets) = split_flags args
+    val ({dry_run, skip_checkpoints, goalfrag, tactic_timeout}, targets) = split_flags args
+    val build_options = {skip_checkpoints = skip_checkpoints,
+                         goalfrag = goalfrag,
+                         tactic_timeout = tactic_timeout}
     val _ = reject_object_targets targets
     val index = HolbuildSourceIndex.discover project
     val plan = HolbuildBuildPlan.plan index targets
     val toolchain_key = HolbuildToolchain.toolchain_key tc
   in
-    if dry_run then HolbuildBuildPlan.describe toolchain_key plan
+    if dry_run then HolbuildBuildPlan.describe (HolbuildBuildExec.build_config_lines build_options) toolchain_key plan
     else
       HolbuildBuildExec.with_project_lock project "build"
-        (fn () => HolbuildBuildExec.build tc project plan toolchain_key jobs)
+        (fn () => HolbuildBuildExec.build build_options tc project plan toolchain_key jobs)
   end
 
 fun heap_named project target =
@@ -124,7 +150,8 @@ fun build_heap tc jobs target =
   in
     HolbuildBuildExec.with_project_lock project ("heap " ^ target)
       (fn () =>
-          (HolbuildBuildExec.build tc project plan toolchain_key jobs;
+          (HolbuildBuildExec.build {skip_checkpoints = false, goalfrag = true, tactic_timeout = SOME 2.5}
+                                  tc project plan toolchain_key jobs;
            HolbuildBuildExec.export_heap tc project plan output_path))
   end
 

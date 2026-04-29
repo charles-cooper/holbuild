@@ -58,15 +58,6 @@ second_log=$tmpdir/second.log
 (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$second_log"
 require_grep "ATheory is up to date" "$second_log"
 
-rm "$project/.holbuild/checkpoints/basic/src/AScript.sml.deps_loaded.save.ok"
-missing_ok_log=$tmpdir/missing-ok.log
-(cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$missing_ok_log"
-if grep -q "ATheory is up to date" "$missing_ok_log"; then
-  echo "checkpoint without .ok marker was treated as up to date" >&2
-  exit 1
-fi
-require_file "$project/.holbuild/checkpoints/basic/src/AScript.sml.deps_loaded.save.ok"
-
 rm -rf "$project/.holbuild"
 cache_log=$tmpdir/cache-restore.log
 (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$cache_log"
@@ -82,5 +73,25 @@ base_count=$(find "$project/.holbuild/checkpoints/_base" -name '*.save' | wc -l)
 base_ok_count=$(find "$project/.holbuild/checkpoints/_base" -name '*.save.ok' | wc -l)
 if [[ "$base_count" -lt 1 || "$base_ok_count" -lt 1 ]]; then
   echo "missing restored project base checkpoint" >&2
+  exit 1
+fi
+
+skip_project=$tmpdir/skip-project
+mkdir -p "$skip_project/src"
+cp "$project/holproject.toml" "$skip_project/holproject.toml"
+cp "$project/src/AScript.sml" "$skip_project/src/AScript.sml"
+skip_log=$tmpdir/skip.log
+(cd "$skip_project" && \
+  HOLBUILD_CHECKPOINT_TIMING=1 "$HOLBUILD_BIN" --holdir "$HOLDIR" build --skip-checkpoints ATheory) \
+  > "$skip_log" 2>&1
+if grep -q "holbuild checkpoint kind=deps_loaded\|holbuild checkpoint kind=final_context" "$skip_log"; then
+  echo "--skip-checkpoints created theory checkpoints" >&2
+  exit 1
+fi
+require_file "$skip_project/.holbuild/gen/src/ATheory.sig"
+require_file "$skip_project/.holbuild/gen/src/ATheory.sml"
+require_file "$skip_project/.holbuild/obj/src/ATheory.dat"
+if find "$skip_project/.holbuild/checkpoints" -name '*.save' -o -name '*.save.ok' 2>/dev/null | grep -q .; then
+  echo "--skip-checkpoints left checkpoint files" >&2
   exit 1
 fi

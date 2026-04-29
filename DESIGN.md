@@ -515,6 +515,22 @@ theorem-context checkpoint and replay only the suffix to `export_theory()`.
 End-of-proof checkpoints are proof-navigation states, not successor-ready
 contexts, and are not used for dependency replay.
 
+Goal-fragment execution is separable from PolyML checkpoint creation. A build may
+run modern theorem proofs through the goalfrag/proof-manager path without saving
+`.save` files, e.g. for dependency packages or `--skip-checkpoints`; this keeps
+proof failures inspectable without retaining large checkpoint trees. Power users
+can opt out of goalfrag instrumentation with `--skip-goalfrag`, which also means
+no theorem-boundary checkpoints or tactic timeout enforcement for that build.
+
+When goalfrag is enabled, holbuild applies a tactic timeout to each goalfrag
+step, and to the conservative whole-tactic fallback used for attributed proofs.
+The CLI default is 2.5 seconds per tactic step; `--tactic-timeout SECONDS`
+changes it, and `--tactic-timeout 0` disables it. The timeout is part of the
+action key because a proof that only succeeds with a longer/no timeout must not
+share a cache entry with the default timed build. On timeout, holbuild reports the
+timed-out tactic and does not retry the script through the plain non-goalfrag
+fallback, since that would remove the only timeout guard.
+
 Other theorem-producing syntax, such as simple `Theorem name = thm` declarations,
 `store_thm` calls, `Resume`, or `Finalise`, is not checkpoint-instrumented in v1.
 Those declarations still execute during normal source builds/replays, but they do
