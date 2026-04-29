@@ -95,3 +95,10 @@ if find "$skip_project/.holbuild/checkpoints" -name '*.save' -o -name '*.save.ok
   echo "--skip-checkpoints left checkpoint files" >&2
   exit 1
 fi
+
+bad_flags_log=$tmpdir/bad-flags.log
+if (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --skip-goalfrag --tactic-timeout 0 ATheory) > "$bad_flags_log" 2>&1; then
+  echo "--skip-goalfrag --tactic-timeout should fail" >&2
+  exit 1
+fi
+require_grep "requires goalfrag" "$bad_flags_log"

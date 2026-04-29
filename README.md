@@ -108,9 +108,11 @@ and for the build phase of `heap` targets; the default is `-j1`.
 `--skip-checkpoints` disables retained theory checkpoint `.save`/`.ok` files
 without disabling goalfrag proof execution. `--skip-goalfrag` opts out of modern
 theorem instrumentation. `--tactic-timeout SECONDS` sets the per-tactic goalfrag
-timeout; the default is 2.5 seconds, and `0` disables the timeout. `cache gc` uses
-`$HOLBUILD_CACHE`, `$XDG_CACHE_HOME/holbuild`, or `$HOME/.cache/holbuild` and
-does not require a HOL toolchain.
+timeout; the default is 2.5 seconds, and `0` disables the timeout. Combining
+`--skip-goalfrag` with `--tactic-timeout` is an error because the timeout is
+implemented by the goalfrag runtime. `cache gc` uses `$HOLBUILD_CACHE`,
+`$XDG_CACHE_HOME/holbuild`, or `$HOME/.cache/holbuild` and does not require a HOL
+toolchain.
 
 See `DESIGN.md` for the intended long-term model: manifest-based package
 resolution, project-local `.holbuild/` materialization, action-key invalidation,

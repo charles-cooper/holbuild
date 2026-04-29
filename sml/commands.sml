@@ -31,25 +31,30 @@ fun tactic_timeout_value text =
 
 fun split_flags args =
   let
-    fun loop dry skip_checkpoints goalfrag tactic_timeout rest =
+    fun loop dry skip_checkpoints goalfrag tactic_timeout tactic_timeout_set rest =
       case rest of
           [] => ({dry_run = dry, skip_checkpoints = skip_checkpoints,
-                  goalfrag = goalfrag, tactic_timeout = tactic_timeout}, [])
-        | "--dry-run" :: xs => loop true skip_checkpoints goalfrag tactic_timeout xs
-        | "--skip-checkpoints" :: xs => loop dry true goalfrag tactic_timeout xs
-        | "--skip-goalfrag" :: xs => loop dry skip_checkpoints false tactic_timeout xs
+                  goalfrag = goalfrag, tactic_timeout = tactic_timeout,
+                  tactic_timeout_set = tactic_timeout_set}, [])
+        | "--dry-run" :: xs =>
+            loop true skip_checkpoints goalfrag tactic_timeout tactic_timeout_set xs
+        | "--skip-checkpoints" :: xs =>
+            loop dry true goalfrag tactic_timeout tactic_timeout_set xs
+        | "--skip-goalfrag" :: xs =>
+            loop dry skip_checkpoints false tactic_timeout tactic_timeout_set xs
         | "--tactic-timeout" :: seconds :: xs =>
-            loop dry skip_checkpoints goalfrag (tactic_timeout_value seconds) xs
+            loop dry skip_checkpoints goalfrag (tactic_timeout_value seconds) true xs
         | "--tactic-timeout" :: [] => raise Error "--tactic-timeout requires SECONDS"
         | x :: xs =>
             if String.isPrefix "--tactic-timeout=" x then
               loop dry skip_checkpoints goalfrag
-                   (tactic_timeout_value (String.extract (x, size "--tactic-timeout=", NONE))) xs
+                   (tactic_timeout_value (String.extract (x, size "--tactic-timeout=", NONE)))
+                   true xs
             else
-              let val (flags, ys) = loop dry skip_checkpoints goalfrag tactic_timeout xs
+              let val (flags, ys) = loop dry skip_checkpoints goalfrag tactic_timeout tactic_timeout_set xs
               in (flags, x :: ys) end
   in
-    loop false false true (SOME 2.5) args
+    loop false false true (SOME 2.5) false args
   end
 
 fun has_suffix suffix s =
@@ -114,7 +119,11 @@ fun context () = HolbuildProject.describe (load_project ())
 fun build tc jobs args =
   let
     val project = load_project ()
-    val ({dry_run, skip_checkpoints, goalfrag, tactic_timeout}, targets) = split_flags args
+    val ({dry_run, skip_checkpoints, goalfrag, tactic_timeout, tactic_timeout_set}, targets) = split_flags args
+    val _ =
+      if not goalfrag andalso tactic_timeout_set then
+        raise Error "--tactic-timeout requires goalfrag; remove --skip-goalfrag"
+      else ()
     val build_options = {skip_checkpoints = skip_checkpoints,
                          goalfrag = goalfrag,
                          tactic_timeout = tactic_timeout}
