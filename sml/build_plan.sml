@@ -72,8 +72,7 @@ fun declared_load_names node =
 
 fun direct_dependency_names node =
   unique_strings
-    (#theories (deps_of node) @ #loads (deps_of node) @ #libs (deps_of node) @
-     declared_dependency_names node @ declared_load_names node)
+    (#loads (deps_of node) @ declared_dependency_names node @ declared_load_names node)
 
 fun source_object_candidates node =
   let
@@ -174,9 +173,10 @@ fun direct_external_theories nodes node =
   let
     fun known name = not (null (nodes_named nodes name))
     val holdep_theories = List.filter theory_name (holdep_external_names node)
+    val loaded_theories = List.filter theory_name (#loads (deps_of node))
   in
     unique_strings (List.filter (fn name => not (known name))
-                      (#theories (deps_of node) @ holdep_theories))
+                      (loaded_theories @ holdep_theories))
   end
 
 fun direct_external_libs nodes node =
@@ -186,8 +186,7 @@ fun direct_external_libs nodes node =
   in
     unique_strings
       (List.filter (fn name => not (known name))
-         (#libs (deps_of node) @ declared_load_names node @ holdep_libs @
-          raw_external_load_names nodes node))
+         (declared_load_names node @ holdep_libs @ raw_external_load_names nodes node))
   end
 
 fun direct_unresolved_loads nodes node =

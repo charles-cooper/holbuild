@@ -8,9 +8,7 @@ exception Error of string
 datatype token = Word of string | StringLit of string | Symbol of char
 
 type t =
-  { theories : string list,
-    loads : string list,
-    libs : string list,
+  { loads : string list,
     uses : string list,
     holdep_deps : string list }
 
@@ -134,18 +132,6 @@ fun tokenize text =
 
 fun theory_name s = has_suffix "Theory" s andalso size s > size "Theory"
 
-fun ancestor_theory name = if theory_name name then name else name ^ "Theory"
-
-fun extract_token_theories tokens =
-  let
-    fun add (token, acc) =
-      case token of
-          Word word => if theory_name word then add_unique word acc else acc
-        | _ => acc
-  in
-    List.foldl add [] tokens
-  end
-
 fun extract_string_args keyword tokens =
   let
     fun loop rest acc =
@@ -159,73 +145,24 @@ fun extract_string_args keyword tokens =
     loop tokens []
   end
 
-fun header_stop_word word =
-  List.exists (fn stop => stop = word)
-    ["val", "fun", "open", "local", "structure", "signature", "datatype",
-     "type", "exception", "Type", "Definition", "Theorem", "Triviality", "Lemma",
-     "Corollary", "Datatype", "Overload", "Inductive", "CoInductive",
-     "End", "Resume", "Finalise"]
-
-fun extract_holsource_header tokens =
-  let
-    fun skip_qualifier rest =
-      let
-        fun skip_until_close tokens =
-          case tokens of
-              [] => []
-            | Symbol #"]" :: xs => xs
-            | _ :: xs => skip_until_close xs
-      in
-        case rest of
-            Symbol #"[" :: xs => skip_until_close xs
-          | _ => rest
-      end
-    fun section current rest theories libs =
-      case rest of
-          [] => (theories, libs)
-        | Word "Ancestors" :: xs => section "Ancestors" xs theories libs
-        | Word "Libs" :: xs => section "Libs" xs theories libs
-        | Word word :: xs =>
-            if header_stop_word word then (theories, libs)
-            else if current = "Ancestors" then
-              section current (skip_qualifier xs) (add_unique (ancestor_theory word) theories) libs
-            else if current = "Libs" then
-              section current (skip_qualifier xs) theories (add_unique word libs)
-            else section current xs theories libs
-        | _ :: xs => section current xs theories libs
-    fun find rest =
-      case rest of
-          Word "Theory" :: Word _ :: xs => section "" xs [] []
-        | _ :: xs => find xs
-        | [] => ([], [])
-  in
-    find tokens
-  end
-
 fun extract {includes} path =
   let
     val tokens = tokenize (read_all path)
     val loads = extract_string_args "load" tokens
     val uses = extract_string_args "use" tokens
-    val loaded_theories = List.filter theory_name loads
-    val (header_theories, header_libs) = extract_holsource_header tokens
-    val theories = sort_unique (loaded_theories @ header_theories @ extract_token_theories tokens)
   in
-    {theories = theories, loads = sort_unique loads,
-     libs = sort_unique header_libs, uses = sort_unique uses,
+    {loads = sort_unique loads, uses = sort_unique uses,
      holdep_deps = holdep_deps includes path}
   end
 
-fun describe ({theories, loads, libs, uses, holdep_deps} : t) =
+fun describe ({loads, uses, holdep_deps} : t) =
   let
     fun line label values =
       case values of
           [] => ()
         | _ => print ("  " ^ label ^ ": " ^ String.concatWith ", " values ^ "\n")
   in
-    line "theory deps" theories;
     line "loads" loads;
-    line "libs" libs;
     line "uses" uses;
     line "Holdep deps" holdep_deps
   end
