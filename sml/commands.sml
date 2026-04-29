@@ -129,7 +129,7 @@ fun build tc jobs args =
                          tactic_timeout = tactic_timeout}
     val _ = reject_object_targets targets
     val index = HolbuildSourceIndex.discover project
-    val plan = HolbuildBuildPlan.plan index targets
+    val plan = HolbuildBuildPlan.plan (#holdir tc) index targets
     val toolchain_key = HolbuildToolchain.toolchain_key tc
   in
     if dry_run then HolbuildBuildPlan.describe (HolbuildBuildExec.build_config_lines build_options) toolchain_key plan
@@ -153,7 +153,7 @@ fun build_heap tc jobs target =
     val HolbuildProject.Heap {output, objects, ...} = heap_named project target
     val _ = if null objects then raise Error ("heap target has no objects: " ^ target) else ()
     val index = HolbuildSourceIndex.discover project
-    val plan = HolbuildBuildPlan.plan index objects
+    val plan = HolbuildBuildPlan.plan (#holdir tc) index objects
     val toolchain_key = HolbuildToolchain.toolchain_key tc
     val output_path = HolbuildProject.abs_under (#root project) output
   in

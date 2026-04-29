@@ -1,6 +1,8 @@
 structure HolbuildDependencies =
 struct
 
+structure Path = OS.Path
+
 exception Error of string
 
 datatype token = Word of string | StringLit of string | Symbol of char
@@ -9,7 +11,8 @@ type t =
   { theories : string list,
     loads : string list,
     libs : string list,
-    uses : string list }
+    uses : string list,
+    holdep_deps : string list }
 
 fun has_suffix suffix s =
   let
@@ -35,6 +38,26 @@ fun insert_sorted item items =
           | GREATER => x :: insert_sorted item xs
 
 fun sort_unique items = List.foldl (fn (item, acc) => insert_sorted item acc) [] items
+
+fun normalize_path path = Path.mkCanonical path handle Path.InvalidArc => path
+
+fun absolute_path path = Path.isAbsolute path handle Path.InvalidArc => false
+
+fun normalize_dep_path source_path dep =
+  normalize_path
+    (if absolute_path dep then dep else Path.concat(Path.dir source_path, dep))
+
+fun holdep_deps includes path =
+  let
+    val {deps, ...} = Holdep.main {assumes = [], includes = includes,
+                                   diag = fn _ => (), fname = path}
+  in
+    sort_unique (map (normalize_dep_path path) deps)
+  end
+  handle Holdep.Holdep_Error msg =>
+    raise Error ("Holdep failed for " ^ path ^ ": " ^ msg)
+       | Holdep_tokens.LEX_ERROR msg =>
+    raise Error ("Holdep failed for " ^ path ^ ": " ^ msg)
 
 fun read_all path =
   let
@@ -179,7 +202,7 @@ fun extract_holsource_header tokens =
     find tokens
   end
 
-fun extract path =
+fun extract {includes} path =
   let
     val tokens = tokenize (read_all path)
     val loads = extract_string_args "load" tokens
@@ -189,10 +212,11 @@ fun extract path =
     val theories = sort_unique (loaded_theories @ header_theories @ extract_token_theories tokens)
   in
     {theories = theories, loads = sort_unique loads,
-     libs = sort_unique header_libs, uses = sort_unique uses}
+     libs = sort_unique header_libs, uses = sort_unique uses,
+     holdep_deps = holdep_deps includes path}
   end
 
-fun describe ({theories, loads, libs, uses} : t) =
+fun describe ({theories, loads, libs, uses, holdep_deps} : t) =
   let
     fun line label values =
       case values of
@@ -202,7 +226,8 @@ fun describe ({theories, loads, libs, uses} : t) =
     line "theory deps" theories;
     line "loads" loads;
     line "libs" libs;
-    line "uses" uses
+    line "uses" uses;
+    line "Holdep deps" holdep_deps
   end
 
 end

@@ -205,12 +205,14 @@ always_reexecute = true
 # impure = true is shorthand for no cache and always re-execute
 ```
 
-`deps` names additional logical project dependencies when source-level imports
-are insufficient or intentionally absent; every listed name must resolve in the
-manifest/source graph. `loads` names additional loadable module/library stems for
-source-implicit `load` predecessors; matching project modules are resolved in the
-DAG, otherwise the name is loaded from the configured HOL toolchain context.
-`extra_inputs` are hashed exactly and included in the action key. `cache = false`
+`holbuild` uses HOL's `Holdep` machinery to infer normal source dependencies
+from old-style `load`/`open` usage and HOLSource headers. `deps` names additional
+logical project dependencies when source-level imports are insufficient or
+intentionally absent; every listed name must resolve in the manifest/source
+graph. `loads` names additional loadable module/library stems for source-implicit
+predecessors; matching project modules are resolved in the DAG, otherwise the
+name is loaded from the configured HOL toolchain context. `extra_inputs` are
+hashed exactly and included in the action key. `cache = false`
 disables global-cache restore/publish for that action. `always_reexecute = true`
 prevents local up-to-date skipping and checkpoint replay for that action. These
 are escape hatches, not ambient include/search paths.

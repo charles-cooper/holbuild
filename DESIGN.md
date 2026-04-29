@@ -207,14 +207,17 @@ always_reexecute = true
 impure = true
 ```
 
-`deps` names additional logical project dependencies when source-level imports
-are insufficient or intentionally absent; every listed dependency must resolve to
-a source in the manifest graph. `loads` names additional loadable module/library
-stems for source-implicit `load` predecessors; matching project modules are
-resolved in the DAG, otherwise the name is loaded from the configured HOL
-toolchain context. `extra_inputs` are package-root-relative paths whose exact
-bytes are hashed into the action key. `cache = false` disables global-cache
-restore/publish for the action. `always_reexecute = true` disables local
+Source dependencies are inferred with HOL's existing `Holdep` machinery over the
+resolved manifest package roots and the configured HOL toolchain objects, so
+normal old-style `load`/`open` usage and HOLSource headers become graph edges
+without user-facing include paths. `deps` names additional logical project
+dependencies when source-level imports are insufficient or intentionally absent;
+every listed dependency must resolve to a source in the manifest graph. `loads`
+names additional loadable module/library stems for source-implicit predecessors;
+matching project modules are resolved in the DAG, otherwise the name is loaded
+from the configured HOL toolchain context. `extra_inputs` are package-root-relative
+paths whose exact bytes are hashed into the action key. `cache = false` disables
+global-cache restore/publish for the action. `always_reexecute = true` disables local
 up-to-date skipping and dirty checkpoint replay for the action. `impure = true`
 is a conservative shorthand for no cache and always re-execute. These fields are
 intended for audited exceptions such as generated data, root-HOL SML modules with
@@ -291,10 +294,12 @@ project/.holbuild/
 Path-sensitive files are generated or rebased for this local layout. In
 particular, `.uo`/`.ui` files and generated `Theory.sml` files may contain paths
 and should not be treated as portable semantic truth. Project SML/SIG modules are
-built as internal load manifests: `load "Module"` references are resolved against
-the project graph, not against ambient include paths. Generated theory modules
-also get internal load manifests from HOL's recorded theory metadata
-(`Theory.current_ML_deps` / `Theory.add_ML_dependency`), so legitimate generated
+built as internal load manifests: `load "Module"`, `open Module`, and qualified
+module references are resolved through HOL's `Holdep` scanner against the project
+graph plus the configured HOL toolchain objects, not against ambient include
+paths. Generated theory modules also get internal load manifests from HOL's
+recorded theory metadata (`Theory.current_ML_deps` /
+`Theory.add_ML_dependency`), so legitimate generated
 `local open ...` dependencies are preserved without parsing generated SML text.
 Source-level `use "file"` is rejected in project build actions in v1 because it
 is an arbitrary path/input outside the resolved package graph; declare a project

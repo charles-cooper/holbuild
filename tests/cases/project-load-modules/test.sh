@@ -48,13 +48,32 @@ structure Baz = struct
   val reduce = numLib.REDUCE_CONV
 end
 SML
+cat > "$project/src/Quux.sml" <<'SML'
+open Foo numLib;
+
+structure Quux = struct
+  val witness = value
+  val reduce = REDUCE_CONV
+end
+SML
+cat > "$project/src/RawLoad.sml" <<'SML'
+load "numLib";
+
+structure RawLoad = struct
+  val reduce = numLib.REDUCE_CONV
+end
+SML
 cat > "$project/src/AScript.sml" <<'SML'
 open HolKernel Parse boolLib bossLib;
 
 load "Bar";
 load "Baz";
+load "Quux";
+load "RawLoad";
 val _ = if Bar.witness then () else raise Fail "Bar did not load Foo";
 val _ = if Baz.witness then () else raise Fail "Baz did not load declared dep Foo";
+val _ = if Quux.witness then () else raise Fail "Quux did not load Holdep-inferred Foo";
+val _ = RawLoad.reduce ``1 + 1``;
 
 val _ = new_theory "A";
 val a_thm = store_thm("a_thm", ``T``, ACCEPT_TAC TRUTH);
@@ -67,6 +86,8 @@ require_grep "Foo (sig" "$dry_log"
 require_grep "Foo (sml" "$dry_log"
 require_grep "Bar (sml" "$dry_log"
 require_grep "Baz (sml" "$dry_log"
+require_grep "Quux (sml" "$dry_log"
+require_grep "RawLoad (sml" "$dry_log"
 require_grep "ATheory" "$dry_log"
 
 (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory)
@@ -74,15 +95,22 @@ require_file "$project/.holbuild/obj/src/Foo.ui"
 require_file "$project/.holbuild/obj/src/Foo.uo"
 require_file "$project/.holbuild/obj/src/Bar.uo"
 require_file "$project/.holbuild/obj/src/Baz.uo"
+require_file "$project/.holbuild/obj/src/Quux.uo"
+require_file "$project/.holbuild/obj/src/RawLoad.uo"
 require_file "$project/.holbuild/gen/src/ATheory.sml"
 require_file "$project/.holbuild/obj/src/ATheory.dat"
 
 require_grep ".holbuild/obj/src/Foo" "$project/.holbuild/obj/src/Bar.uo"
 require_grep ".holbuild/obj/src/Foo" "$project/.holbuild/obj/src/Baz.uo"
 require_grep "numLib" "$project/.holbuild/obj/src/Baz.uo"
+require_grep ".holbuild/obj/src/Foo" "$project/.holbuild/obj/src/Quux.uo"
+require_grep "numLib" "$project/.holbuild/obj/src/Quux.uo"
+require_grep "numLib" "$project/.holbuild/obj/src/RawLoad.uo"
 require_grep ".holbuild/obj/src/Bar" "$project/.holbuild/obj/src/AScript.uo"
 require_grep ".holbuild/obj/src/Baz" "$project/.holbuild/obj/src/AScript.uo"
-if grep -q ".holbuild/obj/src/Bar\|.holbuild/obj/src/Baz" "$project/.holbuild/obj/src/ATheory.uo"; then
+require_grep ".holbuild/obj/src/Quux" "$project/.holbuild/obj/src/AScript.uo"
+require_grep ".holbuild/obj/src/RawLoad" "$project/.holbuild/obj/src/AScript.uo"
+if grep -q ".holbuild/obj/src/Bar\|.holbuild/obj/src/Baz\|.holbuild/obj/src/Quux\|.holbuild/obj/src/RawLoad" "$project/.holbuild/obj/src/ATheory.uo"; then
   echo "source-only project loads leaked into generated theory load manifest" >&2
   exit 1
 fi
