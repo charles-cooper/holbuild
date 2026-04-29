@@ -27,6 +27,8 @@ declare -a running_pids=()
 declare -a running_names=()
 declare -a failed_names=()
 
+echo "running holbuild tests with HOLBUILD_TEST_JOBS=$HOLBUILD_TEST_JOBS"
+
 run_case() {
   local test_script=$1
   local name=$2
@@ -59,16 +61,32 @@ remove_running_at() {
   unset 'running_names[$last]'
 }
 
+running_index_for_pid() {
+  local pid=$1
+  local i
+  for i in "${!running_pids[@]}"; do
+    if [[ ${running_pids[$i]} == "$pid" ]]; then
+      echo "$i"
+      return 0
+    fi
+  done
+  echo "unknown completed test pid: $pid" >&2
+  exit 2
+}
+
 wait_one() {
-  local pid=${running_pids[0]}
-  local name=${running_names[0]}
-  if wait "$pid"; then
-    cat "$log_dir/$name.log"
-  else
+  local completed_pid
+  local status=0
+  wait -n -p completed_pid "${running_pids[@]}" || status=$?
+
+  local index
+  index=$(running_index_for_pid "$completed_pid")
+  local name=${running_names[$index]}
+  if [[ $status -ne 0 ]]; then
     failed_names+=("$name")
-    cat "$log_dir/$name.log"
   fi
-  remove_running_at 0
+  cat "$log_dir/$name.log"
+  remove_running_at "$index"
 }
 
 wait_all() {
