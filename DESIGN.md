@@ -218,7 +218,7 @@ matching project modules are resolved in the DAG, otherwise the name is loaded
 from the configured HOL toolchain context. `extra_inputs` are package-root-relative
 paths whose exact bytes are hashed into the action key. `cache = false` disables
 global-cache restore/publish for the action. `always_reexecute = true` disables local
-up-to-date skipping and dirty checkpoint replay for the action. `impure = true`
+up-to-date skipping and any retained/debug checkpoint replay for the action. `impure = true`
 is a conservative shorthand for no cache and always re-execute. These fields are
 intended for audited exceptions such as generated data, root-HOL SML modules with
 explicit predecessor requirements, source-implicit external libraries, or
@@ -464,10 +464,10 @@ the resolved holbuild-produced base context, loads generated theory modules in
 resolved build-graph order, and saves the requested heap with PolyML SaveState.
 
 Heaps requested by users remain project-local exported artifacts. Checkpoints are
-build state: they may be produced locally or restored from the global cache when
-their action key, base-context key, schema, toolchain, platform, and relocation
-metadata validate. Raw checkpoint bytes are never the semantic identity; they are
-the materialized state for an already-resolved graph.
+transient build/debug state. Normal successful theory builds may create them
+while running, but remove them after logical artifacts and metadata are written.
+Raw checkpoint bytes are never the semantic identity; they are local replay/debug
+breadcrumbs for an already-resolved graph, not retained outputs.
 
 `holbuild` should not use `hol buildheap` as the normal incremental-build
 primitive. `buildheap` snapshots a process after loading a closure of `.uo`
@@ -498,12 +498,12 @@ action key/cache:        can this whole script action be skipped?
 syntactic checkpoint:    if the action changed, where can replay resume?
 ```
 
-A holbuild checkpoint action keys replay eligibility by the exact source
+A retained/debug checkpoint action keys replay eligibility by the exact source
 prefix/boundary identity, resolved dependency-context key, toolchain/base-context
 key, and checkpoint schema. Raw `.save` bytes are diagnostic only and must not be
-used as stable semantic keys. Shareable checkpoints are cache entries keyed by
-those resolved inputs and materialized into `.holbuild/checkpoints/` for the
-consuming project.
+used as stable semantic keys. The default build does not retain successful
+checkpoints or materialize checkpoints from the global cache; cache restore
+recreates only logical theory artifacts and internal load manifests.
 
 The prototype currently instruments AST `HOLTheoremDecl` declarations, i.e.
 modern goal/proof forms such as `Theorem ... Proof ... QED` (including proof
@@ -514,20 +514,19 @@ insert a theorem marker before expansion, then runs the proof through
 `<thm>_end_of_proof.save` checkpoint is saved before `drop_all`, so it preserves
 proof-manager history for navigation; `<thm>_context.save` is saved after the
 expanded theorem declaration stores the theorem in the theory context. If a later
-source edit leaves an earlier theorem prefix byte-identical and the resolved
-dependency context still matches, a dirty rebuild can load the nearest valid
-theorem-context checkpoint and replay only the suffix to `export_theory()`.
-End-of-proof checkpoints are proof-navigation states, not successor-ready
-contexts, and are not used for dependency replay.
+source edit leaves an earlier retained theorem prefix byte-identical and the
+resolved dependency context still matches, a dirty/debug rebuild can load the
+nearest valid theorem-context checkpoint and replay only the suffix to
+`export_theory()`. End-of-proof checkpoints are proof-navigation states, not
+successor-ready contexts, and are not used for dependency replay.
 
-Goal-fragment execution is separable from PolyML checkpoint creation. By default,
-holbuild retains checkpoints for all built packages, including dependencies, so
-ancestor builds have local incremental replay state. `--skip-checkpoints` runs
-modern theorem proofs through the goalfrag/proof-manager path without saving
-`.save` files; this is useful for disk-constrained semantic probes while keeping
-proof failures inspectable. Power users can opt out of goalfrag instrumentation
-with `--skip-goalfrag`, which also means no theorem-boundary checkpoints or tactic
-timeout enforcement for that build.
+Goal-fragment execution is separable from PolyML checkpoint creation and
+retention. By default, holbuild creates checkpoints during source execution for
+crash/debug breadcrumbs, then removes them after a successful theory build.
+`--skip-checkpoints` runs modern theorem proofs through the goalfrag/proof-manager
+path without saving `.save` files at all. Power users can opt out of goalfrag
+instrumentation with `--skip-goalfrag`, which also means no theorem-boundary
+checkpoints or tactic timeout enforcement for that build.
 
 When goalfrag is enabled, holbuild applies a tactic timeout to each goalfrag
 step, and to the conservative whole-tactic fallback used for attributed proofs.

@@ -47,13 +47,13 @@ require_grep "holbuild checkpoint kind=final_context share=false" "$first_log"
 require_file "$project/.holbuild/gen/src/ATheory.sig"
 require_file "$project/.holbuild/gen/src/ATheory.sml"
 require_file "$project/.holbuild/obj/src/ATheory.dat"
-require_file "$project/.holbuild/checkpoints/basic/src/AScript.sml.deps_loaded.save"
-require_file "$project/.holbuild/checkpoints/basic/src/AScript.sml.deps_loaded.save.ok"
-require_file "$project/.holbuild/checkpoints/basic/src/AScript.sml.final_context.save"
-require_file "$project/.holbuild/checkpoints/basic/src/AScript.sml.final_context.save.ok"
 require_file "$project/.holbuild/dep/basic/src/AScript.sml.key"
-if find "$project/.holbuild/checkpoints/_base" -name '*.save' -o -name '*.save.ok' 2>/dev/null | grep -q .; then
-  echo "unexpected project base checkpoint" >&2
+if find "$project/.holbuild/checkpoints" \( -name '*.save' -o -name '*.save.ok' \) -print -quit 2>/dev/null | grep -q .; then
+  echo "successful build retained checkpoint files" >&2
+  exit 1
+fi
+if grep -q "deps_loaded=\|final_context=\|theorem_boundary" "$project/.holbuild/dep/basic/src/AScript.sml.key"; then
+  echo "metadata should not retain checkpoint paths" >&2
   exit 1
 fi
 
@@ -68,12 +68,8 @@ require_grep "ATheory restored from cache" "$cache_log"
 require_file "$project/.holbuild/gen/src/ATheory.sig"
 require_file "$project/.holbuild/gen/src/ATheory.sml"
 require_file "$project/.holbuild/obj/src/ATheory.dat"
-require_file "$project/.holbuild/checkpoints/basic/src/AScript.sml.deps_loaded.save"
-require_file "$project/.holbuild/checkpoints/basic/src/AScript.sml.deps_loaded.save.ok"
-require_file "$project/.holbuild/checkpoints/basic/src/AScript.sml.final_context.save"
-require_file "$project/.holbuild/checkpoints/basic/src/AScript.sml.final_context.save.ok"
-if find "$project/.holbuild/checkpoints/_base" -name '*.save' -o -name '*.save.ok' 2>/dev/null | grep -q .; then
-  echo "unexpected restored project base checkpoint" >&2
+if find "$project/.holbuild/checkpoints" \( -name '*.save' -o -name '*.save.ok' \) -print -quit 2>/dev/null | grep -q .; then
+  echo "cache restore retained checkpoint files" >&2
   exit 1
 fi
 
@@ -92,7 +88,7 @@ fi
 require_file "$skip_project/.holbuild/gen/src/ATheory.sig"
 require_file "$skip_project/.holbuild/gen/src/ATheory.sml"
 require_file "$skip_project/.holbuild/obj/src/ATheory.dat"
-if find "$skip_project/.holbuild/checkpoints" -name '*.save' -o -name '*.save.ok' 2>/dev/null | grep -q .; then
+if find "$skip_project/.holbuild/checkpoints" \( -name '*.save' -o -name '*.save.ok' \) -print -quit 2>/dev/null | grep -q .; then
   echo "--skip-checkpoints left checkpoint files" >&2
   exit 1
 fi

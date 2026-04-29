@@ -30,8 +30,8 @@ This prototype is intentionally small:
 - records local action metadata and skips unchanged actions
 - publishes/restores simple theory semantic artifacts through the global cache
 - includes the resolved holbuild-produced base context/toolchain in prototype action keys
-- saves local theory checkpoints: dependencies-loaded, AST-derived theorem end-of-proof/context checkpoints for modern theorem declarations, and successor-ready final context
-- keeps goalfrag proof execution separate from checkpoint retention; `--skip-checkpoints` avoids theory `.save` files, `--skip-goalfrag` opts out of theorem instrumentation, and `--tactic-timeout SECONDS` controls the default 2.5s per-tactic goalfrag timeout (`0` disables it)
+- creates transient local theory checkpoints while building: dependencies-loaded, AST-derived theorem end-of-proof/context checkpoints for modern theorem declarations, and successor-ready final context; successful builds remove them after writing logical artifacts and metadata
+- keeps goalfrag proof execution separate from checkpoint creation; `--skip-checkpoints` avoids theory `.save` files entirely, `--skip-goalfrag` opts out of theorem instrumentation, and `--tactic-timeout SECONDS` controls the default 2.5s per-tactic goalfrag timeout (`0` disables it)
 - exports explicit project heap targets from `[[heap]]` entries using local SaveState
 - exposes `holbuild cache gc` with a 7-day default global-cache retention policy
 - does not delegate build semantics to Holmake
@@ -69,7 +69,7 @@ HOL's selftest layout with minimal reshaping; `tests/run.sh` is the repo-local
 runner and can run cases in parallel with `HOLBUILD_TEST_JOBS`. Current cases
 cover simple theory builds, package overrides, cross-package SML load
 resolution, dependency cycle rejection, conservative invalidation, theorem
-checkpoint replay, logical-name conflict rejection, cache
+checkpoint creation/cleanup, logical-name conflict rejection, cache
 restoration/corruption/concurrency fallback, parallel diamonds, same-project
 write locking, explicit heaps, object-target rejection, manifest schema
 validation, and cache GC.
@@ -104,8 +104,9 @@ bin/holbuild heap main
 `--holdir PATH` can be used instead of `HOLBUILD_HOLDIR` at runtime for HOL
 commands. `-jN`, `-j N`, or `--jobs N` controls build parallelism for `build`
 and for the build phase of `heap` targets; the default is `-j1`.
-`--skip-checkpoints` disables retained theory checkpoint `.save`/`.ok` files
-without disabling goalfrag proof execution. `--skip-goalfrag` opts out of modern
+`--skip-checkpoints` disables theory checkpoint `.save`/`.ok` creation without
+disabling goalfrag proof execution. By default checkpoints may be created during
+a build but are removed after successful artifact/metadata writes. `--skip-goalfrag` opts out of modern
 theorem instrumentation. `--tactic-timeout SECONDS` sets the per-tactic goalfrag
 timeout; the default is 2.5 seconds, and `0` disables the timeout. Combining
 `--skip-goalfrag` with `--tactic-timeout` is an error because the timeout is
@@ -214,29 +215,29 @@ predecessors; matching project modules are resolved in the DAG, otherwise the
 name is loaded from the configured HOL toolchain context. `extra_inputs` are
 hashed exactly and included in the action key. `cache = false`
 disables global-cache restore/publish for that action. `always_reexecute = true`
-prevents local up-to-date skipping and checkpoint replay for that action. These
+prevents local up-to-date skipping and any retained/debug checkpoint replay for that action. These
 are escape hatches, not ambient include/search paths.
 
 Incremental correctness is action-key based. `holbuild` does not use
 `hol buildheap` as its default build primitive; it builds contexts directly by
-loading resolved ancestors and saving PolyML checkpoints at syntactic boundaries:
-dependencies loaded, AST-derived theorem end-of-proof/context boundaries for
-modern `Theorem ... Proof ... QED` declarations, and successor-ready final
-context, materialized under `.holbuild/checkpoints/`. Simple theorem-producing
-forms such as `Theorem name = thm` still build normally but are not theorem
-checkpoint boundaries in v1. When a script is dirty but a previous theorem-context
-prefix still matches exactly, holbuild can replay from that checkpoint instead
-of from the dependency-loaded state. Explicit
-`holbuild heap NAME` targets build their declared logical objects, load the
-generated theory modules, and save the requested heap with PolyML SaveState.
+loading resolved ancestors and, unless `--skip-checkpoints` is set, saving
+transient PolyML checkpoints at syntactic boundaries: dependencies loaded,
+AST-derived theorem end-of-proof/context boundaries for modern
+`Theorem ... Proof ... QED` declarations, and successor-ready final context.
+Successful builds remove those checkpoint files after writing artifacts and
+metadata; failed/interrupted builds may leave them as debug breadcrumbs. Simple
+theorem-producing forms such as `Theorem name = thm` still build normally but are
+not theorem checkpoint boundaries in v1. Explicit `holbuild heap NAME` targets
+build their declared logical objects, load the generated theory modules, and save
+the requested heap with PolyML SaveState.
 
 The optional global cache stores simple theory semantic artifacts by action key:
-`Theory.sig`, a path-rebased `Theory.sml` template, and `Theory.dat`. The target
-model also shares validated successor-ready dependency state. On a cache hit,
-holbuild materializes artifacts/checkpoints into local `.holbuild/`, writes local
-load manifests, and validates the restored state before dependents use it.
-`holbuild cache gc` removes stale temporary entries, stale action manifests, and
-old unreferenced blobs after 7 days by default.
+`Theory.sig`, a path-rebased `Theory.sml` template, and `Theory.dat`. On a cache
+hit, holbuild materializes artifacts into local `.holbuild/`, writes local load
+manifests, and validates hashes before dependents use them. It does not restore
+successful-build checkpoint files by default. `holbuild cache gc` removes stale
+temporary entries, stale action manifests, and old unreferenced blobs after 7
+days by default.
 
 `holbuild run` and `holbuild repl` generate `.holbuild/holbuild-run-context.sml`
 in the project root before loading `[run].loads` and user-supplied arguments.

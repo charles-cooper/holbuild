@@ -58,10 +58,10 @@ SML
 require_file "$project/.holbuild/deps/dep/gen/src/ATheory.sig"
 require_file "$project/.holbuild/deps/dep/gen/src/ATheory.sml"
 require_file "$project/.holbuild/deps/dep/obj/src/ATheory.dat"
-require_file "$project/.holbuild/checkpoints/dep/src/AScript.sml.deps_loaded.save"
-require_file "$project/.holbuild/checkpoints/dep/src/AScript.sml.deps_loaded.save.ok"
-require_file "$project/.holbuild/checkpoints/dep/src/AScript.sml.final_context.save"
-require_file "$project/.holbuild/checkpoints/dep/src/AScript.sml.final_context.save.ok"
+if find "$project/.holbuild/checkpoints" \( -name '*.save' -o -name '*.save.ok' \) -print -quit 2>/dev/null | grep -q .; then
+  echo "successful dependency build retained checkpoint files" >&2
+  exit 1
+fi
 require_file "$project/.holbuild/gen/src/BTheory.sig"
 require_file "$project/.holbuild/gen/src/BTheory.sml"
 require_file "$project/.holbuild/obj/src/BTheory.dat"

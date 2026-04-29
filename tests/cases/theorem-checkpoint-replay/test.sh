@@ -49,131 +49,69 @@ QED
 val _ = export_theory();
 SML
 
-(cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory)
-require_file "$project/.holbuild/checkpoints/replay/src/AScript.sml.a_thm_context.save"
-require_file "$project/.holbuild/checkpoints/replay/src/AScript.sml.a_thm_context.save.ok"
-require_file "$project/.holbuild/checkpoints/replay/src/AScript.sml.a_thm_end_of_proof.save"
-require_file "$project/.holbuild/checkpoints/replay/src/AScript.sml.a_thm_end_of_proof.save.ok"
-require_file "$project/.holbuild/checkpoints/replay/src/AScript.sml.b_thm_context.save"
-require_file "$project/.holbuild/checkpoints/replay/src/AScript.sml.b_thm_context.save.ok"
-require_file "$project/.holbuild/checkpoints/replay/src/AScript.sml.b_thm_end_of_proof.save"
-require_file "$project/.holbuild/checkpoints/replay/src/AScript.sml.b_thm_end_of_proof.save.ok"
-require_file "$project/.holbuild/checkpoints/replay/src/AScript.sml.c_thm_context.save"
-require_file "$project/.holbuild/checkpoints/replay/src/AScript.sml.c_thm_context.save.ok"
-require_file "$project/.holbuild/checkpoints/replay/src/AScript.sml.c_thm_end_of_proof.save"
-require_file "$project/.holbuild/checkpoints/replay/src/AScript.sml.c_thm_end_of_proof.save.ok"
-require_grep "theorem_boundary a_thm" "$project/.holbuild/dep/replay/src/AScript.sml.key"
-require_grep "theorem_boundary c_thm" "$project/.holbuild/dep/replay/src/AScript.sml.key"
-require_grep "_end_of_proof.save" "$project/.holbuild/dep/replay/src/AScript.sml.key"
+first_log=$tmpdir/first.log
+(cd "$project" && \
+  HOLBUILD_CHECKPOINT_TIMING=1 "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) \
+  > "$first_log" 2>&1
+require_grep "holbuild checkpoint kind=deps_loaded" "$first_log"
+require_grep "holbuild checkpoint kind=end_of_proof" "$first_log"
+require_grep "holbuild checkpoint kind=theorem_context" "$first_log"
+require_grep "holbuild checkpoint kind=final_context" "$first_log"
+require_file "$project/.holbuild/gen/src/ATheory.sig"
+require_file "$project/.holbuild/gen/src/ATheory.sml"
+require_file "$project/.holbuild/obj/src/ATheory.dat"
 require_grep "dependency_context_key=" "$project/.holbuild/dep/replay/src/AScript.sml.key"
-
-cat > "$tmpdir/check-checkpoint-parents.sml" <<SML
-fun expect_parent child expected =
-  case PolyML.SaveState.showParent child of
-      SOME actual => if actual = expected then () else raise Fail ("bad parent for " ^ child ^ ": " ^ actual)
-    | NONE => raise Fail ("missing parent for " ^ child);
-val deps_loaded = "$project/.holbuild/checkpoints/replay/src/AScript.sml.deps_loaded.save";
-val a_context = "$project/.holbuild/checkpoints/replay/src/AScript.sml.a_thm_context.save";
-val a_end = "$project/.holbuild/checkpoints/replay/src/AScript.sml.a_thm_end_of_proof.save";
-val b_context = "$project/.holbuild/checkpoints/replay/src/AScript.sml.b_thm_context.save";
-val b_end = "$project/.holbuild/checkpoints/replay/src/AScript.sml.b_thm_end_of_proof.save";
-val _ = expect_parent a_end deps_loaded;
-val _ = expect_parent a_context deps_loaded;
-val _ = expect_parent b_end a_context;
-val _ = expect_parent b_context a_context;
-SML
-"$HOLDIR/bin/hol" run --noconfig --holstate "$HOLDIR/bin/hol.state" "$tmpdir/check-checkpoint-parents.sml"
-
-if grep -q "theorem_boundary simple_thm" "$project/.holbuild/dep/replay/src/AScript.sml.key"; then
-  echo "simple Theorem = declaration should not create a goalfrag checkpoint" >&2
+if grep -q "theorem_boundary\|_end_of_proof.save\|deps_loaded=\|final_context=" "$project/.holbuild/dep/replay/src/AScript.sml.key"; then
+  echo "successful metadata retained checkpoint paths" >&2
+  exit 1
+fi
+if find "$project/.holbuild/checkpoints" \( -name '*.save' -o -name '*.save.ok' \) -print -quit 2>/dev/null | grep -q .; then
+  echo "successful theorem build retained checkpoint files" >&2
   exit 1
 fi
 
-cat > "$tmpdir/check-fragmented-proof-state.sml" <<'SML'
-val _ = proofManagerLib.b();
-val _ = proofManagerLib.b();
-val _ =
-  case proofManagerLib.top_goals() of
-      [] => raise Fail "end-of-proof checkpoint has no multi-step goalfrag history"
-    | _ => ();
-SML
-cat > "$tmpdir/check-proof-state.sml" <<'SML'
-val _ = proofManagerLib.b();
-val _ =
-  case proofManagerLib.top_goals() of
-      [] => raise Fail "end-of-proof checkpoint has no goalfrag history"
-    | _ => ();
-SML
-"$HOLDIR/bin/hol" run --noconfig \
-  --holstate "$project/.holbuild/checkpoints/replay/src/AScript.sml.b_thm_end_of_proof.save" \
-  "$tmpdir/check-fragmented-proof-state.sml"
-"$HOLDIR/bin/hol" run --noconfig \
-  --holstate "$project/.holbuild/checkpoints/replay/src/AScript.sml.c_thm_end_of_proof.save" \
-  "$tmpdir/check-proof-state.sml"
+second_log=$tmpdir/second.log
+(cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$second_log"
+require_grep "ATheory is up to date" "$second_log"
 
 skip_goalfrag_project=$tmpdir/skip-goalfrag-project
 mkdir -p "$skip_goalfrag_project/src"
 cp "$project/holproject.toml" "$skip_goalfrag_project/holproject.toml"
 cp "$project/src/AScript.sml" "$skip_goalfrag_project/src/AScript.sml"
 (cd "$skip_goalfrag_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --skip-goalfrag ATheory)
-require_file "$skip_goalfrag_project/.holbuild/checkpoints/replay/src/AScript.sml.deps_loaded.save"
-require_file "$skip_goalfrag_project/.holbuild/checkpoints/replay/src/AScript.sml.final_context.save"
+require_file "$skip_goalfrag_project/.holbuild/gen/src/ATheory.sig"
+require_file "$skip_goalfrag_project/.holbuild/gen/src/ATheory.sml"
+require_file "$skip_goalfrag_project/.holbuild/obj/src/ATheory.dat"
 if grep -q "theorem_boundary a_thm" "$skip_goalfrag_project/.holbuild/dep/replay/src/AScript.sml.key"; then
   echo "--skip-goalfrag should not create theorem boundaries" >&2
   exit 1
 fi
-if find "$skip_goalfrag_project/.holbuild/checkpoints/replay/src" -name '*_thm_context.save' -print -quit | grep -q .; then
-  echo "--skip-goalfrag created theorem checkpoints" >&2
+if find "$skip_goalfrag_project/.holbuild/checkpoints" \( -name '*.save' -o -name '*.save.ok' \) -print -quit 2>/dev/null | grep -q .; then
+  echo "--skip-goalfrag successful build retained checkpoints" >&2
   exit 1
 fi
 
-rm "$project/.holbuild/checkpoints/replay/src/AScript.sml.a_thm_context.save.ok"
+failure_project=$tmpdir/failure-project
+mkdir -p "$failure_project/src"
+cp "$project/holproject.toml" "$failure_project/holproject.toml"
 python3 - <<PY
 from pathlib import Path
-path = Path("$project/src/AScript.sml")
-text = path.read_text()
-path.write_text(text.replace('Theorem b_thm:', '(* missing-ok edit after a_thm *)\nTheorem b_thm:'))
-PY
-
-missing_ok_log=$tmpdir/missing-ok-replay.log
-(cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$missing_ok_log" 2>&1
-if grep -q "replaying from checkpoint" "$missing_ok_log"; then
-  echo "replayed from checkpoint without .ok marker" >&2
-  exit 1
-fi
-require_file "$project/.holbuild/checkpoints/replay/src/AScript.sml.a_thm_context.save.ok"
-
-python3 - <<PY
-from pathlib import Path
-path = Path("$project/src/AScript.sml")
-text = path.read_text()
-path.write_text(text.replace('Theorem b_thm:', '(* proof/comment edit after a_thm *)\nTheorem b_thm:'))
-PY
-
-replay_log=$tmpdir/replay.log
-(cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$replay_log" 2>&1
-require_grep "ATheory replaying from checkpoint a_thm" "$replay_log"
-require_file "$project/.holbuild/gen/src/ATheory.sig"
-require_file "$project/.holbuild/gen/src/ATheory.sml"
-require_file "$project/.holbuild/obj/src/ATheory.dat"
-
-python3 - <<PY
-from pathlib import Path
-path = Path("$project/src/AScript.sml")
-text = path.read_text()
-path.write_text(text.replace('CONJ_TAC >- ACCEPT_TAC TRUTH >- ACCEPT_TAC TRUTH', 'CONJ_TAC >- FAIL_TAC "expected failure" >- ACCEPT_TAC TRUTH'))
+src = Path("$project/src/AScript.sml").read_text()
+src = src.replace('CONJ_TAC >- ACCEPT_TAC TRUTH >- ACCEPT_TAC TRUTH',
+                  'CONJ_TAC >- FAIL_TAC "expected failure" >- ACCEPT_TAC TRUTH')
+Path("$failure_project/src/AScript.sml").write_text(src)
 PY
 
 failure_log=$tmpdir/failure.log
-if (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$failure_log" 2>&1; then
+if (cd "$failure_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$failure_log" 2>&1; then
   echo "expected failing proof to fail build" >&2
   exit 1
 fi
 require_grep "expected failure" "$failure_log"
-if [[ -e "$project/.holbuild/checkpoints/replay/src/AScript.sml.b_thm_context.save" || \
-      -e "$project/.holbuild/checkpoints/replay/src/AScript.sml.b_thm_context.save.ok" || \
-      -e "$project/.holbuild/checkpoints/replay/src/AScript.sml.b_thm_end_of_proof.save" || \
-      -e "$project/.holbuild/checkpoints/replay/src/AScript.sml.b_thm_end_of_proof.save.ok" ]]; then
+if [[ -e "$failure_project/.holbuild/checkpoints/replay/src/AScript.sml.b_thm_context.save" || \
+      -e "$failure_project/.holbuild/checkpoints/replay/src/AScript.sml.b_thm_context.save.ok" || \
+      -e "$failure_project/.holbuild/checkpoints/replay/src/AScript.sml.b_thm_end_of_proof.save" || \
+      -e "$failure_project/.holbuild/checkpoints/replay/src/AScript.sml.b_thm_end_of_proof.save.ok" ]]; then
   echo "stale b_thm checkpoint survived failed proof" >&2
   exit 1
 fi
