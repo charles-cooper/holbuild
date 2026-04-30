@@ -933,18 +933,21 @@ fun replay_candidates old_boundaries checkpoints =
 
 fun later_candidate (a, b) = if #boundary a >= #boundary b then a else b
 
-fun best_replay_candidate project plan keys toolchain_key node checkpoints =
+fun best_replay_candidate project plan keys input_key toolchain_key node checkpoints =
   case current_metadata (metadata_path project node) of
       NONE => NONE
     | SOME text =>
         let
           val lines = metadata_lines text
           val current_context = dependency_context_key toolchain_key plan keys node
+          val old_input_key = metadata_value "input_key" lines
           val old_context = metadata_value "dependency_context_key" lines
           val old_boundaries = List.mapPartial old_theorem_boundary lines
           val candidates = replay_candidates old_boundaries checkpoints
         in
-          if old_context <> SOME current_context orelse null candidates then NONE
+          if old_input_key <> SOME input_key orelse
+             old_context <> SOME current_context orelse
+             null candidates then NONE
           else SOME (List.foldl later_candidate (hd candidates) (tl candidates))
         end
 
@@ -982,17 +985,17 @@ fun instrumented_source policy timeout_marker source_text start_offset checkpoin
        timeout_marker = timeout_marker}
   else source_text
 
-fun replay_candidate project plan keys toolchain_key node checkpoints =
+fun replay_candidate project plan keys input_key toolchain_key node checkpoints =
   if always_reexecute node then NONE
-  else best_replay_candidate project plan keys toolchain_key node checkpoints
+  else best_replay_candidate project plan keys input_key toolchain_key node checkpoints
 
-fun write_theory_script policy project base_context plan keys toolchain_key node source_text checkpoints staged_script preload timeout_marker =
+fun write_theory_script policy project base_context plan keys input_key toolchain_key node source_text checkpoints staged_script preload timeout_marker =
   if not (checkpoint_enabled policy) then
     (write_plain_preload plan node preload;
      write_text staged_script (instrumented_source policy (SOME timeout_marker) source_text 0 checkpoints);
      {context = base_context, files = [preload, staged_script]})
   else
-    case replay_candidate project plan keys toolchain_key node checkpoints of
+    case replay_candidate project plan keys input_key toolchain_key node checkpoints of
         SOME {boundary, path, safe_name} =>
           let
             val _ = write_text staged_script (instrumented_source policy (SOME timeout_marker) source_text boundary checkpoints)
@@ -1040,7 +1043,7 @@ fun build_theory policy tc project base_context plan keys toolchain_key node sou
           {sig_path = staged_sig, sml_path = staged_sml,
            path = final_loader, mldeps_report = SOME mldeps_report}
     val _ = remove_file timeout_marker
-    val run_spec = write_theory_script policy project base_context plan keys toolchain_key node
+    val run_spec = write_theory_script policy project base_context plan keys input_key toolchain_key node
                                     source_text theorem_checkpoints staged_script preload timeout_marker
     fun remove_theorem_checkpoint {context_path, end_of_proof_path, ...} =
       (remove_checkpoint context_path; remove_checkpoint end_of_proof_path)
