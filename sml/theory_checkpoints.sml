@@ -180,7 +180,20 @@ val runtime_fragment_structure_lines =
    "  | holbuild_alt_span (TacticParse.LSelectGoals p) = SOME p",
    "  | holbuild_alt_span _ = NONE;",
    "fun holbuild_frag_end (TacticParse.FAtom a) = (case (TacticParse.topSpan a, holbuild_alt_span a) of (SOME (_, r), _) => r | (NONE, SOME (_, r)) => r | _ => 0)",
-   "  | holbuild_frag_end _ = 0;"]
+   "  | holbuild_frag_end _ = 0;",
+   "fun holbuild_is_composable (TacticParse.Then _) = true",
+   "  | holbuild_is_composable (TacticParse.ThenLT _) = true",
+   "  | holbuild_is_composable (TacticParse.LThen1 _) = true",
+   "  | holbuild_is_composable (TacticParse.LThenLT _) = true",
+   "  | holbuild_is_composable (TacticParse.Group _) = true",
+   "  | holbuild_is_composable _ = false;",
+   "fun holbuild_group_atom_expr (TacticParse.FAtom (TacticParse.Group (_, _, e))) = if holbuild_is_composable e then SOME e else NONE",
+   "  | holbuild_group_atom_expr _ = NONE;",
+   "fun holbuild_reexpand_group_atoms frags = let",
+   "  fun reexpand e = let val subFrags = TacticParse.linearize (fn x => Option.isSome (TacticParse.topSpan x)) e in holbuild_reexpand_group_atoms (holbuild_flatten_frags subFrags) end",
+   "  fun go [] acc = rev acc",
+   "    | go (f::rest) acc = (case holbuild_group_atom_expr f of SOME e => go rest (rev (reexpand e) @ acc) | NONE => go rest (f :: acc))",
+   "in go frags [] end;"]
 
 val runtime_fragment_name_lines =
   ["fun holbuild_open_name TacticParse.FOpen = \"open_paren\"",
@@ -235,7 +248,7 @@ val runtime_step_plan_lines =
    "fun holbuild_steps body = let",
    "  val tree = holbuild_parse_tactic body",
    "  fun isAtom e = Option.isSome (TacticParse.topSpan e)",
-   "  val frags = holbuild_flatten_frags (TacticParse.linearize isAtom tree)",
+   "  val frags = holbuild_reexpand_group_atoms (holbuild_flatten_frags (TacticParse.linearize isAtom tree))",
    "  fun assign [] _ acc = rev acc",
    "    | assign (f::rest) last acc = let val typ = holbuild_frag_type f val txt = holbuild_frag_text body f val (endPos, last') = case f of TacticParse.FAtom _ => let val e = holbuild_frag_end f in (e, e) end | _ => (last, last) in if String.size txt > 0 then assign rest last' ((endPos, typ, txt) :: acc) else assign rest last acc end",
    "in holbuild_merge_select_steps (assign frags 0 []) [] end;"]
