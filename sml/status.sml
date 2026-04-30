@@ -8,6 +8,7 @@ type active_node = {key : string, label : string}
 type t = {
   enabled : bool,
   total : int,
+  jobs : int,
   finished : int ref,
   built : int ref,
   up_to_date : int ref,
@@ -16,6 +17,8 @@ type t = {
   ended : bool ref,
   mutex : Thread.Mutex.mutex
 }
+
+val current_status : t option ref = ref NONE
 
 val clear_to_eol = "\027[0K"
 
@@ -64,16 +67,16 @@ fun remove_active key active = List.filter (fn {key = k, ...} => k <> key) activ
 
 fun active_labels active = map (fn {label, ...} => label) active
 
-fun line ({total, finished, built, up_to_date, restored, active, ...} : t) =
+fun line ({total, jobs, finished, built, up_to_date, restored, active, ...} : t) =
   let
     val running = active_labels (!active)
     val prefix =
       String.concat
-        ["holbuild [", Int.toString (!finished), "/", Int.toString total, "] ",
-         "active=", Int.toString (length running),
+        ["holbuild done=", Int.toString (!finished), "/", Int.toString total,
+         " running=", Int.toString (length running), "/", Int.toString jobs,
          " built=", Int.toString (!built),
-         " cache=", Int.toString (!restored),
-         " up=", Int.toString (!up_to_date)]
+         " from_cache=", Int.toString (!restored),
+         " unchanged=", Int.toString (!up_to_date)]
   in
     case running of
         [] => prefix
@@ -95,16 +98,23 @@ fun with_lock ({mutex, ...} : t) f =
   (Thread.Mutex.lock mutex; f () before Thread.Mutex.unlock mutex)
   handle e => (Thread.Mutex.unlock mutex; raise e)
 
-fun create total =
-  {enabled = enabled_by_default (),
-   total = total,
-   finished = ref 0,
-   built = ref 0,
-   up_to_date = ref 0,
-   restored = ref 0,
-   active = ref [],
-   ended = ref false,
-   mutex = Thread.Mutex.mutex ()}
+fun create {total, jobs} =
+  let
+    val status =
+      {enabled = enabled_by_default (),
+       total = total,
+       jobs = jobs,
+       finished = ref 0,
+       built = ref 0,
+       up_to_date = ref 0,
+       restored = ref 0,
+       active = ref [],
+       ended = ref false,
+       mutex = Thread.Mutex.mutex ()}
+  in
+    current_status := SOME status;
+    status
+  end
 
 fun start_node status key label =
   with_lock status
@@ -134,31 +144,49 @@ fun finish_node status key label outcome =
         end)
 
 fun finish status =
-  with_lock status
-    (fn () =>
-        let val {enabled, ended, ...} = status
-        in
-          if !ended then ()
-          else
-            (if enabled then (redraw status; TextIO.output (TextIO.stdOut, "\n"); TextIO.flushOut TextIO.stdOut) else ();
-             ended := true)
-        end)
+  (with_lock status
+     (fn () =>
+         let val {enabled, ended, ...} = status
+         in
+           if !ended then ()
+           else
+             (if enabled then (redraw status; TextIO.output (TextIO.stdOut, "\n"); TextIO.flushOut TextIO.stdOut) else ();
+              ended := true)
+         end);
+   current_status := NONE)
+
+fun message stream text =
+  case !current_status of
+      NONE => (TextIO.output (stream, text); TextIO.flushOut stream)
+    | SOME status =>
+        with_lock status
+          (fn () =>
+              let val {enabled, ended, ...} = status
+              in
+                if enabled andalso not (!ended) then
+                  (TextIO.output (TextIO.stdOut, "\r" ^ clear_to_eol);
+                   TextIO.flushOut TextIO.stdOut;
+                   TextIO.output (stream, text);
+                   TextIO.flushOut stream;
+                   redraw status)
+                else
+                  (TextIO.output (stream, text); TextIO.flushOut stream)
+              end)
 
 fun fail status key label msg =
-  with_lock status
-    (fn () =>
-        let val {enabled, active, ended, ...} = status
-        in
-          if !ended then ()
-          else
-            (active := remove_active key (!active);
-             if enabled then
-               (TextIO.output (TextIO.stdOut,
-                  "\r" ^ fit (terminal_width ())
-                    (line status ^ " failed " ^ label ^ ": " ^ msg) ^ clear_to_eol ^ "\n");
-                TextIO.flushOut TextIO.stdOut)
-             else ();
-             ended := true)
-        end)
+  (with_lock status
+     (fn () =>
+         let val {enabled, active, ended, ...} = status
+         in
+           if !ended then ()
+           else
+             (active := remove_active key (!active);
+              if enabled then
+                (TextIO.output (TextIO.stdOut, "\r" ^ clear_to_eol);
+                 TextIO.flushOut TextIO.stdOut)
+              else ();
+              ended := true)
+         end);
+   current_status := NONE)
 
 end

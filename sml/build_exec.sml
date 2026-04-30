@@ -292,6 +292,11 @@ fun theory_outputs node =
 fun stage_dir (project : HolbuildProject.t) input_key =
   Path.concat(Path.concat(#root project, ".holbuild/stage"), input_key)
 
+fun log_dir (project : HolbuildProject.t) = Path.concat(#root project, ".holbuild/logs")
+
+fun retained_checkpoint_failure_log project node input_key =
+  Path.concat(log_dir project, input_key ^ "-" ^ logical_name node ^ "-instrumented-failure.log")
+
 fun staged_theory_file stage node ext = Path.concat(Path.concat(stage, ".hol/objs"), logical_name node ^ ext)
 fun staged_dat_reference stage node = Path.concat(stage, logical_name node ^ ".dat")
 
@@ -480,15 +485,27 @@ fun stale_project_lock owner =
       (SOME host, SOME pid) => host = current_host () andalso not (local_pid_alive pid)
     | _ => false
 
+fun owner_summary owner =
+  let
+    fun field name =
+      case owner_value name owner of
+          SOME value => name ^ "=" ^ value
+        | NONE => name ^ "=unknown"
+  in
+    String.concatWith " " [field "command", field "pid", field "cwd"]
+  end
+
 fun remove_stale_project_lock lock owner =
   (TextIO.output(TextIO.stdErr,
-                 "holbuild: warning: removing stale project lock: " ^ lock ^ "\n" ^ owner);
+                 "holbuild: warning: removing stale project lock: " ^ lock ^
+                 " (" ^ owner_summary owner ^ ")\n");
    remove_file (project_lock_owner_path lock);
    FS.rmDir lock handle OS.SysErr _ => ())
 
 fun project_lock_error lock owner =
   Error ("project is already being modified by another holbuild process\n" ^
-         "lock: " ^ lock ^ "\n" ^ owner)
+         "lock: " ^ lock ^ "\n" ^
+         "owner: " ^ owner_summary owner)
 
 fun acquire_fresh_project_lock lock command =
   (FS.mkDir lock;
@@ -556,7 +573,7 @@ fun run_hol_files_to_log tc stage context files log_name error_message =
         log
   in
     if HolbuildToolchain.success status then
-      if echo_child_logs () then print (read_text log handle _ => "") else ()
+      if echo_child_logs () then HolbuildStatus.message TextIO.stdOut (read_text log handle _ => "") else ()
     else
       raise Error (String.concatWith "\n"
         [error_message,
@@ -570,7 +587,33 @@ fun toolchain_base_context tc = HolState (HolbuildToolchain.base_state tc)
 
 val cache_sml_token = "__HOLBUILD_THEORY_DAT_LOAD__"
 
-fun warn msg = TextIO.output(TextIO.stdErr, "holbuild: warning: " ^ msg ^ "\n")
+fun warn msg = HolbuildStatus.message TextIO.stdErr ("holbuild: warning: " ^ msg ^ "\n")
+
+fun nonempty_line line = List.exists (not o Char.isSpace) (String.explode line)
+
+fun last_nonempty_line text =
+  List.foldl (fn (line, last) => if nonempty_line line then SOME line else last)
+             NONE
+             (String.tokens (fn c => c = #"\n") text)
+
+fun truncate_text limit text =
+  if size text <= limit then text
+  else String.substring(text, 0, limit - 3) ^ "..."
+
+fun summarize_log path =
+  Option.map (truncate_text 240) (last_nonempty_line (read_text path))
+  handle _ => NONE
+
+fun preserve_checkpoint_failure_log project node input_key stage =
+  let
+    val src = Path.concat(stage, "holbuild-build.log")
+    val dst = retained_checkpoint_failure_log project node input_key
+  in
+    if file_exists src then
+      (ensure_parent dst; copy_binary src dst; SOME dst)
+      handle _ => SOME src
+    else NONE
+  end
 
 fun cache_root () = HolbuildCache.cache_root ()
 
@@ -1099,7 +1142,8 @@ fun write_theory_script policy project base_context plan keys input_key toolchai
           SOME {boundary, path, safe_name} =>
             let
               val _ = write_text staged_script (instrumented_source policy (SOME timeout_marker) source_text boundary checkpoints)
-              val _ = print (logical_name node ^ " replaying from checkpoint " ^ safe_name ^ "\n")
+              val _ = HolbuildStatus.message TextIO.stdOut
+                        (logical_name node ^ " replaying from checkpoint " ^ safe_name ^ "\n")
             in
               {context = HolState path, files = [staged_script]}
             end
@@ -1150,22 +1194,19 @@ fun build_theory policy tc project base_context plan keys toolchain_key node sou
     fun tactic_timeout_error () =
       Error ("tactic timed out while building " ^ logical_name node ^ ": " ^
              String.concatWith " " (String.tokens Char.isSpace (read_text timeout_marker)))
-    fun run_plain_after_checkpoint_failure msg =
+    fun checkpoint_failure_error msg =
       let
-        val _ = print (logical_name node ^
-                       " checkpoint instrumentation failed; retrying without theorem checkpoints\n")
-        val deps_usable = checkpoint_enabled policy andalso deps_checkpoint_exists deps_loaded deps_key
-        val _ =
-          if deps_usable then ()
-          else if checkpoint_enabled policy then write_preload plan node deps_loaded deps_ok preload
-          else write_plain_preload plan node preload
-        val _ = write_text staged_script source_text
-        val context = if deps_usable then HolState deps_loaded else base_context
-        val files = if deps_usable then [staged_script, final_loader]
-                    else [preload, staged_script, final_loader]
+        val failure_log = preserve_checkpoint_failure_log project node input_key stage
+        val reason = Option.mapPartial summarize_log failure_log
+        val detail =
+          String.concat
+            [logical_name node,
+             " goalfrag/checkpoint run failed\n",
+             "plain-source fallback disabled; use --skip-checkpoints to avoid replay or --skip-goalfrag to run source directly\n",
+             case failure_log of NONE => "" | SOME path => "instrumented log: " ^ path ^ "\n",
+             case reason of NONE => "" | SOME line => "last log line: " ^ line ^ "\n"]
       in
-        run_hol_files_to_log tc stage context files
-          "holbuild-plain-retry.log" msg
+        Error detail
       end
     val _ =
       run_hol_files_to_log tc stage (#context run_spec)
@@ -1175,7 +1216,7 @@ fun build_theory policy tc project base_context plan keys toolchain_key node sou
       handle Error msg =>
         if file_exists timeout_marker then raise tactic_timeout_error ()
         else if null theorem_checkpoints then raise Error msg
-        else run_plain_after_checkpoint_failure msg
+        else raise checkpoint_failure_error msg
     val _ = copy_binary staged_dat data_path
     val _ = copy_binary staged_dat (hfs_remapped_path data_path)
     val _ = copy_binary staged_sig sig_path
@@ -1517,13 +1558,23 @@ fun build_parallel status options tc project base_context plan keys toolchain_ke
              signal ()))
 
     fun finish_failure msg =
-      with_lock
-        (fn () =>
-            (running := !running - 1;
-             case !failure of
-                 SOME _ => ()
-               | NONE => failure := SOME msg;
-             signal ()))
+      let
+        val first_failure =
+          with_lock
+            (fn () =>
+                let
+                  val _ = running := !running - 1
+                  val first =
+                    case !failure of
+                        SOME _ => false
+                      | NONE => (failure := SOME msg; true)
+                in
+                  signal ();
+                  first
+                end)
+      in
+        if first_failure then HolbuildToolchain.cleanup_active_children () else ()
+      end
 
     fun worker_exit () =
       with_lock (fn () => (active := !active - 1; signal ()))
@@ -1576,7 +1627,7 @@ fun build (options : build_options) tc project plan toolchain_key jobs =
     val keys = HolbuildBuildPlan.input_keys (build_config_lines_for_node options project) toolchain_key plan
   in
     let
-      val status = HolbuildStatus.create (length plan)
+      val status = HolbuildStatus.create {total = length plan, jobs = jobs}
       fun run () =
         if jobs <= 1 then build_serial status options tc project base_context plan keys toolchain_key
         else if all_nodes_up_to_date options project plan keys toolchain_key then

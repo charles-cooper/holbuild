@@ -3,10 +3,10 @@ struct
 
 exception Error of string
 
-fun err msg = (TextIO.output(TextIO.stdErr, "holbuild: " ^ msg ^ "\n");
+fun err msg = (HolbuildStatus.message TextIO.stdErr ("holbuild: " ^ msg ^ "\n");
                OS.Process.exit OS.Process.failure)
 
-fun warn msg = TextIO.output(TextIO.stdErr, "holbuild: warning: " ^ msg ^ "\n")
+fun warn msg = HolbuildStatus.message TextIO.stdErr ("holbuild: warning: " ^ msg ^ "\n")
 
 fun usage () = print
   "holbuild: experimental project-aware build frontend for HOL4\n\n\
@@ -18,7 +18,8 @@ fun usage () = print
   \  holbuild [--holdir PATH] repl [ARG ...]\n\
   \  holbuild cache gc [--retention-days DAYS] [--cache-dir PATH]\n\n\
   \HOLDIR is found from --holdir, HOLBUILD_HOLDIR, or HOLDIR for HOL commands.\n\
-  \-j/--jobs controls build parallelism and defaults to 1.\n"
+  \-j/--jobs controls build parallelism. Default is .holconfig.toml [build].jobs,\n\
+  \or max(1, detected processor count / 2).\n"
 
 fun nonnegative_real label text =
   case Real.fromString text of
@@ -127,20 +128,47 @@ fun parse_global_options args =
       case rest of
           [] => ({holdir = holdir, jobs = jobs}, [])
         | "--holdir" :: path :: xs => loop (SOME path) jobs xs
-        | "--jobs" :: n :: xs => loop holdir (positive_int "--jobs" n) xs
-        | "-j" :: n :: xs => loop holdir (positive_int "-j" n) xs
+        | "--jobs" :: n :: xs => loop holdir (SOME (positive_int "--jobs" n)) xs
+        | "-j" :: n :: xs => loop holdir (SOME (positive_int "-j" n)) xs
         | arg :: xs =>
             if String.isPrefix "--holdir=" arg then
               loop (SOME (String.extract (arg, size "--holdir=", NONE))) jobs xs
             else if String.isPrefix "--jobs=" arg then
-              loop holdir (positive_int "--jobs" (String.extract (arg, size "--jobs=", NONE))) xs
+              loop holdir (SOME (positive_int "--jobs" (String.extract (arg, size "--jobs=", NONE)))) xs
             else if String.isPrefix "-j" arg andalso size arg > 2 then
-              loop holdir (positive_int "-j" (String.extract (arg, 2, NONE))) xs
+              loop holdir (SOME (positive_int "-j" (String.extract (arg, 2, NONE)))) xs
             else
               let val (opts, args') = loop holdir jobs xs in (opts, arg :: args') end
   in
-    loop NONE 1 args
+    loop NONE NONE args
   end
+
+fun with_input path f =
+  let val ins = TextIO.openIn path
+  in (f ins before TextIO.closeIn ins)
+     handle e => (TextIO.closeIn ins; raise e)
+  end
+
+fun detected_processors () =
+  let
+    fun count ins n =
+      case TextIO.inputLine ins of
+          NONE => n
+        | SOME line =>
+            if String.isPrefix "processor" line then count ins (n + 1)
+            else count ins n
+    val n = with_input "/proc/cpuinfo" (fn ins => count ins 0)
+  in
+    if n > 0 then n else 2
+  end
+  handle _ => 2
+
+fun default_jobs () = Int.max (1, detected_processors () div 2)
+
+fun effective_jobs (project : HolbuildProject.t) cli_jobs =
+  case cli_jobs of
+      SOME jobs => jobs
+    | NONE => Option.getOpt (#local_build_jobs project, default_jobs ())
 
 fun runtime_holdir cline_holdir =
   case cline_holdir of
@@ -161,9 +189,10 @@ fun context () = HolbuildProject.describe (load_project ())
 
 fun timed_phase name f = HolbuildToolchain.time_phase name f
 
-fun build tc jobs args =
+fun build tc cli_jobs args =
   let
     val project = timed_phase "project.discover" load_project
+    val jobs = effective_jobs project cli_jobs
     val ({dry_run, skip_checkpoints, goalfrag, tactic_timeout, tactic_timeout_set}, targets) = split_flags args
     val _ =
       if not goalfrag andalso tactic_timeout_set then
@@ -200,9 +229,10 @@ fun heap_named project target =
       | NONE => raise Error ("unknown heap target: " ^ target)
   end
 
-fun build_heap tc jobs target =
+fun build_heap tc cli_jobs target =
   let
     val project = timed_phase "project.discover" load_project
+    val jobs = effective_jobs project cli_jobs
     val HolbuildProject.Heap {output, objects, ...} = heap_named project target
     val _ = if null objects then raise Error ("heap target has no objects: " ^ target) else ()
     val index = timed_phase "source.discover" (fn () => HolbuildSourceIndex.discover project)

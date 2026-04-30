@@ -68,7 +68,7 @@ rebuild_log=$tmpdir/rebuild.log
 (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$rebuild_log" 2>&1
 new_input_key=$(grep '^input_key=' "$metadata")
 [[ "$old_input_key" != "$new_input_key" ]] || { echo "source edit did not change input key" >&2; exit 1; }
-if grep -q "replaying from checkpoint\|checkpoint instrumentation failed" "$rebuild_log"; then
+if grep -q "replaying from checkpoint\|goalfrag/checkpoint run failed" "$rebuild_log"; then
   echo "invalidated action reused stale theorem checkpoint" >&2
   exit 1
 fi

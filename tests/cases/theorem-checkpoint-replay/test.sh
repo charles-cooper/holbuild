@@ -137,7 +137,7 @@ if (cd "$timeout_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --tactic-t
   exit 1
 fi
 require_grep "tactic timed out while building ATheory" "$timeout_log"
-if grep -q "retrying without theorem checkpoints" "$timeout_log"; then
-  echo "timed out goalfrag proof retried plain source" >&2
+if grep -q "goalfrag/checkpoint run failed\|plain-source fallback disabled" "$timeout_log"; then
+  echo "timeout was reported as generic instrumentation failure" >&2
   exit 1
 fi

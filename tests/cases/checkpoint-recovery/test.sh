@@ -150,8 +150,8 @@ force_rebuild
 fixed_log=$tmpdir/fixed.log
 (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$fixed_log" 2>&1
 require_grep "ATheory replaying from checkpoint first" "$fixed_log"
-if grep -q "parent for this saved state\|checkpoint instrumentation failed" "$fixed_log"; then
-  echo "suffix recovery hit checkpoint parent mismatch/fallback" >&2
+if grep -q "parent for this saved state\|goalfrag/checkpoint run failed" "$fixed_log"; then
+  echo "suffix recovery hit checkpoint parent mismatch/instrumentation failure" >&2
   exit 1
 fi
 require_file "$project/.holbuild/obj/src/ATheory.dat"
@@ -176,11 +176,23 @@ printf 'not a valid PolyML checkpoint\n' > "$corrupt_context"
 write_good_source
 force_rebuild
 corrupt_log=$tmpdir/corrupt.log
-(cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$corrupt_log" 2>&1
+if (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$corrupt_log" 2>&1; then
+  echo "corrupt checkpoint replay should fail the build, not retry plain source" >&2
+  exit 1
+fi
 require_grep "ATheory replaying from checkpoint first" "$corrupt_log"
-require_grep "checkpoint instrumentation failed; retrying without theorem checkpoints" "$corrupt_log"
+require_grep "ATheory goalfrag/checkpoint run failed" "$corrupt_log"
+require_grep "plain-source fallback disabled" "$corrupt_log"
+if grep -q -- "--- child log tail ---" "$corrupt_log"; then
+  echo "checkpoint failure duplicated full child log tail" >&2
+  exit 1
+fi
+rm -rf "$project/.holbuild/checkpoints"
+write_good_source
+force_rebuild
+(cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$tmpdir/corrupt-clean-rebuild.log" 2>&1
 require_file "$project/.holbuild/obj/src/ATheory.dat"
-assert_no_checkpoints "corrupt-checkpoint recovery retained checkpoint files"
+assert_no_checkpoints "clean rebuild after corrupt checkpoint retained checkpoint files"
 
 run_expect_suffix_failure "$tmpdir/prefix-seed.log"
 write_changed_prefix_source

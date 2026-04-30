@@ -52,7 +52,11 @@ if (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$secon
   exit 1
 fi
 require_grep "project is already being modified" "$second_log"
-require_grep "holbuild-project-lock-v1" "$second_log"
+require_grep "owner: command=build pid=" "$second_log"
+if grep -q "holbuild-project-lock-v1" "$second_log"; then
+  echo "project lock conflict leaked raw owner file" >&2
+  exit 1
+fi
 
 wait "$first_pid"
 [[ ! -e "$lock" ]] || { echo "project lock survived successful build" >&2; exit 1; }

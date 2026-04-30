@@ -57,3 +57,51 @@ for i in 1 2 3 4 5 6; do
   require_grep "END T${i}" "$child_log"
   require_file "$project/.holbuild/obj/src/T${i}Theory.dat"
 done
+
+fail_project=$tmpdir/fail-project
+mkdir -p "$fail_project/src"
+cat > "$fail_project/holproject.toml" <<'TOML'
+[project]
+name = "parallel_failure_cleanup"
+
+[build]
+members = ["src"]
+TOML
+
+fail_child_log=$fail_project/child.log
+cat > "$fail_project/src/SlowScript.sml" <<SML
+open HolKernel Parse boolLib bossLib;
+fun append msg =
+  let val out = TextIO.openAppend "$fail_child_log"
+  in TextIO.output(out, msg ^ "\\n"); TextIO.closeOut out end;
+val _ = append "START slow";
+val _ = OS.Process.system "sleep 12";
+val _ = append "END slow";
+val _ = new_theory "Slow";
+val slow_thm = store_thm("slow_thm", ``T``, ACCEPT_TAC TRUTH);
+val _ = export_theory();
+SML
+cat > "$fail_project/src/FailScript.sml" <<'SML'
+open HolKernel Parse boolLib bossLib;
+val _ = new_theory "Fail";
+val _ = raise Fail "expected parallel failure";
+val _ = export_theory();
+SML
+
+start_seconds=$SECONDS
+if (cd "$fail_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" -j2 build --skip-checkpoints --skip-goalfrag) > "$tmpdir/fail-build.log" 2>&1; then
+  echo "expected parallel build failure" >&2
+  exit 1
+fi
+elapsed=$((SECONDS - start_seconds))
+require_grep "expected parallel failure" "$tmpdir/fail-build.log"
+if [[ "$elapsed" -ge 10 ]]; then
+  echo "parallel failure waited for unrelated slow child ($elapsed seconds)" >&2
+  cat "$tmpdir/fail-build.log" >&2
+  exit 1
+fi
+if grep -q "END slow" "$fail_child_log" 2>/dev/null; then
+  echo "unrelated slow child survived first parallel failure" >&2
+  cat "$fail_child_log" >&2
+  exit 1
+fi

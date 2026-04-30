@@ -28,7 +28,7 @@ datatype dependency =
 
 datatype override = Override of {name : string, path : string}
 
-datatype local_config = LocalConfig of {overrides : override list, build_excludes : string list}
+datatype local_config = LocalConfig of {overrides : override list, build_excludes : string list, build_jobs : int option}
 
 datatype package =
   Package of
@@ -52,6 +52,7 @@ type t =
     dependencies : dependency list,
     overrides : override list,
     local_build_excludes : string list,
+    local_build_jobs : int option,
     run_heap : string option,
     run_loads : string list,
     heaps : heap list,
@@ -115,6 +116,11 @@ fun int_at table key =
       NONE => NONE
     | SOME (TOML.INTEGER n) => SOME n
     | SOME _ => die (key_text key ^ " must be an integer")
+
+fun positive_int_field context n =
+  if n >= IntInf.fromInt 1 then
+    IntInf.toInt n handle Overflow => die (context ^ " is too large")
+  else die (context ^ " must be a positive integer")
 
 fun bool_at table key =
   case lookup table key of
@@ -257,7 +263,7 @@ fun validate_override_table (name, table) =
   require_known_fields ("overrides." ^ name) ["path"] table
 
 fun validate_local_build_table table =
-  require_known_fields ".holconfig.toml build" ["exclude"] table
+  require_known_fields ".holconfig.toml build" ["exclude", "jobs"] table
 
 fun validate_local_config_table table =
   (require_known_fields ".holconfig.toml" ["overrides", "build"] table;
@@ -306,6 +312,11 @@ fun local_build_excludes table =
       NONE => []
     | SOME build => package_relative_paths ".holconfig.toml build.exclude" (string_array_field build "exclude")
 
+fun local_build_jobs table =
+  case table_field table ["build"] of
+      NONE => NONE
+    | SOME build => Option.map (positive_int_field ".holconfig.toml build.jobs") (int_at build ["jobs"])
+
 fun parse_local_config root =
   let val config = Path.concat(root, ".holconfig.toml")
   in
@@ -314,9 +325,10 @@ fun parse_local_config root =
       in
         validate_local_config_table table;
         LocalConfig {overrides = overrides_at table,
-                     build_excludes = local_build_excludes table}
+                     build_excludes = local_build_excludes table,
+                     build_jobs = local_build_jobs table}
       end
-    else LocalConfig {overrides = [], build_excludes = []}
+    else LocalConfig {overrides = [], build_excludes = [], build_jobs = NONE}
   end
 
 fun parse_at {manifest, root, local_config} =
@@ -331,7 +343,7 @@ fun parse_at {manifest, root, local_config} =
       case build of
           NONE => default
         | SOME t => Option.getOpt(string_array_field_opt t name, default)
-    val LocalConfig {overrides, build_excludes} = local_config
+    val LocalConfig {overrides, build_excludes, build_jobs} = local_config
     val members = package_relative_paths "build.members" (build_strings "members" ["."])
     val excludes = package_relative_paths "build.exclude" (build_strings "exclude" []) @ build_excludes
     val roots = package_relative_paths "build.roots" (build_strings "roots" [])
@@ -346,6 +358,7 @@ fun parse_at {manifest, root, local_config} =
       dependencies = dependencies_at table,
       overrides = overrides,
       local_build_excludes = build_excludes,
+      local_build_jobs = build_jobs,
       run_heap = Option.mapPartial (fn t => string_field t "heap") run,
       run_loads = from run (fn t => string_array_field t "loads") [],
       heaps = heaps_at table,
@@ -465,7 +478,8 @@ fun dependency_project (project : t) (dep as Dependency {name, ...}) =
       else die ("dependency " ^ name ^ " manifest not found: " ^ dep_manifest)
     val dep_project = parse_at {manifest = dep_manifest, root = dep_root,
                                 local_config = LocalConfig {overrides = #overrides project,
-                                                            build_excludes = #local_build_excludes project}}
+                                                            build_excludes = #local_build_excludes project,
+                                                            build_jobs = #local_build_jobs project}}
     val declared_name = #name dep_project
     val _ =
       case declared_name of
@@ -518,7 +532,7 @@ fun packages (project : t) =
 fun describe (project : t) =
   let
     val {root, manifest, name, version, members, excludes, roots, dependencies,
-         overrides, local_build_excludes, run_heap, run_loads, heaps, action_policies} = project
+         overrides, local_build_excludes, local_build_jobs, run_heap, run_loads, heaps, action_policies} = project
     fun opt label value =
       case value of NONE => () | SOME s => print (label ^ s ^ "\n")
   in
@@ -531,6 +545,7 @@ fun describe (project : t) =
     print ("roots: " ^ String.concatWith ", " roots ^ "\n");
     List.app (fn dep => print ("dependency: " ^ dependency_to_string project dep ^ "\n")) dependencies;
     List.app (fn override => print ("override: " ^ override_to_string override ^ "\n")) overrides;
+    Option.app (fn jobs => print ("local build.jobs: " ^ Int.toString jobs ^ "\n")) local_build_jobs;
     opt "run.heap: " run_heap;
     print ("run.loads: " ^ String.concatWith ", " run_loads ^ "\n");
     List.app (fn heap => print ("heap: " ^ heap_to_string heap ^ "\n")) heaps;

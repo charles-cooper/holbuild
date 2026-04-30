@@ -214,3 +214,25 @@ cat > "$tmpdir/bad_local_build/.holconfig.toml" <<'TOML'
 members = ["local"]
 TOML
 expect_context_failure bad_local_build "unknown field in .holconfig.toml build: members"
+
+make_project bad_local_jobs_type
+cat > "$tmpdir/bad_local_jobs_type/holproject.toml" <<'TOML'
+[project]
+name = "bad_local_jobs_type"
+TOML
+cat > "$tmpdir/bad_local_jobs_type/.holconfig.toml" <<'TOML'
+[build]
+jobs = "many"
+TOML
+expect_context_failure bad_local_jobs_type "jobs must be an integer"
+
+make_project bad_local_jobs_value
+cat > "$tmpdir/bad_local_jobs_value/holproject.toml" <<'TOML'
+[project]
+name = "bad_local_jobs_value"
+TOML
+cat > "$tmpdir/bad_local_jobs_value/.holconfig.toml" <<'TOML'
+[build]
+jobs = 0
+TOML
+expect_context_failure bad_local_jobs_value ".holconfig.toml build.jobs must be a positive integer"
