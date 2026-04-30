@@ -968,10 +968,10 @@ fun bool_text true = "true"
 
 val theory_manifest_version = "1"
 
-fun build_config_lines ({goalfrag, tactic_timeout, ...} : build_options) =
+fun policy_config_lines policy =
   ["theory_manifest_version=" ^ theory_manifest_version,
-   "goalfrag=" ^ bool_text goalfrag,
-   "tactic_timeout=" ^ (if goalfrag then timeout_text tactic_timeout else "none")]
+   "goalfrag=" ^ bool_text (goalfrag_enabled policy),
+   "tactic_timeout=" ^ timeout_text (tactic_timeout policy)]
 
 fun instrumented_source policy timeout_marker source_text start_offset checkpoints =
   if goalfrag_enabled policy then
@@ -1206,10 +1206,25 @@ fun write_metadata checkpoint_policy project plan keys input_key toolchain_key n
   write_text (metadata_path project node)
              (metadata_text checkpoint_policy project plan keys input_key toolchain_key node theorem_checkpoints)
 
-fun checkpoint_policy_for_node ({skip_checkpoints, goalfrag, tactic_timeout} : build_options) _ _ =
+fun root_package_name project =
+  HolbuildProject.package_name (HolbuildProject.project_package project)
+
+fun root_package_node project node =
+  HolbuildBuildPlan.package node = root_package_name project
+
+fun effective_tactic_timeout goalfrag root_package tactic_timeout =
+  if goalfrag andalso root_package then tactic_timeout else NONE
+
+fun checkpoint_policy_for_node ({skip_checkpoints, goalfrag, tactic_timeout} : build_options) project node =
   CheckpointPolicy {checkpoint = not skip_checkpoints,
                     goalfrag = goalfrag,
-                    tactic_timeout = if goalfrag then tactic_timeout else NONE}
+                    tactic_timeout = effective_tactic_timeout goalfrag (root_package_node project node) tactic_timeout}
+
+fun build_config_lines_for_node options project node =
+  case #kind (HolbuildBuildPlan.source_of node) of
+      HolbuildSourceIndex.TheoryScript => policy_config_lines (checkpoint_policy_for_node options project node)
+    | HolbuildSourceIndex.Sml => policy_config_lines no_checkpoint_policy
+    | HolbuildSourceIndex.Sig => policy_config_lines no_checkpoint_policy
 
 fun theory_checkpoints_for_node policy tc project base_context node input_key source_text =
   if not (goalfrag_enabled policy) then []
@@ -1409,7 +1424,7 @@ fun build_parallel options tc project base_context plan keys toolchain_key jobs 
 fun build (options : build_options) tc project plan toolchain_key jobs =
   let
     val base_context = toolchain_base_context tc
-    val keys = HolbuildBuildPlan.input_keys (build_config_lines options) toolchain_key plan
+    val keys = HolbuildBuildPlan.input_keys (build_config_lines_for_node options project) toolchain_key plan
   in
     if jobs <= 1 then build_serial options tc project base_context plan keys toolchain_key
     else if all_nodes_up_to_date options project plan keys toolchain_key then

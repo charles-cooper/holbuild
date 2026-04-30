@@ -180,7 +180,7 @@ fun build tc jobs args =
             else ()
     val toolchain_key = HolbuildToolchain.toolchain_key tc
   in
-    if dry_run then HolbuildBuildPlan.describe (HolbuildBuildExec.build_config_lines build_options) toolchain_key plan
+    if dry_run then HolbuildBuildPlan.describe (HolbuildBuildExec.build_config_lines_for_node build_options project) toolchain_key plan
     else
       HolbuildBuildExec.with_project_lock project "build"
         (fn () => HolbuildBuildExec.build build_options tc project plan toolchain_key jobs)

@@ -31,7 +31,7 @@ This prototype is intentionally small:
 - publishes/restores simple theory semantic artifacts through the global cache
 - includes the resolved holbuild-produced base context/toolchain in prototype action keys
 - creates transient local theory checkpoints while building: dependencies-loaded, AST-derived theorem end-of-proof/context checkpoints for modern theorem declarations, and successor-ready final context; successful builds remove them after writing logical artifacts and metadata
-- keeps goalfrag proof execution separate from checkpoint creation; `--skip-checkpoints` avoids theory `.save` files entirely, `--skip-goalfrag` opts out of theorem instrumentation, and `--tactic-timeout SECONDS` controls the default 2.5s per-tactic goalfrag timeout (`0` disables it)
+- keeps goalfrag proof execution separate from checkpoint creation; `--skip-checkpoints` avoids theory `.save` files entirely, `--skip-goalfrag` opts out of theorem instrumentation, and `--tactic-timeout SECONDS` controls the root-project per-tactic goalfrag timeout (default 2.5s; `0` disables it)
 - exports explicit project heap targets from `[[heap]]` entries using local SaveState
 - exposes `holbuild cache gc` with a 7-day default global-cache retention policy
 - does not delegate build semantics to Holmake
@@ -107,8 +107,9 @@ and for the build phase of `heap` targets; the default is `-j1`.
 `--skip-checkpoints` disables theory checkpoint `.save`/`.ok` creation without
 disabling goalfrag proof execution. By default checkpoints may be created during
 a build but are removed after successful artifact/metadata writes. `--skip-goalfrag` opts out of modern
-theorem instrumentation. `--tactic-timeout SECONDS` sets the per-tactic goalfrag
-timeout; the default is 2.5 seconds, and `0` disables the timeout. Combining
+theorem instrumentation. `--tactic-timeout SECONDS` sets the root-project per-tactic goalfrag
+timeout; the default is 2.5 seconds, and `0` disables the timeout. Dependency
+packages build with no tactic timeout. Combining
 `--skip-goalfrag` with `--tactic-timeout` is an error because the timeout is
 implemented by the goalfrag runtime. `cache gc` uses `$HOLBUILD_CACHE`,
 `$XDG_CACHE_HOME/holbuild`, or `$HOME/.cache/holbuild` and does not require a HOL

@@ -291,7 +291,7 @@ fun lookup_key keys dep =
       SOME (_, input_key) => input_key
     | NONE => raise Error ("missing action key for dependency: " ^ logical_name dep)
 
-fun action_text config_lines toolchain_key nodes keys node =
+fun action_text config_lines_for_node toolchain_key nodes keys node =
   let
     val source = source_of node
     val source_hash = HolbuildHash.file_sha1 (#source_path source)
@@ -321,7 +321,7 @@ fun action_text config_lines toolchain_key nodes keys node =
        "source-sha1=" ^ source_hash,
        "cache=" ^ bool_text (HolbuildProject.action_cache_enabled policy),
        "always_reexecute=" ^ bool_text (HolbuildProject.action_always_reexecute policy)] @
-      config_lines @
+      config_lines_for_node node @
       declared_dep_lines @
       declared_load_lines @
       extra_input_lines @
@@ -330,11 +330,11 @@ fun action_text config_lines toolchain_key nodes keys node =
     String.concatWith "\n" lines ^ "\n"
   end
 
-fun add_input_key config_lines toolchain_key nodes (node, keys) =
-  (key node, hash_text (action_text config_lines toolchain_key nodes keys node)) :: keys
+fun add_input_key config_lines_for_node toolchain_key nodes (node, keys) =
+  (key node, hash_text (action_text config_lines_for_node toolchain_key nodes keys node)) :: keys
 
-fun input_keys config_lines toolchain_key nodes =
-  List.foldl (fn (node, keys) => add_input_key config_lines toolchain_key nodes (node, keys)) [] nodes
+fun input_keys config_lines_for_node toolchain_key nodes =
+  List.foldl (fn (node, keys) => add_input_key config_lines_for_node toolchain_key nodes (node, keys)) [] nodes
 
 fun input_key_for keys node = lookup_key keys node
 
@@ -361,8 +361,8 @@ fun describe_node nodes keys node =
    print_external_deps nodes node;
    print_external_libs nodes node)
 
-fun describe config_lines toolchain_key nodes =
-  let val keys = input_keys config_lines toolchain_key nodes
+fun describe config_lines_for_node toolchain_key nodes =
+  let val keys = input_keys config_lines_for_node toolchain_key nodes
   in List.app (describe_node nodes keys) nodes end
 
 end

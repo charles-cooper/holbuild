@@ -538,12 +538,15 @@ checkpoints or tactic timeout enforcement for that build.
 
 When goalfrag is enabled, holbuild applies a tactic timeout to each goalfrag
 step, and to the conservative whole-tactic fallback used for attributed proofs.
-The CLI default is 2.5 seconds per tactic step; `--tactic-timeout SECONDS`
-changes it, and `--tactic-timeout 0` disables it. Because timeouts only exist in
-the goalfrag runtime, `--skip-goalfrag --tactic-timeout ...` is rejected instead
-of silently ignoring the timeout. The timeout is part of the action key because a
-proof that only succeeds with a longer/no timeout must not share a cache entry
-with the default timed build. On timeout, holbuild reports the timed-out tactic
+The CLI default is 2.5 seconds per tactic step for the root package;
+`--tactic-timeout SECONDS` changes that root-package timeout, and
+`--tactic-timeout 0` disables it. Dependency package builds use no tactic timeout,
+so a consumer's proof-debug timeout does not make dependency builds fail. Because
+timeouts only exist in the goalfrag runtime,
+`--skip-goalfrag --tactic-timeout ...` is rejected instead of silently ignoring
+the timeout. The effective per-node timeout is part of that node's action key
+because a proof that only succeeds with a longer/no timeout must not share a
+cache entry with a timed build. On timeout, holbuild reports the timed-out tactic
 and does not retry the script through the plain non-goalfrag fallback, since that
 would remove the only timeout guard.
 
