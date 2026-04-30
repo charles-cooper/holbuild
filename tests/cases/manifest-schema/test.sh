@@ -203,3 +203,14 @@ path = "../dep"
 branch = "main"
 TOML
 expect_context_failure bad_config "unknown field in overrides.dep: branch"
+
+make_project bad_local_build
+cat > "$tmpdir/bad_local_build/holproject.toml" <<'TOML'
+[project]
+name = "bad_local_build"
+TOML
+cat > "$tmpdir/bad_local_build/.holconfig.toml" <<'TOML'
+[build]
+members = ["local"]
+TOML
+expect_context_failure bad_local_build "unknown field in .holconfig.toml build: members"

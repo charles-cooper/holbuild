@@ -35,12 +35,20 @@ SML
 cat > "$project/src/Keep.sml" <<'SML'
 val keep = 1;
 SML
+mkdir -p "$project/src/local"
+cat > "$project/src/local/MachineOnly.sml" <<'SML'
+val machine_only = 1;
+SML
+cat > "$project/.holconfig.toml" <<'TOML'
+[build]
+exclude = ["src/local/*"]
+TOML
 
 (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" context) > "$tmpdir/context.log"
-require_grep "exclude: \*/selftest.sml, src/generated/\*" "$tmpdir/context.log"
+require_grep "exclude: \*/selftest.sml, src/generated/\*, src/local/\*" "$tmpdir/context.log"
 (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --dry-run) > "$tmpdir/dry.log"
 require_grep "Keep (sml, package exclude)" "$tmpdir/dry.log"
-if grep -q "selftest\|Generated" "$tmpdir/dry.log"; then
+if grep -q "selftest\|Generated\|MachineOnly" "$tmpdir/dry.log"; then
   echo "excluded source appeared in dry-run plan" >&2
   exit 1
 fi
