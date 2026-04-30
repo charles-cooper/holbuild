@@ -895,8 +895,11 @@ fun timeout_text NONE = "none"
 fun bool_text true = "true"
   | bool_text false = "false"
 
+val theory_manifest_version = "2"
+
 fun build_config_lines ({goalfrag, tactic_timeout, ...} : build_options) =
-  ["goalfrag=" ^ bool_text goalfrag,
+  ["theory_manifest_version=" ^ theory_manifest_version,
+   "goalfrag=" ^ bool_text goalfrag,
    "tactic_timeout=" ^ (if goalfrag then timeout_text tactic_timeout else "none")]
 
 fun instrumented_source policy timeout_marker source_text start_offset checkpoints =
