@@ -266,7 +266,8 @@ fun main raw_args =
    in
      dispatch_with_options options args
    end)
-  handle Error msg => err msg
+  handle Thread.Thread.Interrupt => (HolbuildToolchain.cleanup_active_children (); err "interrupted")
+       | Error msg => err msg
        | HolbuildToolchain.Error msg => err msg
        | HolbuildProject.Error msg => err msg
        | HolbuildSourceIndex.Error msg => err msg
