@@ -417,9 +417,9 @@ fun dependency_local_path ({root, overrides, ...} : t) (Dependency {name, path, 
          SOME override => SOME override
        | NONE => path)
 
-fun dependency_manifest (project as {root, ...} : t) dep =
+fun dependency_manifest (project as {manifest = project_manifest, ...} : t) dep =
   case dep of
-      Dependency {manifest = SOME manifest, ...} => SOME (abs_under root manifest)
+      Dependency {manifest = SOME manifest, ...} => SOME (abs_under (manifest_root project_manifest) manifest)
     | Dependency {manifest = NONE, ...} =>
         Option.map (fn path => Path.concat(path, "holproject.toml"))
           (dependency_local_path project dep)

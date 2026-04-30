@@ -13,8 +13,10 @@ trap cleanup EXIT
 export HOLBUILD_CACHE="$tmpdir/cache"
 
 dep=$tmpdir/dep
+nested=$tmpdir/nested
 project=$tmpdir/project
-mkdir -p "$dep/src" "$project/src"
+shimdir=$tmpdir/shims
+mkdir -p "$dep/src" "$nested/src" "$project/src" "$shimdir"
 
 cat > "$dep/holproject.toml" <<'TOML'
 [project]
@@ -30,7 +32,39 @@ val a_thm = store_thm("a_thm", ``T``, ACCEPT_TAC TRUTH);
 val _ = export_theory();
 SML
 
-cat > "$project/holproject.toml" <<'TOML'
+cat > "$nested/holproject.toml" <<'TOML'
+[project]
+name = "nested"
+
+[build]
+members = ["src"]
+TOML
+cat > "$nested/src/CScript.sml" <<'SML'
+open HolKernel Parse boolLib bossLib;
+val _ = new_theory "C";
+val c_thm = store_thm("c_thm", ``T``, ACCEPT_TAC TRUTH);
+val _ = export_theory();
+SML
+
+cat > "$shimdir/dep-shim.toml" <<'TOML'
+[project]
+name = "dep"
+
+[build]
+members = ["src"]
+
+[dependencies.nested]
+manifest = "nested-shim.toml"
+TOML
+cat > "$shimdir/nested-shim.toml" <<'TOML'
+[project]
+name = "nested"
+
+[build]
+members = ["src"]
+TOML
+
+cat > "$project/holproject.toml" <<TOML
 [project]
 name = "consumer"
 
@@ -38,18 +72,21 @@ name = "consumer"
 members = ["src"]
 
 [dependencies.dep]
-git = "https://example.invalid/dep.git"
-rev = "test"
+manifest = "$shimdir/dep-shim.toml"
 TOML
 cat > "$project/.holconfig.toml" <<TOML
 [overrides.dep]
 path = "$dep"
+
+[overrides.nested]
+path = "$nested"
 TOML
 cat > "$project/src/BScript.sml" <<'SML'
 open HolKernel Parse boolLib bossLib;
-open ATheory;
+open ATheory CTheory;
 val _ = new_theory "B";
 val b_thm = store_thm("b_thm", ``T``, ACCEPT_TAC ATheory.a_thm);
+val c_thm = store_thm("c_thm", ``T``, ACCEPT_TAC CTheory.c_thm);
 val _ = export_theory();
 SML
 
