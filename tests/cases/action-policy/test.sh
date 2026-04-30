@@ -71,7 +71,7 @@ if grep -q "ATheory is up to date" "$tmpdir/always2.log"; then
   echo "always_reexecute action was skipped" >&2
   exit 1
 fi
-require_grep "Created theory \"A\"" "$tmpdir/always2.log"
+require_file "$always_project/.holbuild/obj/src/ATheory.dat"
 
 no_cache_project="$tmpdir/no_cache_policy"
 make_theory_project "$no_cache_project" '[actions.ATheory]
@@ -83,7 +83,7 @@ if grep -q "restored from cache" "$tmpdir/no_cache2.log"; then
   echo "cache=false action restored from cache" >&2
   exit 1
 fi
-require_grep "Created theory \"A\"" "$tmpdir/no_cache2.log"
+require_file "$no_cache_project/.holbuild/obj/src/ATheory.dat"
 
 unknown_project="$tmpdir/unknown_policy"
 make_theory_project "$unknown_project" '[actions.MissingTheory]

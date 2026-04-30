@@ -51,7 +51,7 @@ SML
 
 first_log=$tmpdir/first.log
 (cd "$project" && \
-  HOLBUILD_CHECKPOINT_TIMING=1 "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) \
+  HOLBUILD_CHECKPOINT_TIMING=1 HOLBUILD_ECHO_CHILD_LOGS=1 "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) \
   > "$first_log" 2>&1
 require_grep "holbuild checkpoint kind=deps_loaded" "$first_log"
 require_grep "holbuild checkpoint kind=end_of_proof" "$first_log"

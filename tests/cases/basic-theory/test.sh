@@ -39,7 +39,7 @@ SML
 
 first_log=$tmpdir/first.log
 (cd "$project" && \
-  HOLBUILD_CHECKPOINT_TIMING=1 HOLBUILD_SHARE_COMMON_DATA=0 \
+  HOLBUILD_CHECKPOINT_TIMING=1 HOLBUILD_SHARE_COMMON_DATA=0 HOLBUILD_ECHO_CHILD_LOGS=1 \
   "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$first_log" 2>&1
 require_grep "holbuild checkpoint kind=deps_loaded share=false" "$first_log"
 require_grep "holbuild checkpoint kind=final_context share=false" "$first_log"
@@ -86,7 +86,7 @@ cp "$project/holproject.toml" "$skip_project/holproject.toml"
 cp "$project/src/AScript.sml" "$skip_project/src/AScript.sml"
 skip_log=$tmpdir/skip.log
 (cd "$skip_project" && \
-  HOLBUILD_CHECKPOINT_TIMING=1 "$HOLBUILD_BIN" --holdir "$HOLDIR" build --skip-checkpoints ATheory) \
+  HOLBUILD_CHECKPOINT_TIMING=1 HOLBUILD_ECHO_CHILD_LOGS=1 "$HOLBUILD_BIN" --holdir "$HOLDIR" build --skip-checkpoints ATheory) \
   > "$skip_log" 2>&1
 if grep -q "holbuild checkpoint kind=deps_loaded\|holbuild checkpoint kind=final_context" "$skip_log"; then
   echo "--skip-checkpoints created theory checkpoints" >&2

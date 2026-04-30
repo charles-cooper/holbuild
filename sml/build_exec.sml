@@ -393,6 +393,16 @@ fun project_lock_owner_path lock = Path.concat(lock, "owner")
 
 fun env_default name default = Option.getOpt(OS.Process.getEnv name, default)
 
+fun env_bool name default =
+  case OS.Process.getEnv name of
+      SOME "1" => true
+    | SOME "true" => true
+    | SOME "yes" => true
+    | SOME "0" => false
+    | SOME "false" => false
+    | SOME "no" => false
+    | _ => default
+
 fun current_pid_text () =
   LargeInt.toString (SysWord.toLargeInt (Posix.Process.pidToWord (Posix.ProcEnv.getpid ())))
 
@@ -497,14 +507,36 @@ datatype hol_context = HolState of string
 
 fun hol_context_args (HolState path) = ["--holstate", path]
 
-fun run_hol_files tc stage context files error_message =
+fun tail_text path =
   let
-    val status =
-      HolbuildToolchain.run_in_dir stage
-        ([HolbuildToolchain.hol tc, "run", "--noconfig"] @ hol_context_args context @ files)
+    val tmp = FS.tmpName ()
+    val _ = OS.Process.system ("tail -n 80 " ^ HolbuildToolchain.quote path ^
+                               " > " ^ HolbuildToolchain.quote tmp)
+    val text = read_text tmp handle _ => ""
+    val _ = remove_file tmp
   in
-    if HolbuildToolchain.success status then ()
-    else raise Error error_message
+    text
+  end
+
+fun echo_child_logs () = env_bool "HOLBUILD_ECHO_CHILD_LOGS" false
+
+fun run_hol_files_to_log tc stage context files log_name error_message =
+  let
+    val log = Path.concat(stage, log_name)
+    val status =
+      HolbuildToolchain.run_in_dir_to_file stage
+        ([HolbuildToolchain.hol tc, "run", "--noconfig"] @ hol_context_args context @ files)
+        log
+  in
+    if HolbuildToolchain.success status then
+      if echo_child_logs () then print (read_text log handle _ => "") else ()
+    else
+      raise Error (String.concatWith "\n"
+        [error_message,
+         "child log: " ^ log,
+         "--- child log tail ---",
+         tail_text log,
+         "--- end child log tail ---"])
   end
 
 fun toolchain_base_context tc = HolState (HolbuildToolchain.base_state tc)
@@ -858,7 +890,8 @@ fun discover_theorem_boundaries tc stage base_context source_path source_text =
     val script = Path.concat(stage, "holbuild-discover-theorems.sml")
     val report_path = Path.concat(stage, "holbuild-theorems.tsv")
     val _ = write_text script (theorem_discovery_script {source_path = source_path, report_path = report_path})
-    val _ = run_hol_files tc stage base_context [script]
+    val _ = run_hol_files_to_log tc stage base_context [script]
+              "holbuild-discover-theorems.log"
               "hol run failed while discovering theorem AST boundaries"
     val report = read_text report_path handle IO.Io _ => ""
   in
@@ -1060,11 +1093,13 @@ fun build_theory policy tc project base_context plan keys toolchain_key node sou
           else write_plain_preload plan node preload
         val _ = write_text staged_script source_text
       in
-        run_hol_files tc stage base_context [preload, staged_script, final_loader] msg
+        run_hol_files_to_log tc stage base_context [preload, staged_script, final_loader]
+          "holbuild-plain-retry.log" msg
       end
     val _ =
-      run_hol_files tc stage (#context run_spec)
+      run_hol_files_to_log tc stage (#context run_spec)
         (#files run_spec @ [final_loader])
+        "holbuild-build.log"
         "hol run failed while building theory script"
       handle Error msg =>
         if file_exists timeout_marker then raise tactic_timeout_error ()
@@ -1465,7 +1500,8 @@ fun export_heap tc (project : HolbuildProject.t) plan output =
     ensure_dir stage;
     ensure_parent output;
     write_heap_loader plan output loader;
-    run_hol_files tc stage base_context [loader]
+    run_hol_files_to_log tc stage base_context [loader]
+      "holbuild-heap.log"
       ("hol run failed while exporting heap: " ^ output);
     remove_tree stage
   end

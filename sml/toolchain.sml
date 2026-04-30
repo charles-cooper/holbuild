@@ -25,6 +25,10 @@ fun run argv = OS.Process.system (command argv)
 fun run_in_dir dir argv =
   OS.Process.system ("cd " ^ quote dir ^ " && " ^ command argv)
 
+fun run_in_dir_to_file dir argv output =
+  OS.Process.system ("cd " ^ quote dir ^ " && " ^ command argv ^
+                     " > " ^ quote output ^ " 2>&1")
+
 fun success status = OS.Process.isSuccess status
 
 fun ensure_dir path =
