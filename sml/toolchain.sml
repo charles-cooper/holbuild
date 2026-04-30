@@ -47,6 +47,32 @@ fun append_timing entry =
         in TextIO.output(out, entry); TextIO.closeOut out end
         handle _ => ()
 
+fun phase_line {name, status, start, finish} =
+  String.concatWith "\t"
+    ["phase",
+     "name=" ^ timing_field name,
+     "status=" ^ timing_field status,
+     "ms=" ^ LargeInt.toString (Time.toMilliseconds (Time.-(finish, start)))] ^ "\n"
+
+fun time_phase name f =
+  let val start = Time.now ()
+  in
+    (let
+       val result = f ()
+       val finish = Time.now ()
+       val _ = append_timing (phase_line {name = name, status = "ok", start = start, finish = finish})
+     in
+       result
+     end)
+    handle e =>
+      let
+        val finish = Time.now ()
+        val _ = append_timing (phase_line {name = name, status = "fail", start = start, finish = finish})
+      in
+        raise e
+      end
+  end
+
 fun timed_system kind argv output run =
   let
     val start = Time.now ()

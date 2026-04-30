@@ -159,9 +159,11 @@ fun load_project () =
 
 fun context () = HolbuildProject.describe (load_project ())
 
+fun timed_phase name f = HolbuildToolchain.time_phase name f
+
 fun build tc jobs args =
   let
-    val project = load_project ()
+    val project = timed_phase "project.discover" load_project
     val ({dry_run, skip_checkpoints, goalfrag, tactic_timeout, tactic_timeout_set}, targets) = split_flags args
     val _ =
       if not goalfrag andalso tactic_timeout_set then
@@ -170,20 +172,23 @@ fun build tc jobs args =
     val build_options = {skip_checkpoints = skip_checkpoints,
                          goalfrag = goalfrag,
                          tactic_timeout = tactic_timeout}
-    val index = HolbuildSourceIndex.discover project
+    val index = timed_phase "source.discover" (fn () => HolbuildSourceIndex.discover project)
     val requested_targets = targets
-    val targets = default_build_targets project index requested_targets
+    val targets = timed_phase "targets.default" (fn () => default_build_targets project index requested_targets)
     val _ = reject_object_targets targets
-    val plan = HolbuildBuildPlan.plan (#holdir tc) index targets
+    val plan = timed_phase "build.plan" (fn () => HolbuildBuildPlan.plan (#holdir tc) index targets)
     val _ = if null requested_targets andalso not (null targets) then
               warn_unreachable_root_scripts project index plan
             else ()
-    val toolchain_key = HolbuildToolchain.toolchain_key tc
+    val toolchain_key = timed_phase "toolchain.key" (fn () => HolbuildToolchain.toolchain_key tc)
   in
-    if dry_run then HolbuildBuildPlan.describe (HolbuildBuildExec.build_config_lines_for_node build_options project) toolchain_key plan
+    if dry_run then
+      timed_phase "dry_run.describe"
+        (fn () => HolbuildBuildPlan.describe (HolbuildBuildExec.build_config_lines_for_node build_options project) toolchain_key plan)
     else
       HolbuildBuildExec.with_project_lock project "build"
-        (fn () => HolbuildBuildExec.build build_options tc project plan toolchain_key jobs)
+        (fn () => timed_phase "build.execute"
+          (fn () => HolbuildBuildExec.build build_options tc project plan toolchain_key jobs))
   end
 
 fun heap_named project target =
@@ -197,12 +202,12 @@ fun heap_named project target =
 
 fun build_heap tc jobs target =
   let
-    val project = load_project ()
+    val project = timed_phase "project.discover" load_project
     val HolbuildProject.Heap {output, objects, ...} = heap_named project target
     val _ = if null objects then raise Error ("heap target has no objects: " ^ target) else ()
-    val index = HolbuildSourceIndex.discover project
-    val plan = HolbuildBuildPlan.plan (#holdir tc) index objects
-    val toolchain_key = HolbuildToolchain.toolchain_key tc
+    val index = timed_phase "source.discover" (fn () => HolbuildSourceIndex.discover project)
+    val plan = timed_phase "build.plan" (fn () => HolbuildBuildPlan.plan (#holdir tc) index objects)
+    val toolchain_key = timed_phase "toolchain.key" (fn () => HolbuildToolchain.toolchain_key tc)
     val output_path = HolbuildProject.abs_under (#root project) output
   in
     HolbuildBuildExec.with_project_lock project ("heap " ^ target)
@@ -225,7 +230,7 @@ fun hol_args_for_project tc project subcommand user_args =
 
 fun run_hol tc subcommand user_args =
   let
-    val project = load_project ()
+    val project = timed_phase "project.discover" load_project
     val argv = HolbuildToolchain.hol tc :: hol_args_for_project tc project subcommand user_args
     val status = HolbuildToolchain.run argv
   in

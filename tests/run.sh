@@ -82,26 +82,36 @@ write_case_timing_summary() {
   local case_timing=$3
   local tool_timing=$4
   local summary_file=$5
-  local holbuild_count holbuild_ms child_hol_count child_hol_ms max_child_hol_ms
+  local holbuild_count holbuild_ms tool_count tool_ms phase_count phase_ms max_tool_ms max_phase_ms top_phase
 
   holbuild_count=$(count_lines '^holbuild' "$case_timing")
   holbuild_ms=$(sum_field_ms ms "$case_timing")
-  child_hol_count=$(count_lines 'kind=run_in_dir_to_file' "$tool_timing")
-  child_hol_ms=$(awk '
-    /kind=run_in_dir_to_file/ {
-      for (i = 1; i <= NF; i++) if ($i ~ /^ms=/) { sub("ms=", "", $i); sum += $i }
-    }
+  tool_count=$(count_lines '^tool' "$tool_timing")
+  tool_ms=$(awk '
+    /^tool/ { for (i = 1; i <= NF; i++) if ($i ~ /^ms=/) { sub("ms=", "", $i); sum += $i } }
     END { printf "%d", sum + 0 }
   ' "$tool_timing" 2>/dev/null || printf '0')
-  max_child_hol_ms=$(awk '
-    /kind=run_in_dir_to_file/ {
-      for (i = 1; i <= NF; i++) if ($i ~ /^ms=/) { sub("ms=", "", $i); if (($i + 0) > max) max = $i + 0 }
-    }
+  phase_count=$(count_lines '^phase' "$tool_timing")
+  phase_ms=$(awk '
+    /^phase/ { for (i = 1; i <= NF; i++) if ($i ~ /^ms=/) { sub("ms=", "", $i); sum += $i } }
+    END { printf "%d", sum + 0 }
+  ' "$tool_timing" 2>/dev/null || printf '0')
+  max_tool_ms=$(awk '
+    /^tool/ { for (i = 1; i <= NF; i++) if ($i ~ /^ms=/) { sub("ms=", "", $i); if (($i + 0) > max) max = $i + 0 } }
     END { printf "%d", max + 0 }
   ' "$tool_timing" 2>/dev/null || printf '0')
+  max_phase_ms=$(awk '
+    /^phase/ { for (i = 1; i <= NF; i++) if ($i ~ /^ms=/) { sub("ms=", "", $i); if (($i + 0) > max) max = $i + 0 } }
+    END { printf "%d", max + 0 }
+  ' "$tool_timing" 2>/dev/null || printf '0')
+  top_phase=$(awk '
+    function value(key,    i, prefix) { prefix = key "="; for (i = 1; i <= NF; i++) if (index($i, prefix) == 1) return substr($i, length(prefix) + 1); return "" }
+    /^phase/ { ms = value("ms") + 0; name = value("name"); totals[name] += ms }
+    END { best = "none"; for (name in totals) if (totals[name] > best_ms) { best = name; best_ms = totals[name] } printf "%s:%d", best, best_ms + 0 }
+  ' "$tool_timing" 2>/dev/null || printf 'none:0')
 
-  printf 'TIMING\tname=%s\twall_ms=%s\tholbuild_n=%s\tholbuild_ms=%s\tchild_hol_n=%s\tchild_hol_ms=%s\tmax_child_hol_ms=%s\n' \
-    "$name" "$duration_ms" "$holbuild_count" "$holbuild_ms" "$child_hol_count" "$child_hol_ms" "$max_child_hol_ms" > "$summary_file"
+  printf 'TIMING\tname=%s\twall_ms=%s\tholbuild_n=%s\tholbuild_ms=%s\ttool_n=%s\ttool_ms=%s\tphase_n=%s\tphase_ms=%s\tmax_tool_ms=%s\tmax_phase_ms=%s\ttop_phase=%s\n' \
+    "$name" "$duration_ms" "$holbuild_count" "$holbuild_ms" "$tool_count" "$tool_ms" "$phase_count" "$phase_ms" "$max_tool_ms" "$max_phase_ms" "$top_phase" > "$summary_file"
 }
 
 run_case() {
@@ -211,8 +221,8 @@ print_timing_summary() {
   suite_end_ms=$(now_ms)
   total_ms=$((suite_end_ms - suite_start_ms))
   echo "holbuild test timing summary (total ${total_ms} ms):"
-  printf '%8s %4s %9s %4s %9s %9s %s\n' \
-    wall_ms hb_n hb_ms hol_n hol_ms max_hol test
+  printf '%8s %4s %9s %5s %9s %7s %9s %9s %s %s\n' \
+    wall_ms hb_n hb_ms tool_n tool_ms phase_n phase_ms max_tool top_phase test
   for i in "${!completed_summaries[@]}"; do
     printf '%s\n' "${completed_summaries[$i]}"
   done | awk '
@@ -222,10 +232,10 @@ print_timing_summary() {
       return 0
     }
     /^TIMING/ {
-      printf "%8d %4d %9d %4d %9d %9d %s\n", \
+      printf "%8d %4d %9d %5d %9d %7d %9d %9d %s %s\n", \
         value("wall_ms"), value("holbuild_n"), value("holbuild_ms"), \
-        value("child_hol_n"), value("child_hol_ms"), value("max_child_hol_ms"), \
-        value("name")
+        value("tool_n"), value("tool_ms"), value("phase_n"), value("phase_ms"), \
+        value("max_tool_ms"), value("top_phase"), value("name")
     }
   ' | sort -nr
 }
