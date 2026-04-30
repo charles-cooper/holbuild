@@ -56,6 +56,41 @@ Proof
   \\ REFL_TAC
 QED
 
+Theorem generated_thenl:
+  T /\ T
+Proof
+  CONJ_TAC THENL
+  let
+    fun tac () = ACCEPT_TAC TRUTH
+  in
+    [tac (), tac ()]
+  end
+QED
+
+Theorem by_after_split:
+  T /\ T
+Proof
+  CONJ_TAC
+  \\ `T` by ACCEPT_TAC TRUTH
+  \\ ACCEPT_TAC TRUTH
+QED
+
+Theorem suffices_after_split:
+  F ==> (T /\ T)
+Proof
+  strip_tac
+  \\ CONJ_TAC
+  \\ `F` suffices_by simp[]
+  \\ FIRST_ASSUM ACCEPT_TAC
+QED
+
+Theorem unicode_quote_by:
+  T
+Proof
+  ‘T’ by ACCEPT_TAC TRUTH
+  \\ ACCEPT_TAC TRUTH
+QED
+
 val _ = export_theory();
 SML
 

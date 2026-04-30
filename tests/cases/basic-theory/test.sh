@@ -123,6 +123,23 @@ if grep -q "ATheory restored from cache" "$no_cache_after_log"; then
 fi
 require_file "$no_cache_publish_project/.holbuild/obj/src/ATheory.dat"
 
+no_export_project=$tmpdir/no-export-project
+mkdir -p "$no_export_project/src"
+cp "$project/holproject.toml" "$no_export_project/holproject.toml"
+cat > "$no_export_project/src/AScript.sml" <<'SML'
+open HolKernel Parse boolLib bossLib;
+val _ = new_theory "A";
+Theorem no_export_thm:
+  T
+Proof
+  ACCEPT_TAC TRUTH
+QED
+SML
+(cd "$no_export_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --no-cache ATheory) > "$tmpdir/no-export.log"
+require_file "$no_export_project/.holbuild/gen/src/ATheory.sig"
+require_file "$no_export_project/.holbuild/gen/src/ATheory.sml"
+require_file "$no_export_project/.holbuild/obj/src/ATheory.dat"
+
 skip_project=$tmpdir/skip-project
 mkdir -p "$skip_project/src"
 cp "$project/holproject.toml" "$skip_project/holproject.toml"

@@ -251,7 +251,12 @@ fun mldep_report_lines NONE = []
       ["val holbuild_mldeps_out = TextIO.openOut " ^ HolbuildToolchain.sml_string report_path ^ ";",
        "val _ = (List.app (fn s => TextIO.output(holbuild_mldeps_out, s ^ \"\\n\")) (Theory.current_ML_deps()); TextIO.closeOut holbuild_mldeps_out);"]
 
+fun export_theory_if_needed_line sig_path =
+  "val _ = if OS.FileSys.access(" ^ HolbuildToolchain.sml_string sig_path ^
+  ", [OS.FileSys.A_READ]) then () else export_theory();"
+
 fun final_context_loader_lines {sig_path, sml_path, mldeps_report} =
+  export_theory_if_needed_line sig_path ::
   mldep_report_lines mldeps_report @
   ["use " ^ HolbuildToolchain.sml_string sig_path ^ ";",
    "use " ^ HolbuildToolchain.sml_string sml_path ^ ";"]
