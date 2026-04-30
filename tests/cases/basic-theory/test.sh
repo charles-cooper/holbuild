@@ -61,6 +61,13 @@ second_log=$tmpdir/second.log
 (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$second_log"
 require_grep "ATheory is up to date" "$second_log"
 
+metadata="$project/.holbuild/dep/basic/src/AScript.sml.key"
+require_grep "^output-sha1=" "$metadata"
+sed -i 's/^output-sha1=.*/output-sha1=stale-diagnostic-hash/' "$metadata"
+stale_hash_log=$tmpdir/stale-output-hash.log
+(cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$stale_hash_log"
+require_grep "ATheory is up to date" "$stale_hash_log"
+
 rm -rf "$project/.holbuild"
 cache_log=$tmpdir/cache-restore.log
 (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$cache_log"
