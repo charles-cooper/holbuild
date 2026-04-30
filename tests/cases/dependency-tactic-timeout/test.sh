@@ -105,7 +105,16 @@ require_grep "tactic timed out while building ATheory" "$root_timeout_log"
 root_default_project=$tmpdir/root-default
 mkdir -p "$root_default_project/src"
 cp "$root_timeout_project/holproject.toml" "$root_default_project/holproject.toml"
-cp "$root_timeout_project/src/AScript.sml" "$root_default_project/src/AScript.sml"
+cat > "$root_default_project/src/AScript.sml" <<'SML'
+open HolKernel Parse boolLib bossLib;
+val _ = new_theory "A";
+Theorem root_default_thm:
+  T
+Proof
+  ACCEPT_TAC TRUTH
+QED
+val _ = export_theory();
+SML
 (cd "$root_default_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$tmpdir/root-default.log" 2>&1
 require_file "$root_default_project/.holbuild/obj/src/ATheory.dat"
 require_grep "tactic_timeout=2.5" "$root_default_project/.holbuild/dep/root-timeout/src/AScript.sml.key"
