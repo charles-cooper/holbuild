@@ -427,17 +427,7 @@ fun file_hash path =
 fun bool_text true = "true"
   | bool_text false = "false"
 
-fun hash_text text =
-  let
-    val tmp = OS.FileSys.tmpName ()
-    val out = TextIO.openOut tmp
-    val _ = TextIO.output(out, text)
-    val _ = TextIO.closeOut out
-    val hash = SHA1_ML.sha1_file {filename = tmp}
-    val _ = OS.FileSys.remove tmp handle OS.SysErr _ => ()
-  in
-    hash
-  end
+fun hash_text text = HolbuildHash.string_sha1 text
 
 fun lookup_key keys dep =
   case List.find (fn (dep_key, _) => dep_key = key dep) keys of

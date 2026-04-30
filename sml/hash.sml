@@ -44,6 +44,17 @@ fun large_file path =
   handle Overflow => true
        | OS.SysErr _ => false
 
+fun string_byte_reader text (offset, requested) =
+  let
+    val remaining = Int.max(0, size text - offset)
+    val count = Int.min(requested, remaining)
+    fun byte i = Word8.fromInt (Char.ord (String.sub(text, offset + i)))
+  in
+    (Word8Vector.tabulate(count, byte), offset + count)
+  end
+
+fun string_sha1 text = SHA1_ML.sha1String (string_byte_reader text) 0
+
 fun file_sha1 path =
   if large_file path then
     case external_sha1 path of

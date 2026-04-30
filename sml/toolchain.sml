@@ -108,17 +108,7 @@ fun readable path = FS.access(path, [FS.A_READ]) handle OS.SysErr _ => false
 fun require_readable path =
   if readable path then () else raise Error ("required toolchain file not readable: " ^ path)
 
-fun hash_text text =
-  let
-    val tmp = FS.tmpName ()
-    val out = TextIO.openOut tmp
-    val _ = TextIO.output(out, text)
-    val _ = TextIO.closeOut out
-    val hash = SHA1_ML.sha1_file {filename = tmp}
-    val _ = FS.remove tmp handle OS.SysErr _ => ()
-  in
-    hash
-  end
+fun hash_text text = HolbuildHash.string_sha1 text
 
 fun file_hash path = (require_readable path; HolbuildHash.file_sha1 path)
 
