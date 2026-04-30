@@ -91,6 +91,28 @@ Proof
   \\ ACCEPT_TAC TRUTH
 QED
 
+Theorem reverse_multi_goal_validation:
+  (T /\ T) /\ T
+Proof
+  CONJ_TAC
+  \\ Tactical.REVERSE (TRY CONJ_TAC) THENL
+     [ACCEPT_TAC TRUTH, ACCEPT_TAC TRUTH, ACCEPT_TAC TRUTH]
+QED
+
+Theorem branch_body_all_subgoals:
+  (T /\ T) /\ T
+Proof
+  CONJ_TAC
+  >- (TRY CONJ_TAC >> ACCEPT_TAC TRUTH)
+  \\ ACCEPT_TAC TRUTH
+QED
+
+Theorem induction_shared_suffix:
+  ∀xs:'a list. xs = xs
+Proof
+  Induct_on `xs` >> simp[]
+QED
+
 val _ = export_theory();
 SML
 
