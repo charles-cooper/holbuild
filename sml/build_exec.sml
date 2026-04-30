@@ -862,7 +862,6 @@ fun materialize_theory_cache _ project plan input_key node =
        write_text (hfs_remapped_path sml_path) (read_text sml_path);
        write_local_theory_manifests plan node mldeps;
        remove_checkpoint_family project node;
-       print (logical_name node ^ " restored from cache\n");
        true)
   in
     (install () before cleanup ()) handle e => (cleanup (); raise e)
@@ -1355,12 +1354,13 @@ fun build_theory_node options tc project base_context plan keys toolchain_key no
     if not (always_reexecute node) andalso
        up_to_date policy project plan keys input_key toolchain_key node metadata_checkpoints then
       (remove_tree_if_exists stage;
-       print (HolbuildBuildPlan.logical_name node ^ " is up to date\n"))
+       HolbuildStatus.UpToDate)
     else if cache_enabled node andalso
             materialize_theory_cache tc project plan input_key node then
       (remove_tree stage;
        write_metadata policy project plan keys input_key toolchain_key node metadata_checkpoints;
-       remove_checkpoint_family project node)
+       remove_checkpoint_family project node;
+       HolbuildStatus.Restored)
     else
       let
         val source_text = read_text (source_file node)
@@ -1369,7 +1369,8 @@ fun build_theory_node options tc project base_context plan keys toolchain_key no
       in
         build_theory policy tc project base_context plan keys toolchain_key node source_text theorem_checkpoints;
         write_metadata policy project plan keys input_key toolchain_key node metadata_checkpoints;
-        remove_checkpoint_family project node
+        remove_checkpoint_family project node;
+        HolbuildStatus.Built
       end
   end
 
@@ -1382,15 +1383,17 @@ fun build_node options tc project base_context plan keys toolchain_key node =
       | HolbuildSourceIndex.Sml =>
           if not (always_reexecute node) andalso
              up_to_date no_checkpoint_policy project plan keys input_key toolchain_key node [] then
-            print (HolbuildBuildPlan.logical_name node ^ " is up to date\n")
+            HolbuildStatus.UpToDate
           else (build_sml_like plan node ".uo";
-                write_metadata no_checkpoint_policy project plan keys input_key toolchain_key node [])
+                write_metadata no_checkpoint_policy project plan keys input_key toolchain_key node [];
+                HolbuildStatus.Built)
       | HolbuildSourceIndex.Sig =>
           if not (always_reexecute node) andalso
              up_to_date no_checkpoint_policy project plan keys input_key toolchain_key node [] then
-            print (HolbuildBuildPlan.logical_name node ^ " is up to date\n")
+            HolbuildStatus.UpToDate
           else (build_sml_like plan node ".ui";
-                write_metadata no_checkpoint_policy project plan keys input_key toolchain_key node [])
+                write_metadata no_checkpoint_policy project plan keys input_key toolchain_key node [];
+                HolbuildStatus.Built)
   end
 
 fun node_policy options project node =
@@ -1405,24 +1408,53 @@ fun node_is_up_to_date options project plan keys toolchain_key node =
              project plan keys (HolbuildBuildPlan.input_key_for keys node)
              toolchain_key node []
 
-fun report_up_to_date_node project keys node =
+fun report_up_to_date_node status project keys node =
   let
     val input_key = HolbuildBuildPlan.input_key_for keys node
+    val key = HolbuildBuildPlan.key node
+    val label = HolbuildBuildPlan.logical_name node
   in
+    HolbuildStatus.start_node status key label;
     case #kind (HolbuildBuildPlan.source_of node) of
         HolbuildSourceIndex.TheoryScript => remove_tree_if_exists (stage_dir project input_key)
       | _ => ();
-    print (HolbuildBuildPlan.logical_name node ^ " is up to date\n")
+    HolbuildStatus.finish_node status key label HolbuildStatus.UpToDate
   end
 
 fun all_nodes_up_to_date options project plan keys toolchain_key =
   List.all (node_is_up_to_date options project plan keys toolchain_key) plan
 
-fun report_all_up_to_date project keys plan =
-  List.app (report_up_to_date_node project keys) plan
+fun report_all_up_to_date status project keys plan =
+  List.app (report_up_to_date_node status project keys) plan
 
-fun build_serial options tc project base_context plan keys toolchain_key =
-  List.app (build_node options tc project base_context plan keys toolchain_key) plan
+fun build_one status options tc project base_context plan keys toolchain_key node =
+  let
+    val key = HolbuildBuildPlan.key node
+    val label = HolbuildBuildPlan.logical_name node
+    val _ = HolbuildStatus.start_node status key label
+    val outcome = build_node options tc project base_context plan keys toolchain_key node
+  in
+    HolbuildStatus.finish_node status key label outcome
+  end
+
+fun build_serial status options tc project base_context plan keys toolchain_key =
+  let
+    fun error_message e =
+      case e of
+          Error msg => msg
+        | _ => General.exnMessage e
+    fun one node =
+      build_one status options tc project base_context plan keys toolchain_key node
+      handle e =>
+        let val msg = error_message e
+        in
+          HolbuildStatus.fail status (HolbuildBuildPlan.key node)
+                                (HolbuildBuildPlan.logical_name node) msg;
+          raise e
+        end
+  in
+    List.app one plan
+  end
 
 fun node_done done node = List.exists (fn k => k = HolbuildBuildPlan.key node) done
 
@@ -1446,7 +1478,7 @@ fun build_error_message e =
       Error msg => msg
     | _ => General.exnMessage e
 
-fun build_parallel options tc project base_context plan keys toolchain_key jobs =
+fun build_parallel status options tc project base_context plan keys toolchain_key jobs =
   let
     val mutex = Thread.Mutex.mutex ()
     val cv = Thread.ConditionVar.conditionVar ()
@@ -1502,10 +1534,18 @@ fun build_parallel options tc project base_context plan keys toolchain_key jobs 
           case next_work () of
               NONE => worker_exit ()
             | SOME node =>
-                ((build_node options tc project base_context plan keys toolchain_key node;
+                ((build_one status options tc project base_context plan keys toolchain_key node;
                   finish_success node;
                   loop ())
-                 handle e => (finish_failure (build_error_message e); worker_exit ()))
+                 handle e =>
+                   let
+                     val msg = build_error_message e
+                   in
+                     HolbuildStatus.fail status (HolbuildBuildPlan.key node)
+                                           (HolbuildBuildPlan.logical_name node) msg;
+                     finish_failure msg;
+                     worker_exit ()
+                   end)
       in
         loop ()
       end
@@ -1535,10 +1575,17 @@ fun build (options : build_options) tc project plan toolchain_key jobs =
     val base_context = toolchain_base_context tc
     val keys = HolbuildBuildPlan.input_keys (build_config_lines_for_node options project) toolchain_key plan
   in
-    if jobs <= 1 then build_serial options tc project base_context plan keys toolchain_key
-    else if all_nodes_up_to_date options project plan keys toolchain_key then
-      report_all_up_to_date project keys plan
-    else build_parallel options tc project base_context plan keys toolchain_key jobs
+    let
+      val status = HolbuildStatus.create (length plan)
+      fun run () =
+        if jobs <= 1 then build_serial status options tc project base_context plan keys toolchain_key
+        else if all_nodes_up_to_date options project plan keys toolchain_key then
+          report_all_up_to_date status project keys plan
+        else build_parallel status options tc project base_context plan keys toolchain_key jobs
+    in
+      (run (); HolbuildStatus.finish status)
+      handle e => (HolbuildStatus.finish status; raise e)
+    end
   end
 
 fun heap_external_theories plan =
