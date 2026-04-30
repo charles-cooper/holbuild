@@ -888,41 +888,43 @@ fun theorem_end_of_proof_path project node deps_key prefix_hash safe_name =
   Path.concat(theorem_checkpoint_dir project node deps_key prefix_hash,
               safe_name ^ "_end_of_proof.save")
 
-fun theorem_discovery_script {source_path, report_path} =
-  String.concatWith "\n"
-    ["load \"HOLSourceParser\";",
-     "fun holbuild_read_all path = let val input = TextIO.openIn path in TextIO.inputAll input before TextIO.closeIn input end;",
-     "val holbuild_source_path = " ^ HolbuildToolchain.sml_string source_path ^ ";",
-     "val holbuild_report_path = " ^ HolbuildToolchain.sml_string report_path ^ ";",
-     "val holbuild_source = holbuild_read_all holbuild_source_path;",
-     "val holbuild_out = TextIO.openOut holbuild_report_path;",
-     "val holbuild_fed = ref false;",
-     "fun holbuild_read _ = if !holbuild_fed then \"\" else (holbuild_fed := true; holbuild_source);",
-     "fun holbuild_parse_error _ _ msg = raise Fail (\"HOL source parse error: \" ^ msg);",
-     "val holbuild_result = HOLSourceParser.parseSML holbuild_source_path holbuild_read holbuild_parse_error HOLSourceParser.initialScope;",
-     "fun holbuild_bool true = \"1\" | holbuild_bool false = \"0\";",
-     "fun holbuild_emit_theorem name start stop tac_start tac_end has_attrs = TextIO.output(holbuild_out, String.concatWith \"\\t\" [\"theorem\", name, Int.toString start, Int.toString stop, Int.toString tac_start, Int.toString tac_end, holbuild_bool has_attrs] ^ \"\\n\");",
-     "fun holbuild_loop () =",
-     "  case #parseDec holbuild_result () of",
-     "      NONE => ()",
-     "    | SOME (HOLSourceAST.HOLTheoremDecl {theorem_, id = (_, name), proof_, tac, stop, ...}) =>",
-     "        let",
-     "          val (tac_start, tac_end) = HOLSourceAST.expSpan tac",
-     "          val has_attrs = case proof_ of SOME {attrs = SOME _, ...} => true | _ => false",
-     "        in holbuild_emit_theorem name theorem_ stop tac_start tac_end has_attrs; holbuild_loop () end",
-     "    | SOME _ => holbuild_loop ();",
-     "val _ = (holbuild_loop (); TextIO.closeOut holbuild_out);",
-     ""]
+fun bool_digit true = "1"
+  | bool_digit false = "0"
 
-fun discover_theorem_boundaries tc stage base_context source_path source_text =
+fun theorem_report_line name theorem_start theorem_stop tactic_start tactic_end has_attrs =
+  String.concatWith "\t"
+    ["theorem", name, Int.toString theorem_start, Int.toString theorem_stop,
+     Int.toString tactic_start, Int.toString tactic_end, bool_digit has_attrs]
+
+fun theorem_report_lines result =
   let
-    val script = Path.concat(stage, "holbuild-discover-theorems.sml")
-    val report_path = Path.concat(stage, "holbuild-theorems.tsv")
-    val _ = write_text script (theorem_discovery_script {source_path = source_path, report_path = report_path})
-    val _ = run_hol_files_to_log tc stage base_context [script]
-              "holbuild-discover-theorems.log"
-              "hol run failed while discovering theorem AST boundaries"
-    val report = read_text report_path handle IO.Io _ => ""
+    fun loop acc =
+      case #parseDec result () of
+          NONE => rev acc
+        | SOME (HOLSourceAST.HOLTheoremDecl {theorem_, id = (_, name), proof_, tac, stop, ...}) =>
+            let
+              val (tactic_start, tactic_end) = HOLSourceAST.expSpan tac
+              val has_attrs = case proof_ of SOME {attrs = SOME _, ...} => true | _ => false
+              val line = theorem_report_line name theorem_ stop tactic_start tactic_end has_attrs
+            in
+              loop (line :: acc)
+            end
+        | SOME _ => loop acc
+  in
+    loop []
+  end
+
+fun parse_error _ _ msg = raise Error ("HOL source parse error: " ^ msg)
+
+fun parser_reader source_text =
+  let val fed = ref false
+  in fn _ => if !fed then "" else (fed := true; source_text) end
+
+fun discover_theorem_boundaries source_path source_text =
+  let
+    val result = HOLSourceParser.parseSML source_path (parser_reader source_text) parse_error
+                   HOLSourceParser.initialScope
+    val report = String.concatWith "\n" (theorem_report_lines result) ^ "\n"
   in
     HolbuildTheoryCheckpoints.discover_from_report {source = source_text, report = report}
   end
@@ -1334,14 +1336,12 @@ fun build_config_lines_for_node options project node =
     | HolbuildSourceIndex.Sml => policy_config_lines no_checkpoint_policy
     | HolbuildSourceIndex.Sig => policy_config_lines no_checkpoint_policy
 
-fun theory_checkpoints_for_node policy tc project base_context plan keys toolchain_key node input_key source_text =
+fun theory_checkpoints_for_node policy project plan keys toolchain_key node source_text =
   if not (goalfrag_enabled policy) then []
   else
     let
-      val stage = stage_dir project input_key
       val deps_key = dependency_context_key toolchain_key plan keys node
-      val _ = ensure_dir stage
-      val boundaries = discover_theorem_boundaries tc stage base_context (source_file node) source_text
+      val boundaries = discover_theorem_boundaries (source_file node) source_text
     in
       theorem_checkpoint_specs project node deps_key boundaries
     end
@@ -1365,7 +1365,7 @@ fun build_theory_node options tc project base_context plan keys toolchain_key no
       let
         val source_text = read_text (source_file node)
         val theorem_checkpoints =
-          theory_checkpoints_for_node policy tc project base_context plan keys toolchain_key node input_key source_text
+          theory_checkpoints_for_node policy project plan keys toolchain_key node source_text
       in
         build_theory policy tc project base_context plan keys toolchain_key node source_text theorem_checkpoints;
         write_metadata policy project plan keys input_key toolchain_key node metadata_checkpoints;
