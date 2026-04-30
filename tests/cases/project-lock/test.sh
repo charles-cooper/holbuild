@@ -58,6 +58,36 @@ if grep -q "holbuild-project-lock-v1" "$second_log"; then
   exit 1
 fi
 
+locked_bad_project=$tmpdir/locked-bad-project
+mkdir -p "$locked_bad_project/.holbuild/locks/project.lock"
+cat > "$locked_bad_project/holproject.toml" <<'TOML'
+[project]
+name = "locked-bad-project"
+
+[build]
+members = ["missing"]
+TOML
+cat > "$locked_bad_project/.holbuild/locks/project.lock/owner" <<TOML
+holbuild-project-lock-v1
+command=build
+pid=$$
+cwd=$locked_bad_project
+host=$(cat /proc/sys/kernel/hostname)
+started=live-lock-test
+TOML
+locked_bad_log=$tmpdir/locked-bad.log
+if (cd "$locked_bad_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build) > "$locked_bad_log" 2>&1; then
+  echo "locked project with missing member unexpectedly succeeded" >&2
+  wait "$first_pid" || true
+  exit 1
+fi
+require_grep "project is already being modified" "$locked_bad_log"
+if grep -q "member does not exist" "$locked_bad_log"; then
+  echo "locked build discovered sources before checking the project lock" >&2
+  wait "$first_pid" || true
+  exit 1
+fi
+
 wait "$first_pid"
 [[ ! -e "$lock" ]] || { echo "project lock survived successful build" >&2; exit 1; }
 require_file "$project/.holbuild/obj/src/ATheory.dat"

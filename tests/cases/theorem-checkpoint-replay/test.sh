@@ -112,6 +112,10 @@ if (cd "$failure_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) >
   exit 1
 fi
 require_grep "expected failure" "$failure_log"
+failure_child_log=$(find "$failure_project/.holbuild/logs" -name '*-ATheory-instrumented-failure.log' -print -quit)
+require_file "$failure_child_log"
+require_grep "holbuild goal state at failed fragment" "$failure_child_log"
+require_grep "holbuild remaining goals: 1" "$failure_child_log"
 if [[ -e "$failure_project/.holbuild/checkpoints/replay/src/AScript.sml.b_thm_context.save" || \
       -e "$failure_project/.holbuild/checkpoints/replay/src/AScript.sml.b_thm_context.save.ok" || \
       -e "$failure_project/.holbuild/checkpoints/replay/src/AScript.sml.b_thm_end_of_proof.save" || \
