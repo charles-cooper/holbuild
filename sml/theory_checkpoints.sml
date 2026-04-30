@@ -11,7 +11,9 @@ type checkpoint = {name : string, safe_name : string, theorem_start : int,
                    theorem_stop : int, boundary : int, tactic_start : int,
                    tactic_end : int, tactic_text : string,
                    has_proof_attrs : bool, prefix_hash : string,
-                   context_path : string, end_of_proof_path : string}
+                   context_path : string, context_ok : string,
+                   end_of_proof_path : string, end_of_proof_ok : string,
+                   deps_key : string, checkpoint_key : string}
 
 fun is_ident c = Char.isAlphaNum c orelse c = #"_" orelse c = #"'"
 
@@ -96,14 +98,17 @@ fun discover_from_report {source, report} : boundary list =
       (List.filter (fn line => line <> "")
                    (String.tokens (fn c => c = #"\n") report))
 
-fun begin_theorem_line ({name, tactic_text, context_path, end_of_proof_path,
+fun begin_theorem_line ({name, tactic_text, context_path, context_ok,
+                         end_of_proof_path, end_of_proof_ok,
                          has_proof_attrs, ...} : checkpoint) =
   String.concat
     ["val _ = holbuild_begin_theorem(",
      HolbuildToolchain.sml_string name, ", ",
      HolbuildToolchain.sml_string tactic_text, ", ",
      HolbuildToolchain.sml_string context_path, ", ",
+     HolbuildToolchain.sml_string context_ok, ", ",
      HolbuildToolchain.sml_string end_of_proof_path, ", ",
+     HolbuildToolchain.sml_string end_of_proof_ok, ", ",
      if has_proof_attrs then "true" else "false",
      ");\n"]
 
@@ -126,21 +131,21 @@ fun runtime_theorem_state_lines {checkpoint_enabled, tactic_timeout, timeout_mar
   ["val holbuild_checkpoint_enabled = " ^ (if checkpoint_enabled then "true" else "false") ^ ";",
    "val holbuild_tactic_timeout = " ^ option_real_sml tactic_timeout ^ ";",
    "val holbuild_tactic_timeout_marker = " ^ option_string_sml timeout_marker ^ ";",
-   "val holbuild_theorem_info = ref NONE : (string * string * string * string * bool * int) option ref;",
-   "val holbuild_context_info = ref NONE : (string * int) option ref;",
+   "val holbuild_theorem_info = ref NONE : (string * string * string * string * string * string * bool * int) option ref;",
+   "val holbuild_context_info = ref NONE : (string * string * int) option ref;",
    "fun holbuild_env_bool name = case OS.Process.getEnv name of SOME \"1\" => SOME true | SOME \"true\" => SOME true | SOME \"yes\" => SOME true | SOME \"0\" => SOME false | SOME \"false\" => SOME false | SOME \"no\" => SOME false | _ => NONE;",
    "fun holbuild_bool_text true = \"true\" | holbuild_bool_text false = \"false\";",
    "fun holbuild_seconds (a, b) = Time.toReal (Time.-(b, a));",
    "fun holbuild_fmt_time t = Real.fmt (StringCvt.FIX (SOME 3)) t;",
    "fun holbuild_delete_file path = OS.FileSys.remove path handle _ => ();",
    "fun holbuild_delete_checkpoint path = (holbuild_delete_file (path ^ \".ok\"); holbuild_delete_file path);",
-   "fun holbuild_write_checkpoint_ok path = let val out = TextIO.openOut (path ^ \".ok\") in TextIO.output(out, \"holbuild-checkpoint-ok-v1\\n\"); TextIO.closeOut out end;",
+   "fun holbuild_write_checkpoint_ok path ok_text = let val out = TextIO.openOut (path ^ \".ok\") in TextIO.output(out, ok_text); TextIO.closeOut out end;",
    "fun holbuild_write_timeout_marker label seconds = case holbuild_tactic_timeout_marker of NONE => () | SOME path => let val out = TextIO.openOut path in TextIO.output(out, String.concat [label, \"\\t\", Real.toString seconds, \"\\n\"]); TextIO.closeOut out end;",
    "fun holbuild_timeout_message label seconds = String.concat [\"holbuild tactic timeout after \", Real.toString seconds, \"s: \", label];",
    "fun holbuild_with_tactic_timeout label f x = case holbuild_tactic_timeout of NONE => f x | SOME seconds => (smlTimeout.timeout seconds f x handle smlTimeout.FunctionTimeout => (holbuild_write_timeout_marker label seconds; raise Fail (holbuild_timeout_message label seconds)));",
-   "fun holbuild_save_checkpoint label default_share path depth = if not holbuild_checkpoint_enabled then () else let val share = Option.getOpt(holbuild_env_bool \"HOLBUILD_SHARE_COMMON_DATA\", default_share) val timing = Option.getOpt(holbuild_env_bool \"HOLBUILD_CHECKPOINT_TIMING\", false) val t0 = Time.now() val _ = holbuild_delete_checkpoint path val _ = if share then PolyML.shareCommonData PolyML.rootFunction else () val t1 = Time.now() val _ = PolyML.SaveState.saveChild(path, depth) val t2 = Time.now() val _ = holbuild_write_checkpoint_ok path val _ = if timing then TextIO.output(TextIO.stdErr, String.concat [\"holbuild checkpoint kind=\", label, \" share=\", holbuild_bool_text share, \" depth=\", Int.toString depth, \" share_s=\", holbuild_fmt_time (holbuild_seconds (t0, t1)), \" save_s=\", holbuild_fmt_time (holbuild_seconds (t1, t2)), \" size=\", Position.toString (OS.FileSys.fileSize path), \" path=\", path, \"\\n\"]) else () in () end;",
-   "fun holbuild_begin_theorem (name, tactic_text, context_path, end_path, has_attrs) = let val depth = length (PolyML.SaveState.showHierarchy()) in if holbuild_checkpoint_enabled then (holbuild_delete_checkpoint context_path; holbuild_delete_checkpoint end_path) else (); holbuild_theorem_info := SOME (name, tactic_text, context_path, end_path, has_attrs, depth); holbuild_context_info := SOME (context_path, depth) end;",
-   "fun holbuild_save_theorem_context () = case !holbuild_context_info of NONE => () | SOME (context_path, depth) => (holbuild_context_info := NONE; holbuild_save_checkpoint \"theorem_context\" false context_path depth);"]
+   "fun holbuild_save_checkpoint label default_share path ok_text depth = if not holbuild_checkpoint_enabled then () else let val share = Option.getOpt(holbuild_env_bool \"HOLBUILD_SHARE_COMMON_DATA\", default_share) val timing = Option.getOpt(holbuild_env_bool \"HOLBUILD_CHECKPOINT_TIMING\", false) val t0 = Time.now() val _ = holbuild_delete_checkpoint path val _ = if share then PolyML.shareCommonData PolyML.rootFunction else () val t1 = Time.now() val _ = PolyML.SaveState.saveChild(path, depth) val t2 = Time.now() val _ = holbuild_write_checkpoint_ok path ok_text val _ = if timing then TextIO.output(TextIO.stdErr, String.concat [\"holbuild checkpoint kind=\", label, \" share=\", holbuild_bool_text share, \" depth=\", Int.toString depth, \" share_s=\", holbuild_fmt_time (holbuild_seconds (t0, t1)), \" save_s=\", holbuild_fmt_time (holbuild_seconds (t1, t2)), \" size=\", Position.toString (OS.FileSys.fileSize path), \" path=\", path, \"\\n\"]) else () in () end;",
+   "fun holbuild_begin_theorem (name, tactic_text, context_path, context_ok, end_path, end_ok, has_attrs) = let val depth = length (PolyML.SaveState.showHierarchy()) in if holbuild_checkpoint_enabled then (holbuild_delete_checkpoint context_path; holbuild_delete_checkpoint end_path) else (); holbuild_theorem_info := SOME (name, tactic_text, context_path, context_ok, end_path, end_ok, has_attrs, depth); holbuild_context_info := SOME (context_path, context_ok, depth) end;",
+   "fun holbuild_save_theorem_context () = case !holbuild_context_info of NONE => () | SOME (context_path, context_ok, depth) => (holbuild_context_info := NONE; holbuild_save_checkpoint \"theorem_context\" false context_path context_ok depth);"]
 
 val runtime_tactic_parse_lines =
   ["fun holbuild_parse_tactic s = let",
@@ -252,13 +257,13 @@ val runtime_prover_lines =
    "fun holbuild_goalfrag_prover (g, tac) =",
    "  case !holbuild_theorem_info of",
    "      NONE => Tactical.TAC_PROOF(g, tac)",
-   "    | SOME (name, tactic_text, _, end_path, has_attrs, checkpoint_depth) =>",
+   "    | SOME (name, tactic_text, _, _, end_path, end_ok, has_attrs, checkpoint_depth) =>",
    "        let",
    "          val _ = holbuild_theorem_info := NONE",
    "          val _ = proofManagerLib.set_goalfrag g",
    "          val _ = if has_attrs orelse tactic_text = \"\" then holbuild_with_tactic_timeout name (fn () => (proofManagerLib.expand tac; ())) () else holbuild_run_steps (holbuild_steps tactic_text)",
    "          val th = proofManagerLib.top_thm()",
-   "          val _ = holbuild_save_checkpoint \"end_of_proof\" false end_path checkpoint_depth",
+   "          val _ = holbuild_save_checkpoint \"end_of_proof\" false end_path end_ok checkpoint_depth",
    "          val _ = proofManagerLib.drop_all()",
    "        in th end",
    "        handle e => (holbuild_theorem_info := NONE; holbuild_context_info := NONE; holbuild_drop_all(); raise e);",

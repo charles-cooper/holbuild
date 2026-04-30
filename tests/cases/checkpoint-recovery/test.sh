@@ -13,6 +13,7 @@ trap cleanup EXIT
 export HOLBUILD_CACHE="$tmpdir/cache"
 
 project=$tmpdir/project
+metadata="$project/.holbuild/dep/checkpointrecovery/src/AScript.sml.key"
 mkdir -p "$project/src"
 cat > "$project/holproject.toml" <<'TOML'
 [project]
@@ -24,7 +25,9 @@ members = ["src"]
 [actions.ATheory]
 cache = false
 TOML
-cat > "$project/src/AScript.sml" <<'SML'
+
+write_good_source() {
+  cat > "$project/src/AScript.sml" <<'SML'
 open HolKernel Parse boolLib bossLib;
 val _ = new_theory "A";
 
@@ -42,62 +45,10 @@ QED
 
 val _ = export_theory();
 SML
-
-metadata="$project/.holbuild/dep/checkpointrecovery/src/AScript.sml.key"
-context_path="$project/.holbuild/checkpoints/checkpointrecovery/src/AScript.sml.first_context.save"
-end_path="$project/.holbuild/checkpoints/checkpointrecovery/src/AScript.sml.first_end_of_proof.save"
-
-prefix_hash() {
-  python3 - <<PY
-from pathlib import Path
-src = Path("$project/src/AScript.sml").read_text()
-end = src.index("QED") + len("QED")
-Path("$tmpdir/prefix").write_text(src[:end])
-PY
-  sha1sum "$tmpdir/prefix" | awk '{print $1}'
 }
 
-seed_old_boundary_metadata() {
-  require_file "$metadata"
-  printf 'theorem_boundary first %s %s %s\n' "$(prefix_hash)" "$context_path" "$end_path" >> "$metadata"
-}
-
-assert_no_checkpoints() {
-  if find "$project/.holbuild/checkpoints" \( -name '*.save' -o -name '*.save.ok' \) -print -quit 2>/dev/null | grep -q .; then
-    echo "$1" >&2
-    exit 1
-  fi
-}
-
-checkpoint_count() {
-  find "$project/.holbuild/checkpoints" \( -name '*.save' -o -name '*.save.ok' \) -print 2>/dev/null | wc -l
-}
-
-(cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$tmpdir/initial.log" 2>&1
-require_file "$project/.holbuild/obj/src/ATheory.dat"
-assert_no_checkpoints "successful initial build retained checkpoint files"
-
-seed_old_boundary_metadata
-missing_ok_log=$tmpdir/missing-ok.log
-(cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$missing_ok_log" 2>&1
-if grep -q "replaying from checkpoint\|checkpoint instrumentation failed" "$missing_ok_log"; then
-  echo "missing checkpoint .ok was treated as replayable" >&2
-  exit 1
-fi
-assert_no_checkpoints "missing-checkpoint rebuild retained checkpoint files"
-
-seed_old_boundary_metadata
-mkdir -p "$(dirname "$context_path")"
-printf 'not a valid PolyML checkpoint\n' > "$context_path"
-printf 'holbuild-checkpoint-ok-v1\n' > "$context_path.ok"
-corrupt_log=$tmpdir/corrupt.log
-(cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$corrupt_log" 2>&1
-require_grep "ATheory replaying from checkpoint first" "$corrupt_log"
-require_grep "checkpoint instrumentation failed; retrying without theorem checkpoints" "$corrupt_log"
-require_file "$project/.holbuild/obj/src/ATheory.dat"
-assert_no_checkpoints "corrupt-checkpoint recovery retained checkpoint files"
-
-cat > "$project/src/AScript.sml" <<'SML'
+write_bad_suffix_source() {
+  cat > "$project/src/AScript.sml" <<'SML'
 open HolKernel Parse boolLib bossLib;
 val _ = new_theory "A";
 
@@ -115,29 +66,14 @@ QED
 
 val _ = export_theory();
 SML
-failed_log=$tmpdir/failed.log
-if (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$failed_log" 2>&1; then
-  echo "expected second theorem failure" >&2
-  exit 1
-fi
-require_grep "expected dirty residue" "$failed_log"
-deps_loaded_path="$project/.holbuild/checkpoints/checkpointrecovery/src/AScript.sml.deps_loaded.save"
-if [[ ! -e "$deps_loaded_path" || ! -e "$deps_loaded_path.ok" ]]; then
-  echo "failed action did not retain deps_loaded checkpoint breadcrumb" >&2
-  exit 1
-fi
-if find "$project/.holbuild/checkpoints/checkpointrecovery/src" \
-    \( -name 'AScript.sml.*_context.save' -o -name 'AScript.sml.*_context.save.ok' -o \
-       -name 'AScript.sml.*_end_of_proof.save' -o -name 'AScript.sml.*_end_of_proof.save.ok' \) \
-    -print -quit 2>/dev/null | grep -q .; then
-  echo "failed theorem fallback retained stale theorem checkpoints" >&2
-  exit 1
-fi
+}
 
-cat > "$project/src/AScript.sml" <<'SML'
+write_changed_prefix_source() {
+  cat > "$project/src/AScript.sml" <<'SML'
 open HolKernel Parse boolLib bossLib;
 val _ = new_theory "A";
 
+(* prefix edit changes the theorem context key *)
 Theorem first:
   T
 Proof
@@ -152,14 +88,114 @@ QED
 
 val _ = export_theory();
 SML
+}
+
+assert_no_checkpoints() {
+  if find "$project/.holbuild/checkpoints" \( -name '*.save' -o -name '*.save.ok' \) -print -quit 2>/dev/null | grep -q .; then
+    echo "$1" >&2
+    exit 1
+  fi
+}
+
+checkpoint_count() {
+  find "$project/.holbuild/checkpoints" \( -name '*.save' -o -name '*.save.ok' \) -print 2>/dev/null | wc -l
+}
+
+force_rebuild() {
+  rm -f "$metadata"
+}
+
+first_context_path() {
+  find "$project/.holbuild/checkpoints/checkpointrecovery/src/AScript.sml.theorems" \
+    -path '*/first_context.save' -print -quit
+}
+
+first_deps_path() {
+  find "$project/.holbuild/checkpoints/checkpointrecovery/src/AScript.sml.deps" \
+    -path '*/deps_loaded.save' -print -quit
+}
+
+run_expect_suffix_failure() {
+  local log=$1
+  write_bad_suffix_source
+  if (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$log" 2>&1; then
+    echo "expected second theorem failure" >&2
+    exit 1
+  fi
+  require_grep "expected dirty residue" "$log"
+  deps_loaded_path=$(first_deps_path)
+  context_path=$(first_context_path)
+  if [[ -z "$deps_loaded_path" || ! -e "$deps_loaded_path.ok" ]]; then
+    echo "failed action did not retain deps_loaded checkpoint breadcrumb" >&2
+    exit 1
+  fi
+  if [[ -z "$context_path" || ! -e "$context_path.ok" ]]; then
+    echo "failed action did not retain reusable first theorem context" >&2
+    exit 1
+  fi
+  require_grep '^holbuild-checkpoint-ok-v2$' "$deps_loaded_path.ok"
+  require_grep '^kind=deps_loaded$' "$deps_loaded_path.ok"
+  require_grep '^holbuild-checkpoint-ok-v2$' "$context_path.ok"
+  require_grep '^kind=theorem_context$' "$context_path.ok"
+}
+
+write_good_source
+(cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$tmpdir/initial.log" 2>&1
+require_file "$project/.holbuild/obj/src/ATheory.dat"
+assert_no_checkpoints "successful initial build retained checkpoint files"
+
+run_expect_suffix_failure "$tmpdir/failed.log"
+write_good_source
+force_rebuild
 fixed_log=$tmpdir/fixed.log
 (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$fixed_log" 2>&1
-require_file "$project/.holbuild/obj/src/ATheory.dat"
-if grep -q "checkpoint instrumentation failed" "$fixed_log"; then
-  echo "fixed source reused dirty checkpoint residue" >&2
+require_grep "ATheory replaying from checkpoint first" "$fixed_log"
+if grep -q "parent for this saved state\|checkpoint instrumentation failed" "$fixed_log"; then
+  echo "suffix recovery hit checkpoint parent mismatch/fallback" >&2
   exit 1
 fi
+require_file "$project/.holbuild/obj/src/ATheory.dat"
+assert_no_checkpoints "successful fixed build retained checkpoint files"
 
+run_expect_suffix_failure "$tmpdir/missing-ok-seed.log"
+missing_context=$(first_context_path)
+rm -f "$missing_context.ok"
+write_good_source
+force_rebuild
+missing_ok_log=$tmpdir/missing-ok.log
+(cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$missing_ok_log" 2>&1
+if grep -q "replaying from checkpoint" "$missing_ok_log"; then
+  echo "missing checkpoint .ok was treated as replayable" >&2
+  exit 1
+fi
+assert_no_checkpoints "missing-checkpoint rebuild retained checkpoint files"
+
+run_expect_suffix_failure "$tmpdir/corrupt-seed.log"
+corrupt_context=$(first_context_path)
+printf 'not a valid PolyML checkpoint\n' > "$corrupt_context"
+write_good_source
+force_rebuild
+corrupt_log=$tmpdir/corrupt.log
+(cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$corrupt_log" 2>&1
+require_grep "ATheory replaying from checkpoint first" "$corrupt_log"
+require_grep "checkpoint instrumentation failed; retrying without theorem checkpoints" "$corrupt_log"
+require_file "$project/.holbuild/obj/src/ATheory.dat"
+assert_no_checkpoints "corrupt-checkpoint recovery retained checkpoint files"
+
+run_expect_suffix_failure "$tmpdir/prefix-seed.log"
+write_changed_prefix_source
+force_rebuild
+prefix_log=$tmpdir/prefix-change.log
+(cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$prefix_log" 2>&1
+if grep -q "replaying from checkpoint" "$prefix_log"; then
+  echo "prefix-changing edit reused stale theorem checkpoint" >&2
+  exit 1
+fi
+assert_no_checkpoints "prefix-changing rebuild retained checkpoint files"
+
+mkdir -p "$project/.holbuild/checkpoints/checkpointrecovery/src/stale"
+printf 'stale residue\n' > "$project/.holbuild/checkpoints/checkpointrecovery/src/stale/manual.save"
+printf 'holbuild-checkpoint-ok-v2\nkind=manual\n' > "$project/.holbuild/checkpoints/checkpointrecovery/src/stale/manual.save.ok"
 residue_before_up_to_date=$(checkpoint_count)
 up_to_date_log=$tmpdir/up-to-date.log
 (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$up_to_date_log" 2>&1

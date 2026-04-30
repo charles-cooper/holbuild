@@ -180,7 +180,14 @@ fun checkpoint_ok_path path = path ^ ".ok"
 fun remove_checkpoint path =
   (remove_file (checkpoint_ok_path path); remove_file path)
 
-fun save_heap_line {label, share_common_data, output} =
+fun checkpoint_ok_v1 () = "holbuild-checkpoint-ok-v1\n"
+
+fun checkpoint_ok_text kind fields =
+  String.concatWith "\n"
+    ("holbuild-checkpoint-ok-v2" :: ("kind=" ^ kind) ::
+     map (fn (key, value) => key ^ "=" ^ value) fields) ^ "\n"
+
+fun save_heap_line {label, share_common_data, output, ok_text} =
   let val default_share = if share_common_data then "true" else "false"
   in
     String.concatWith "\n"
@@ -188,9 +195,10 @@ fun save_heap_line {label, share_common_data, output} =
        "  val holbuild_checkpoint_path = " ^ HolbuildToolchain.sml_string output,
        "  val holbuild_checkpoint_label = " ^ HolbuildToolchain.sml_string label,
        "  val holbuild_checkpoint_default_share = " ^ default_share,
+       "  val holbuild_checkpoint_ok_text = " ^ HolbuildToolchain.sml_string ok_text,
        "  fun holbuild_checkpoint_bool name = case OS.Process.getEnv name of SOME \"1\" => SOME true | SOME \"true\" => SOME true | SOME \"yes\" => SOME true | SOME \"0\" => SOME false | SOME \"false\" => SOME false | SOME \"no\" => SOME false | _ => NONE",
        "  fun holbuild_checkpoint_remove path = OS.FileSys.remove path handle _ => ()",
-       "  fun holbuild_checkpoint_write_ok path = let val out = TextIO.openOut path in TextIO.output(out, \"holbuild-checkpoint-ok-v1\\n\"); TextIO.closeOut out end",
+       "  fun holbuild_checkpoint_write_ok path = let val out = TextIO.openOut path in TextIO.output(out, holbuild_checkpoint_ok_text); TextIO.closeOut out end",
        "  fun holbuild_checkpoint_seconds (a, b) = Time.toReal (Time.-(b, a))",
        "  fun holbuild_checkpoint_fmt t = Real.fmt (StringCvt.FIX (SOME 3)) t",
        "  fun holbuild_checkpoint_bool_text true = \"true\" | holbuild_checkpoint_bool_text false = \"false\"",
@@ -226,11 +234,11 @@ fun preload_lines plan node =
     List.concat (map project_preload_lines project_deps)
   end
 
-fun write_preload plan node deps_loaded path =
+fun write_preload plan node deps_loaded deps_ok path =
   let
     val lines = preload_lines plan node @
                 [save_heap_line {label = "deps_loaded", share_common_data = true,
-                                 output = deps_loaded}]
+                                 output = deps_loaded, ok_text = deps_ok}]
   in
     write_text path (String.concatWith "\n" lines ^ "\n")
   end
@@ -253,7 +261,7 @@ fun write_final_context_loader {sig_path, sml_path, output, path, mldeps_report}
     val lines = final_context_loader_lines {sig_path = sig_path, sml_path = sml_path,
                                             mldeps_report = mldeps_report} @
                 [save_heap_line {label = "final_context", share_common_data = true,
-                                 output = output}]
+                                 output = output, ok_text = checkpoint_ok_v1 ()}]
   in
     write_text path (String.concatWith "\n" lines ^ "\n")
   end
@@ -352,10 +360,19 @@ fun checkpoint_base (project : HolbuildProject.t) node =
                           HolbuildBuildPlan.package node),
               HolbuildBuildPlan.relative_path node)
 
-fun deps_loaded_path project node = checkpoint_base project node ^ ".deps_loaded.save"
+fun deps_checkpoint_root project node = checkpoint_base project node ^ ".deps"
+
+fun deps_loaded_path project node deps_key =
+  Path.concat(Path.concat(deps_checkpoint_root project node, deps_key), "deps_loaded.save")
+
+fun theorem_checkpoint_root project node = checkpoint_base project node ^ ".theorems"
+
+fun theorem_checkpoint_dir project node deps_key prefix_hash =
+  Path.concat(Path.concat(theorem_checkpoint_root project node, deps_key), prefix_hash)
+
 fun final_context_path project node = checkpoint_base project node ^ ".final_context.save"
 
-fun remove_checkpoint_family project node =
+fun remove_legacy_checkpoint_family project node =
   let
     val base = checkpoint_base project node
     val dir = Path.dir base
@@ -377,6 +394,16 @@ fun remove_checkpoint_family project node =
     handle e => (close (); raise e)
   end
   handle Fail "holbuild checkpoint directory missing" => ()
+
+fun remove_checkpoint_tree path =
+  if FS.access(path, []) handle OS.SysErr _ => false then
+    ignore (OS.Process.system ("rm -rf " ^ HolbuildToolchain.quote path))
+  else ()
+
+fun remove_checkpoint_family project node =
+  (remove_legacy_checkpoint_family project node;
+   remove_checkpoint_tree (deps_checkpoint_root project node);
+   remove_checkpoint_tree (theorem_checkpoint_root project node))
 
 fun path_exists path = FS.access(path, []) handle OS.SysErr _ => false
 
@@ -853,11 +880,13 @@ fun metadata_path (project : HolbuildProject.t) node =
     Path.concat(base, #relative_path source ^ ".key")
   end
 
-fun theorem_context_path project node safe_name =
-  checkpoint_base project node ^ "." ^ safe_name ^ "_context.save"
+fun theorem_context_path project node deps_key prefix_hash safe_name =
+  Path.concat(theorem_checkpoint_dir project node deps_key prefix_hash,
+              safe_name ^ "_context.save")
 
-fun theorem_end_of_proof_path project node safe_name =
-  checkpoint_base project node ^ "." ^ safe_name ^ "_end_of_proof.save"
+fun theorem_end_of_proof_path project node deps_key prefix_hash safe_name =
+  Path.concat(theorem_checkpoint_dir project node deps_key prefix_hash,
+              safe_name ^ "_end_of_proof.save")
 
 fun theorem_discovery_script {source_path, report_path} =
   String.concatWith "\n"
@@ -898,16 +927,42 @@ fun discover_theorem_boundaries tc stage base_context source_path source_text =
     HolbuildTheoryCheckpoints.discover_from_report {source = source_text, report = report}
   end
 
-fun theorem_checkpoint_specs project node boundaries =
+fun theorem_checkpoint_key {name, safe_name, boundary, deps_key, prefix_hash} =
+  HolbuildToolchain.hash_text
+    (String.concatWith "\n"
+       ["holbuild-theorem-checkpoint-key-v1",
+        "name=" ^ name,
+        "safe_name=" ^ safe_name,
+        "boundary=" ^ Int.toString boundary,
+        "deps_key=" ^ deps_key,
+        "prefix_key=" ^ prefix_hash] ^ "\n")
+
+fun theorem_checkpoint_ok kind deps_key prefix_hash checkpoint_key =
+  checkpoint_ok_text kind
+    [("deps_key", deps_key),
+     ("prefix_key", prefix_hash),
+     ("checkpoint_key", checkpoint_key)]
+
+fun theorem_checkpoint_specs project node deps_key boundaries =
   map (fn {name, safe_name, theorem_start, theorem_stop, boundary, tactic_start,
            tactic_end, tactic_text, has_proof_attrs, prefix_hash} =>
-          {name = name, safe_name = safe_name, theorem_start = theorem_start,
-           theorem_stop = theorem_stop, boundary = boundary,
-           tactic_start = tactic_start, tactic_end = tactic_end,
-           tactic_text = tactic_text, has_proof_attrs = has_proof_attrs,
-           prefix_hash = prefix_hash,
-           context_path = theorem_context_path project node safe_name,
-           end_of_proof_path = theorem_end_of_proof_path project node safe_name})
+          let
+            val checkpoint_key = theorem_checkpoint_key {name = name, safe_name = safe_name,
+                                                         boundary = boundary, deps_key = deps_key,
+                                                         prefix_hash = prefix_hash}
+          in
+            {name = name, safe_name = safe_name, theorem_start = theorem_start,
+             theorem_stop = theorem_stop, boundary = boundary,
+             tactic_start = tactic_start, tactic_end = tactic_end,
+             tactic_text = tactic_text, has_proof_attrs = has_proof_attrs,
+             prefix_hash = prefix_hash,
+             context_path = theorem_context_path project node deps_key prefix_hash safe_name,
+             context_ok = theorem_checkpoint_ok "theorem_context" deps_key prefix_hash checkpoint_key,
+             end_of_proof_path = theorem_end_of_proof_path project node deps_key prefix_hash safe_name,
+             end_of_proof_ok = theorem_checkpoint_ok "end_of_proof" deps_key prefix_hash checkpoint_key,
+             deps_key = deps_key,
+             checkpoint_key = checkpoint_key}
+          end)
       boundaries
 
 fun dependency_context_key toolchain_key plan keys node =
@@ -939,50 +994,49 @@ fun metadata_value key lines =
                lines
   end
 
-fun old_theorem_boundary line =
-  case String.tokens Char.isSpace line of
-      ["theorem_boundary", safe_name, prefix_hash, path] =>
-        SOME {safe_name = safe_name, prefix_hash = prefix_hash,
-              context_path = path, end_of_proof_path = ""}
-    | ["theorem_boundary", safe_name, prefix_hash, context_path, end_of_proof_path] =>
-        SOME {safe_name = safe_name, prefix_hash = prefix_hash,
-              context_path = context_path, end_of_proof_path = end_of_proof_path}
-    | _ => NONE
+fun checkpoint_ok_matches path fields =
+  file_exists path andalso
+  case current_metadata (checkpoint_ok_path path) of
+      SOME text =>
+        let val lines = metadata_lines text
+        in
+          List.exists (fn line => line = "holbuild-checkpoint-ok-v2") lines andalso
+          List.all (fn (key, value) => metadata_value key lines = SOME value) fields
+        end
+    | NONE => false
 
-fun same_boundary old {safe_name, prefix_hash, ...} =
-  #safe_name old = safe_name andalso #prefix_hash old = prefix_hash
+fun deps_checkpoint_ok_text deps_key =
+  checkpoint_ok_text "deps_loaded" [("deps_key", deps_key)]
 
-fun replay_candidates old_boundaries checkpoints =
+fun deps_checkpoint_exists path deps_key =
+  checkpoint_ok_matches path [("kind", "deps_loaded"), ("deps_key", deps_key)]
+
+fun theorem_context_checkpoint_exists project node checkpoint =
+  let val deps_loaded = deps_loaded_path project node (#deps_key checkpoint)
+  in
+    deps_checkpoint_exists deps_loaded (#deps_key checkpoint) andalso
+    checkpoint_ok_matches (#context_path checkpoint)
+      [("kind", "theorem_context"),
+       ("deps_key", #deps_key checkpoint),
+       ("prefix_key", #prefix_hash checkpoint),
+       ("checkpoint_key", #checkpoint_key checkpoint)]
+  end
+
+fun replay_candidates project node checkpoints =
   List.mapPartial
     (fn checkpoint =>
-        case List.find (fn old => same_boundary old checkpoint) old_boundaries of
-            SOME old =>
-              if checkpoint_exists (#context_path old) then
-                SOME {boundary = #boundary checkpoint, path = #context_path old,
-                      safe_name = #safe_name checkpoint}
-              else NONE
-          | NONE => NONE)
+        if theorem_context_checkpoint_exists project node checkpoint then
+          SOME {boundary = #boundary checkpoint, path = #context_path checkpoint,
+                safe_name = #safe_name checkpoint}
+        else NONE)
     checkpoints
 
 fun later_candidate (a, b) = if #boundary a >= #boundary b then a else b
 
-fun best_replay_candidate project plan keys input_key toolchain_key node checkpoints =
-  case current_metadata (metadata_path project node) of
-      NONE => NONE
-    | SOME text =>
-        let
-          val lines = metadata_lines text
-          val current_context = dependency_context_key toolchain_key plan keys node
-          val old_input_key = metadata_value "input_key" lines
-          val old_context = metadata_value "dependency_context_key" lines
-          val old_boundaries = List.mapPartial old_theorem_boundary lines
-          val candidates = replay_candidates old_boundaries checkpoints
-        in
-          if old_input_key <> SOME input_key orelse
-             old_context <> SOME current_context orelse
-             null candidates then NONE
-          else SOME (List.foldl later_candidate (hd candidates) (tl candidates))
-        end
+fun best_replay_candidate project node checkpoints =
+  case replay_candidates project node checkpoints of
+      [] => NONE
+    | first :: rest => SOME (List.foldl later_candidate first rest)
 
 type build_options = {skip_checkpoints : bool, goalfrag : bool, tactic_timeout : real option}
 
@@ -1018,9 +1072,9 @@ fun instrumented_source policy timeout_marker source_text start_offset checkpoin
        timeout_marker = timeout_marker}
   else source_text
 
-fun replay_candidate project plan keys input_key toolchain_key node checkpoints =
+fun replay_candidate project node checkpoints =
   if always_reexecute node then NONE
-  else best_replay_candidate project plan keys input_key toolchain_key node checkpoints
+  else best_replay_candidate project node checkpoints
 
 fun write_theory_script policy project base_context plan keys input_key toolchain_key node source_text checkpoints staged_script preload timeout_marker =
   if not (checkpoint_enabled policy) then
@@ -1028,18 +1082,30 @@ fun write_theory_script policy project base_context plan keys input_key toolchai
      write_text staged_script (instrumented_source policy (SOME timeout_marker) source_text 0 checkpoints);
      {context = base_context, files = [preload, staged_script]})
   else
-    case replay_candidate project plan keys input_key toolchain_key node checkpoints of
-        SOME {boundary, path, safe_name} =>
-          let
-            val _ = write_text staged_script (instrumented_source policy (SOME timeout_marker) source_text boundary checkpoints)
-            val _ = print (logical_name node ^ " replaying from checkpoint " ^ safe_name ^ "\n")
-          in
-            {context = HolState path, files = [staged_script]}
-          end
-      | NONE =>
-          (write_preload plan node (deps_loaded_path project node) preload;
-           write_text staged_script (instrumented_source policy (SOME timeout_marker) source_text 0 checkpoints);
-           {context = base_context, files = [preload, staged_script]})
+    let
+      val deps_key = dependency_context_key toolchain_key plan keys node
+      val deps_loaded = deps_loaded_path project node deps_key
+      val deps_ok = deps_checkpoint_ok_text deps_key
+      fun run_from_deps_checkpoint () =
+        (write_text staged_script (instrumented_source policy (SOME timeout_marker) source_text 0 checkpoints);
+         {context = HolState deps_loaded, files = [staged_script]})
+      fun run_from_fresh_preload () =
+        (write_preload plan node deps_loaded deps_ok preload;
+         write_text staged_script (instrumented_source policy (SOME timeout_marker) source_text 0 checkpoints);
+         {context = base_context, files = [preload, staged_script]})
+    in
+      case replay_candidate project node checkpoints of
+          SOME {boundary, path, safe_name} =>
+            let
+              val _ = write_text staged_script (instrumented_source policy (SOME timeout_marker) source_text boundary checkpoints)
+              val _ = print (logical_name node ^ " replaying from checkpoint " ^ safe_name ^ "\n")
+            in
+              {context = HolState path, files = [staged_script]}
+            end
+        | NONE =>
+            if deps_checkpoint_exists deps_loaded deps_key then run_from_deps_checkpoint ()
+            else run_from_fresh_preload ()
+    end
 
 fun build_theory policy tc project base_context plan keys toolchain_key node source_text theorem_checkpoints =
   let
@@ -1050,7 +1116,9 @@ fun build_theory policy tc project base_context plan keys toolchain_key node sou
     val final_loader = Path.concat(stage, "holbuild-save-final-context.sml")
     val mldeps_report = Path.concat(stage, "holbuild-theory-mldeps.txt")
     val timeout_marker = Path.concat(stage, "holbuild-tactic-timeout.txt")
-    val deps_loaded = deps_loaded_path project node
+    val deps_key = dependency_context_key toolchain_key plan keys node
+    val deps_loaded = deps_loaded_path project node deps_key
+    val deps_ok = deps_checkpoint_ok_text deps_key
     val final_context = final_context_path project node
     val {sig_path, sml_path, data_path, script_uo, theory_ui, theory_uo} = theory_outputs node
     val staged_sig = staged_theory_file stage node ".sig"
@@ -1078,8 +1146,6 @@ fun build_theory policy tc project base_context plan keys toolchain_key node sou
     val _ = remove_file timeout_marker
     val run_spec = write_theory_script policy project base_context plan keys input_key toolchain_key node
                                     source_text theorem_checkpoints staged_script preload timeout_marker
-    fun remove_theorem_checkpoint {context_path, end_of_proof_path, ...} =
-      (remove_checkpoint context_path; remove_checkpoint end_of_proof_path)
     fun tactic_timeout_error () =
       Error ("tactic timed out while building " ^ logical_name node ^ ": " ^
              String.concatWith " " (String.tokens Char.isSpace (read_text timeout_marker)))
@@ -1087,13 +1153,17 @@ fun build_theory policy tc project base_context plan keys toolchain_key node sou
       let
         val _ = print (logical_name node ^
                        " checkpoint instrumentation failed; retrying without theorem checkpoints\n")
-        val _ = List.app remove_theorem_checkpoint theorem_checkpoints
+        val deps_usable = checkpoint_enabled policy andalso deps_checkpoint_exists deps_loaded deps_key
         val _ =
-          if checkpoint_enabled policy then write_preload plan node (deps_loaded_path project node) preload
+          if deps_usable then ()
+          else if checkpoint_enabled policy then write_preload plan node deps_loaded deps_ok preload
           else write_plain_preload plan node preload
         val _ = write_text staged_script source_text
+        val context = if deps_usable then HolState deps_loaded else base_context
+        val files = if deps_usable then [staged_script, final_loader]
+                    else [preload, staged_script, final_loader]
       in
-        run_hol_files_to_log tc stage base_context [preload, staged_script, final_loader]
+        run_hol_files_to_log tc stage context files
           "holbuild-plain-retry.log" msg
       end
     val _ =
@@ -1264,15 +1334,16 @@ fun build_config_lines_for_node options project node =
     | HolbuildSourceIndex.Sml => policy_config_lines no_checkpoint_policy
     | HolbuildSourceIndex.Sig => policy_config_lines no_checkpoint_policy
 
-fun theory_checkpoints_for_node policy tc project base_context node input_key source_text =
+fun theory_checkpoints_for_node policy tc project base_context plan keys toolchain_key node input_key source_text =
   if not (goalfrag_enabled policy) then []
   else
     let
       val stage = stage_dir project input_key
+      val deps_key = dependency_context_key toolchain_key plan keys node
       val _ = ensure_dir stage
       val boundaries = discover_theorem_boundaries tc stage base_context (source_file node) source_text
     in
-      theorem_checkpoint_specs project node boundaries
+      theorem_checkpoint_specs project node deps_key boundaries
     end
 
 fun build_theory_node options tc project base_context plan keys toolchain_key node input_key =
@@ -1294,7 +1365,7 @@ fun build_theory_node options tc project base_context plan keys toolchain_key no
       let
         val source_text = read_text (source_file node)
         val theorem_checkpoints =
-          theory_checkpoints_for_node policy tc project base_context node input_key source_text
+          theory_checkpoints_for_node policy tc project base_context plan keys toolchain_key node input_key source_text
       in
         build_theory policy tc project base_context plan keys toolchain_key node source_text theorem_checkpoints;
         write_metadata policy project plan keys input_key toolchain_key node metadata_checkpoints;
@@ -1486,7 +1557,7 @@ fun write_heap_loader plan output path =
       map load_theory_line (heap_external_theories plan) @
       List.concat (map heap_theory_load_lines plan) @
       [save_heap_line {label = "heap", share_common_data = false,
-                       output = output}]
+                       output = output, ok_text = checkpoint_ok_v1 ()}]
   in
     write_text path (String.concatWith "\n" lines ^ "\n")
   end
