@@ -635,6 +635,9 @@ fun mldep_load_stem plan dep =
 
 fun mldep_load_stems plan mldeps = unique_strings (map (mldep_load_stem plan) mldeps)
 
+fun stable_generated_mldeps mldeps =
+  List.filter (fn dep => not (String.isSubstring "/.holbuild/stage/" dep)) mldeps
+
 fun drop_object_suffix path =
   if has_suffix ".uo" path then String.substring(path, 0, size path - 3)
   else if has_suffix ".ui" path then String.substring(path, 0, size path - 3)
@@ -686,7 +689,7 @@ fun write_local_theory_manifests plan node mldeps =
     val deps = HolbuildBuildPlan.direct_project_deps plan node
     val theory_loads = HolbuildBuildPlan.direct_external_theories plan node @
                        project_theory_load_stems deps @
-                       mldep_load_stems plan mldeps
+                       mldep_load_stems plan (stable_generated_mldeps mldeps)
     val script_loads = direct_external_loads plan node @ project_load_stems deps
   in
     write_object_manifest theory_ui [sig_path];

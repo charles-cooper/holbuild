@@ -76,6 +76,10 @@ require_grep "cv_transLib" "$project/.holbuild/obj/src/AScript.uo"
 require_grep "arithmeticTheory" "$project/.holbuild/obj/src/ATheory.uo"
 require_grep "monadsyntax" "$project/.holbuild/obj/src/ATheory.uo"
 require_grep "cv_primTheory" "$project/.holbuild/obj/src/ATheory.uo"
+if grep -q "\.holbuild/stage" "$project/.holbuild/obj/src/ATheory.uo"; then
+  echo "transient stage path leaked into generated theory load manifest" >&2
+  exit 1
+fi
 if grep -q "numLib\|cv_transLib" "$project/.holbuild/obj/src/ATheory.uo"; then
   echo "source-only Libs leaked into generated theory load manifest" >&2
   exit 1
@@ -91,6 +95,10 @@ rm -rf "$project/.holbuild"
 require_grep "ATheory restored from cache" "$tmpdir/cache.log"
 require_grep "monadsyntax" "$project/.holbuild/obj/src/ATheory.uo"
 require_grep "cv_primTheory" "$project/.holbuild/obj/src/ATheory.uo"
+if grep -q "\.holbuild/stage" "$project/.holbuild/obj/src/ATheory.uo"; then
+  echo "cache restore leaked transient stage path into generated theory load manifest" >&2
+  exit 1
+fi
 if grep -q "numLib\|cv_transLib" "$project/.holbuild/obj/src/ATheory.uo"; then
   echo "cache restore leaked source-only Libs into generated theory load manifest" >&2
   exit 1
