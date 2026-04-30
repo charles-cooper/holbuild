@@ -83,6 +83,36 @@ if grep -q $'\033\\[0K' "$plain_log"; then
   exit 1
 fi
 
+plain_build_project=$tmpdir/plain-build-project
+mkdir -p "$plain_build_project/src"
+cat > "$plain_build_project/holproject.toml" <<'TOML'
+[project]
+name = "status-redraw-plain-build"
+
+[build]
+members = ["src"]
+
+[actions.BTheory]
+cache = false
+TOML
+cat > "$plain_build_project/src/BScript.sml" <<'SML'
+open HolKernel Parse boolLib bossLib;
+val _ = new_theory "B";
+Theorem b_thm:
+  T
+Proof
+  ACCEPT_TAC TRUTH
+QED
+val _ = export_theory();
+SML
+plain_build_log=$tmpdir/plain-build.log
+(cd "$plain_build_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build BTheory) > "$plain_build_log" 2>&1
+require_grep "BTheory built" "$plain_build_log"
+if grep -q $'\033\\[0K' "$plain_build_log"; then
+  echo "status redraw escaped into non-tty build output" >&2
+  exit 1
+fi
+
 message_project=$tmpdir/message-project
 mkdir -p "$message_project/src"
 cat > "$message_project/holproject.toml" <<'TOML'

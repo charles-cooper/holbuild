@@ -193,7 +193,6 @@ fun finish_node status key label outcome =
              count_outcome status outcome;
              active := remove_active key (!active);
              if enabled then redraw status
-             else if outcome = Built then ()
              else print (label ^ " " ^ outcome_text outcome ^ "\n"))
         end)
 
