@@ -224,20 +224,21 @@ fun write_cache cache_path source_hash deps =
     ()
   end
 
+fun extract_cached_with_hash {cache_path, source_path, source_hash} =
+  case read_cache cache_path source_hash of
+      SOME deps => deps
+    | NONE =>
+        let
+          val deps = extract_uncached source_path
+          val _ = write_cache cache_path source_hash deps handle _ => ()
+        in
+          deps
+        end
+
 fun extract_cached {cache_path, source_path} =
-  let
-    val source_hash = HolbuildHash.file_sha1 source_path
-  in
-    case read_cache cache_path source_hash of
-        SOME deps => deps
-      | NONE =>
-          let
-            val deps = extract_uncached source_path
-            val _ = write_cache cache_path source_hash deps handle _ => ()
-          in
-            deps
-          end
-  end
+  extract_cached_with_hash {cache_path = cache_path,
+                            source_path = source_path,
+                            source_hash = HolbuildHash.file_sha1 source_path}
 
 fun extract path = extract_uncached path
 
