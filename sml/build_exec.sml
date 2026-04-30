@@ -1102,10 +1102,13 @@ fun bool_text true = "true"
 
 val theory_manifest_version = "1"
 
-fun policy_config_lines policy =
-  ["theory_manifest_version=" ^ theory_manifest_version,
-   "goalfrag=" ^ bool_text (goalfrag_enabled policy),
-   "tactic_timeout=" ^ timeout_text (tactic_timeout policy)]
+(* Final theory artifacts are semantic products of source bytes, resolved deps,
+   toolchain, and declared action policy. Execution strategy is deliberately not
+   part of this key: goalfrag/checkpoint/tactic-timeout affect inspectability and
+   replay/debug behavior, not the identity of the generated .uo/.ui/.dat bundle.
+   Checkpoint files carry their own validity in the filesystem and .ok metadata. *)
+fun policy_config_lines _ =
+  ["theory_manifest_version=" ^ theory_manifest_version]
 
 fun instrumented_source policy timeout_marker source_text start_offset checkpoints =
   if goalfrag_enabled policy then
@@ -1324,8 +1327,6 @@ fun metadata_core_lines checkpoint_policy project plan keys input_key toolchain_
      "source=" ^ #relative_path source] @
     dependency_context_lines plan keys toolchain_key node @
     action_policy_lines node @
-    ["goalfrag=" ^ bool_text (goalfrag_enabled checkpoint_policy),
-     "tactic_timeout=" ^ timeout_text (tactic_timeout checkpoint_policy)] @
     checkpoint_lines checkpoint_policy project node @
     theorem_boundary_lines theorem_checkpoints
   end
@@ -1344,12 +1345,19 @@ fun semantic_metadata_text text =
   lines_text (List.filter (fn line => not (String.isPrefix "output-sha1=" line))
                           (metadata_lines text))
 
-fun up_to_date checkpoint_policy project plan keys input_key toolchain_key node theorem_checkpoints =
+fun metadata_input_key_matches input_key text =
+  case metadata_value "input_key" (metadata_lines text) of
+      SOME old_key => old_key = input_key
+    | NONE => false
+
+(* Up-to-date is intentionally a cheap semantic check. The input_key already
+   commits to source hash, dependency keys, toolchain key, and declared action
+   policy, so do not rebuild full diagnostic metadata here; doing so recomputes
+   dependency-context closures for every unchanged node. *)
+fun up_to_date checkpoint_policy project _ _ input_key _ node _ =
   List.all file_exists (output_paths checkpoint_policy project node) andalso
   (case current_metadata (metadata_path project node) of
-       SOME text =>
-         semantic_metadata_text text =
-         metadata_core_text checkpoint_policy project plan keys input_key toolchain_key node theorem_checkpoints
+       SOME text => metadata_input_key_matches input_key text
      | NONE => false)
 
 fun write_metadata checkpoint_policy project plan keys input_key toolchain_key node theorem_checkpoints =
@@ -1521,27 +1529,63 @@ fun build_error_message e =
 
 fun build_parallel status options tc project base_context plan keys toolchain_key jobs =
   let
+    (* Keep scheduler state explicit and reusable: precompute reverse dependency
+       edges once, then release dependents by decrementing remaining_dep counts.
+       Do not add a serial all-up-to-date preflight in front of this path; that
+       duplicates the unchanged-prefix work before any parallel worker can run. *)
+    val node_count = length plan
+    val nodes = Vector.fromList plan
+    val key_index = HolbuildBuildPlan.build_key_index plan
+    val lookup = HolbuildBuildPlan.indexed_nodes_named (HolbuildBuildPlan.build_name_index plan)
+    val remaining_deps = Array.array (node_count, 0)
+    val dependents = Array.array (node_count, [] : int list)
+    val ready = ref ([] : int list)
     val mutex = Thread.Mutex.mutex ()
     val cv = Thread.ConditionVar.conditionVar ()
-    val pending = ref plan
     val running = ref 0
+    val completed = ref 0
     val active = ref jobs
-    val done = ref ([] : string list)
     val failure = ref (NONE : string option)
+
+    fun node_id node = HolbuildBuildPlan.indexed_key_id key_index (HolbuildBuildPlan.key node)
+
+    fun add_ready id = ready := id :: !ready
+
+    fun register_node (id, node) =
+      let val deps = HolbuildBuildPlan.direct_project_deps_with lookup plan node
+      in
+        Array.update (remaining_deps, id, length deps);
+        if null deps then add_ready id else ();
+        List.app
+          (fn dep =>
+              let val dep_id = node_id dep
+              in Array.update (dependents, dep_id, id :: Array.sub (dependents, dep_id)) end)
+          deps
+      end
+
+    fun register_nodes id =
+      if id >= node_count then ()
+      else (register_node (id, Vector.sub (nodes, id)); register_nodes (id + 1))
+
+    val _ = register_nodes 0
 
     fun signal () = Thread.ConditionVar.broadcast cv
     fun lock () = Thread.Mutex.lock mutex
     fun unlock () = Thread.Mutex.unlock mutex
 
+    fun pop_ready () =
+      case !ready of
+          [] => NONE
+        | id :: rest => (ready := rest; SOME id)
+
     fun next_work_locked () =
       case !failure of
           SOME _ => NONE
         | NONE =>
-            case find_ready plan (!done) (!pending) of
-                SOME (node, rest) =>
-                  (pending := rest; running := !running + 1; SOME node)
+            case pop_ready () of
+                SOME id => (running := !running + 1; SOME id)
               | NONE =>
-                  if null (!pending) andalso !running = 0 then NONE
+                  if !completed = node_count andalso !running = 0 then NONE
                   else (Thread.ConditionVar.wait (cv, mutex); next_work_locked ())
 
     fun with_lock f =
@@ -1550,11 +1594,19 @@ fun build_parallel status options tc project base_context plan keys toolchain_ke
 
     fun next_work () = with_lock next_work_locked
 
-    fun finish_success node =
+    fun release_dependent child_id =
+      let val remaining = Array.sub (remaining_deps, child_id) - 1
+      in
+        Array.update (remaining_deps, child_id, remaining);
+        if remaining = 0 then add_ready child_id else ()
+      end
+
+    fun finish_success id =
       with_lock
         (fn () =>
             (running := !running - 1;
-             done := HolbuildBuildPlan.key node :: !done;
+             completed := !completed + 1;
+             List.app release_dependent (Array.sub (dependents, id));
              signal ()))
 
     fun finish_failure msg =
@@ -1584,19 +1636,22 @@ fun build_parallel status options tc project base_context plan keys toolchain_ke
         fun loop () =
           case next_work () of
               NONE => worker_exit ()
-            | SOME node =>
-                ((build_one status options tc project base_context plan keys toolchain_key node;
-                  finish_success node;
-                  loop ())
-                 handle e =>
-                   let
-                     val msg = build_error_message e
-                   in
-                     HolbuildStatus.fail status (HolbuildBuildPlan.key node)
-                                           (HolbuildBuildPlan.logical_name node) msg;
-                     finish_failure msg;
-                     worker_exit ()
-                   end)
+            | SOME id =>
+                let val node = Vector.sub (nodes, id)
+                in
+                  ((build_one status options tc project base_context plan keys toolchain_key node;
+                    finish_success id;
+                    loop ())
+                   handle e =>
+                     let
+                       val msg = build_error_message e
+                     in
+                       HolbuildStatus.fail status (HolbuildBuildPlan.key node)
+                                             (HolbuildBuildPlan.logical_name node) msg;
+                       finish_failure msg;
+                       worker_exit ()
+                     end)
+                end
       in
         loop ()
       end
@@ -1630,8 +1685,6 @@ fun build (options : build_options) tc project plan toolchain_key jobs =
       val status = HolbuildStatus.create {total = length plan, jobs = jobs}
       fun run () =
         if jobs <= 1 then build_serial status options tc project base_context plan keys toolchain_key
-        else if all_nodes_up_to_date options project plan keys toolchain_key then
-          report_all_up_to_date status project keys plan
         else build_parallel status options tc project base_context plan keys toolchain_key jobs
     in
       (run (); HolbuildStatus.finish status)

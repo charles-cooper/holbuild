@@ -270,14 +270,21 @@ holbuild --jobs 4 heap main
 The build scheduler runs over the resolved DAG inside one holbuild process.
 Actions become ready only after all direct project dependencies complete. Each
 action builds in a private staging directory and installs its own outputs/metadata;
-dependents are scheduled after successful completion. Separate holbuild processes
-must not concurrently mutate the same project `.holbuild/`; build and heap commands
-take a coarse project write lock with an owner file for diagnostics. If the lock
-owner is on the same host and its recorded process no longer exists, holbuild
-removes the stale lock and retries. The default remains `-j1` because HOL/PolyML
-heaps can be memory-heavy and path-sensitive artifact installs need conservative
-discipline. Heap targets use `-j` for their declared object build phase, then
-export the heap serially from the resolved holbuild-produced base context.
+dependents are scheduled after successful completion. The parallel scheduler must
+not do a separate serial "all nodes up to date" preflight unless those results are
+reused by the build phase: large incremental builds often have hundreds of
+unchanged prefix nodes before the first dirty frontier, and duplicating those
+checks defeats `-j` before workers start. The scheduler should precompute direct
+and reverse dependency edges once, maintain ready nodes with remaining-dependency
+counts, and treat up-to-date/cache/source outcomes uniformly as completed DAG
+nodes. Separate holbuild processes must not concurrently mutate the same project
+`.holbuild/`; build and heap commands take a coarse project write lock with an
+owner file for diagnostics. If the lock owner is on the same host and its recorded
+process no longer exists, holbuild removes the stale lock and retries. The default
+job count may come from local config or CPU detection because HOL/PolyML heaps can
+be memory-heavy and path-sensitive artifact installs need conservative discipline.
+Heap targets use `-j` for their declared object build phase, then export the heap
+serially from the resolved holbuild-produced base context.
 
 ## Artifacts and local materialization
 
@@ -544,11 +551,17 @@ The CLI default is 2.5 seconds per tactic step for the root package;
 so a consumer's proof-debug timeout does not make dependency builds fail. Because
 timeouts only exist in the goalfrag runtime,
 `--skip-goalfrag --tactic-timeout ...` is rejected instead of silently ignoring
-the timeout. The effective per-node timeout is part of that node's action key
-because a proof that only succeeds with a longer/no timeout must not share a
-cache entry with a timed build. On timeout, holbuild reports the timed-out tactic
-and does not retry the script through the plain non-goalfrag fallback, since that
-would remove the only timeout guard.
+the timeout. Goalfrag, checkpoint creation, and tactic timeout are execution/debug policy,
+not final artifact semantics. They must not be included in the final theory
+action key or local metadata comparison for `.uo/.ui/.dat`: switching
+`--skip-goalfrag`, `--skip-checkpoints`, or root tactic timeout should not rebuild
+an otherwise up-to-date semantic artifact. If goalfrag execution and plain source
+execution produce different final artifacts or success/failure behavior, that is
+an instrumentation bug to fix, not a separate artifact identity. Checkpoint
+validity remains separate and is represented by checkpoint paths plus `.ok`
+metadata keyed by dependency context and source prefix. On timeout, holbuild
+reports the timed-out tactic and does not retry the script through the plain
+non-goalfrag fallback, since that would remove the only timeout guard.
 
 Other theorem-producing syntax, such as simple `Theorem name = thm` declarations,
 `store_thm` calls, `Resume`, or `Finalise`, is not checkpoint-instrumented in v1.

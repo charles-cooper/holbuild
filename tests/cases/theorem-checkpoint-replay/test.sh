@@ -74,6 +74,10 @@ second_log=$tmpdir/second.log
 (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$second_log"
 require_grep "ATheory is up to date" "$second_log"
 
+same_artifact_skip_goalfrag_log=$tmpdir/same-artifact-skip-goalfrag.log
+(cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --skip-goalfrag ATheory) > "$same_artifact_skip_goalfrag_log"
+require_grep "ATheory is up to date" "$same_artifact_skip_goalfrag_log"
+
 skip_goalfrag_project=$tmpdir/skip-goalfrag-project
 mkdir -p "$skip_goalfrag_project/src"
 cp "$project/holproject.toml" "$skip_goalfrag_project/holproject.toml"

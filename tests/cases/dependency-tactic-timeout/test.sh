@@ -61,8 +61,10 @@ build_log=$tmpdir/build.log
 (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --tactic-timeout 0.1 BTheory) > "$build_log" 2>&1
 require_file "$project/.holbuild/deps/dep/obj/src/ATheory.dat"
 require_file "$project/.holbuild/obj/src/BTheory.dat"
-require_grep "tactic_timeout=none" "$project/.holbuild/dep/dep/src/AScript.sml.key"
-require_grep "tactic_timeout=0.1" "$project/.holbuild/dep/consumer/src/BScript.sml.key"
+if grep -q "tactic_timeout=\|goalfrag=" "$project/.holbuild/dep/dep/src/AScript.sml.key" "$project/.holbuild/dep/consumer/src/BScript.sml.key"; then
+  echo "execution policy leaked into final action metadata" >&2
+  exit 1
+fi
 if grep -q "tactic timed out while building ATheory" "$build_log"; then
   echo "dependency package used root tactic timeout" >&2
   exit 1
@@ -71,8 +73,11 @@ fi
 changed_root_timeout_log=$tmpdir/changed-root-timeout.log
 (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --tactic-timeout 0.2 BTheory) > "$changed_root_timeout_log" 2>&1
 require_grep "ATheory is up to date" "$changed_root_timeout_log"
-require_grep "tactic_timeout=none" "$project/.holbuild/dep/dep/src/AScript.sml.key"
-require_grep "tactic_timeout=0.2" "$project/.holbuild/dep/consumer/src/BScript.sml.key"
+require_grep "BTheory is up to date" "$changed_root_timeout_log"
+if grep -q "tactic_timeout=\|goalfrag=" "$project/.holbuild/dep/dep/src/AScript.sml.key" "$project/.holbuild/dep/consumer/src/BScript.sml.key"; then
+  echo "changed root timeout leaked into final action metadata" >&2
+  exit 1
+fi
 
 root_timeout_project=$tmpdir/root-timeout
 mkdir -p "$root_timeout_project/src"
@@ -117,4 +122,7 @@ val _ = export_theory();
 SML
 (cd "$root_default_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$tmpdir/root-default.log" 2>&1
 require_file "$root_default_project/.holbuild/obj/src/ATheory.dat"
-require_grep "tactic_timeout=2.5" "$root_default_project/.holbuild/dep/root-timeout/src/AScript.sml.key"
+if grep -q "tactic_timeout=\|goalfrag=" "$root_default_project/.holbuild/dep/root-timeout/src/AScript.sml.key"; then
+  echo "default root execution policy leaked into final action metadata" >&2
+  exit 1
+fi
