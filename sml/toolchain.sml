@@ -20,16 +20,55 @@ fun quote s =
 
 fun command argv = String.concatWith " " (map quote argv)
 
-fun run argv = OS.Process.system (command argv)
+fun success status = OS.Process.isSuccess status
+
+fun timing_field text =
+  String.translate (fn #"\t" => " " | #"\n" => " " | c => str c) text
+
+fun timing_line {kind, argv, output, status, start, finish} =
+  let
+    val ms = Time.toMilliseconds (Time.-(finish, start))
+    val fields =
+      ["tool", "kind=" ^ timing_field kind,
+       "status=" ^ (if success status then "ok" else "fail"),
+       "ms=" ^ LargeInt.toString ms,
+       "argc=" ^ Int.toString (length argv),
+       "argv0=" ^ timing_field (case argv of [] => "" | first :: _ => first)] @
+      (case output of NONE => [] | SOME path => ["output=" ^ timing_field path])
+  in
+    String.concatWith "\t" fields ^ "\n"
+  end
+
+fun append_timing entry =
+  case OS.Process.getEnv "HOLBUILD_TIMING_LOG" of
+      NONE => ()
+    | SOME path =>
+        let val out = TextIO.openAppend path
+        in TextIO.output(out, entry); TextIO.closeOut out end
+        handle _ => ()
+
+fun timed_system kind argv output run =
+  let
+    val start = Time.now ()
+    val status = run ()
+    val finish = Time.now ()
+    val _ = append_timing (timing_line {kind = kind, argv = argv, output = output,
+                                        status = status, start = start, finish = finish})
+  in
+    status
+  end
+
+fun run argv =
+  timed_system "run" argv NONE (fn () => OS.Process.system (command argv))
 
 fun run_in_dir dir argv =
-  OS.Process.system ("cd " ^ quote dir ^ " && " ^ command argv)
+  timed_system "run_in_dir" argv NONE
+    (fn () => OS.Process.system ("cd " ^ quote dir ^ " && " ^ command argv))
 
 fun run_in_dir_to_file dir argv output =
-  OS.Process.system ("cd " ^ quote dir ^ " && " ^ command argv ^
-                     " > " ^ quote output ^ " 2>&1")
-
-fun success status = OS.Process.isSuccess status
+  timed_system "run_in_dir_to_file" argv (SOME output)
+    (fn () => OS.Process.system ("cd " ^ quote dir ^ " && " ^ command argv ^
+                                 " > " ^ quote output ^ " 2>&1"))
 
 fun ensure_dir path =
   if path = "" orelse path = "." then ()

@@ -19,7 +19,9 @@ if [[ "$HOLBUILD_TEST_JOBS" -lt 1 ]]; then
   exit 2
 fi
 
-log_dir=$(mktemp -d "${TMPDIR:-/tmp}/holbuild-test-logs.XXXXXX")
+test_tmp_root=${TMPDIR:-"$ROOT/scratch/tmp"}
+mkdir -p "$test_tmp_root"
+log_dir=$(mktemp -d "$test_tmp_root/holbuild-test-logs.XXXXXX")
 cleanup() { rm -rf "$log_dir"; }
 trap cleanup EXIT
 
@@ -27,32 +29,112 @@ declare -a running_pids=()
 declare -a running_names=()
 declare -a completed_names=()
 declare -a completed_durations=()
+declare -a completed_summaries=()
 declare -a failed_names=()
 
 now_ms() { date +%s%3N; }
 
+sum_field_ms() {
+  local field=$1
+  local file=$2
+  awk -v field="$field" '
+    { for (i = 1; i <= NF; i++) if ($i ~ "^" field "=") { sub("^[^=]*=", "", $i); sum += $i } }
+    END { printf "%d", sum + 0 }
+  ' "$file" 2>/dev/null || printf '0'
+}
+
+max_field_ms() {
+  local field=$1
+  local file=$2
+  awk -v field="$field" '
+    { for (i = 1; i <= NF; i++) if ($i ~ "^" field "=") { sub("^[^=]*=", "", $i); if (($i + 0) > max) max = $i + 0 } }
+    END { printf "%d", max + 0 }
+  ' "$file" 2>/dev/null || printf '0'
+}
+
+count_lines() {
+  local pattern=$1
+  local file=$2
+  grep -c -- "$pattern" "$file" 2>/dev/null || printf '0'
+}
+
 suite_start_ms=$(now_ms)
 echo "running holbuild tests with HOLBUILD_TEST_JOBS=$HOLBUILD_TEST_JOBS"
+
+write_holbuild_wrapper() {
+  local wrapper=$1
+  cat > "$wrapper" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+start_ms=$(date +%s%3N)
+status=0
+"$REAL_HOLBUILD_BIN" "$@" || status=$?
+end_ms=$(date +%s%3N)
+printf 'holbuild\tstatus=%s\tms=%s\targc=%s\n' "$status" "$((end_ms - start_ms))" "$#" >> "$HOLBUILD_CASE_TIMING_LOG"
+exit "$status"
+SH
+  chmod +x "$wrapper"
+}
+
+write_case_timing_summary() {
+  local name=$1
+  local duration_ms=$2
+  local case_timing=$3
+  local tool_timing=$4
+  local summary_file=$5
+  local holbuild_count holbuild_ms child_hol_count child_hol_ms max_child_hol_ms
+
+  holbuild_count=$(count_lines '^holbuild' "$case_timing")
+  holbuild_ms=$(sum_field_ms ms "$case_timing")
+  child_hol_count=$(count_lines 'kind=run_in_dir_to_file' "$tool_timing")
+  child_hol_ms=$(awk '
+    /kind=run_in_dir_to_file/ {
+      for (i = 1; i <= NF; i++) if ($i ~ /^ms=/) { sub("ms=", "", $i); sum += $i }
+    }
+    END { printf "%d", sum + 0 }
+  ' "$tool_timing" 2>/dev/null || printf '0')
+  max_child_hol_ms=$(awk '
+    /kind=run_in_dir_to_file/ {
+      for (i = 1; i <= NF; i++) if ($i ~ /^ms=/) { sub("ms=", "", $i); if (($i + 0) > max) max = $i + 0 }
+    }
+    END { printf "%d", max + 0 }
+  ' "$tool_timing" 2>/dev/null || printf '0')
+
+  printf 'TIMING\tname=%s\twall_ms=%s\tholbuild_n=%s\tholbuild_ms=%s\tchild_hol_n=%s\tchild_hol_ms=%s\tmax_child_hol_ms=%s\n' \
+    "$name" "$duration_ms" "$holbuild_count" "$holbuild_ms" "$child_hol_count" "$child_hol_ms" "$max_child_hol_ms" > "$summary_file"
+}
 
 run_case() {
   local test_script=$1
   local name=$2
   local log=$log_dir/$name.log
   local duration_file=$log_dir/$name.duration
+  local summary_file=$log_dir/$name.summary
+  local case_timing=$log_dir/$name.holbuild-timing
+  local tool_timing=$log_dir/$name.tool-timing
+  local wrapper=$log_dir/$name.holbuild-wrapper
   local start_ms end_ms duration_ms
 
+  write_holbuild_wrapper "$wrapper"
   start_ms=$(now_ms)
   echo "== $name ==" > "$log"
-  if "$test_script" "$HOLBUILD_BIN" "$HOLDIR" >> "$log" 2>&1; then
+  if REAL_HOLBUILD_BIN="$HOLBUILD_BIN" \
+     HOLBUILD_CASE_TIMING_LOG="$case_timing" \
+     HOLBUILD_TIMING_LOG="$tool_timing" \
+     "$test_script" "$wrapper" "$HOLDIR" >> "$log" 2>&1; then
     end_ms=$(now_ms)
     duration_ms=$((end_ms - start_ms))
     echo "$duration_ms" > "$duration_file"
+    write_case_timing_summary "$name" "$duration_ms" "$case_timing" "$tool_timing" "$summary_file"
+    cat "$summary_file" >> "$log"
     echo "PASS $name (${duration_ms} ms)" >> "$log"
   else
     local status=$?
     end_ms=$(now_ms)
     duration_ms=$((end_ms - start_ms))
     echo "$duration_ms" > "$duration_file"
+    write_case_timing_summary "$name" "$duration_ms" "$case_timing" "$tool_timing" "$summary_file"
+    cat "$summary_file" >> "$log"
     echo "FAIL $name (exit $status, ${duration_ms} ms)" >> "$log"
     return "$status"
   fi
@@ -96,10 +178,12 @@ wait_one() {
   local index
   index=$(running_index_for_pid "$completed_pid")
   local name=${running_names[$index]}
-  local duration
+  local duration summary
   duration=$(cat "$log_dir/$name.duration" 2>/dev/null || echo 0)
+  summary=$(cat "$log_dir/$name.summary" 2>/dev/null || true)
   completed_names+=("$name")
   completed_durations+=("$duration")
+  completed_summaries+=("$summary")
   if [[ $status -ne 0 ]]; then
     failed_names+=("$name")
   fi
@@ -127,9 +211,23 @@ print_timing_summary() {
   suite_end_ms=$(now_ms)
   total_ms=$((suite_end_ms - suite_start_ms))
   echo "holbuild test timing summary (total ${total_ms} ms):"
-  for i in "${!completed_names[@]}"; do
-    printf '%8d ms %s\n' "${completed_durations[$i]}" "${completed_names[$i]}"
-  done | sort -nr | head -10
+  printf '%8s %4s %9s %4s %9s %9s %s\n' \
+    wall_ms hb_n hb_ms hol_n hol_ms max_hol test
+  for i in "${!completed_summaries[@]}"; do
+    printf '%s\n' "${completed_summaries[$i]}"
+  done | awk '
+    function value(key,    i, prefix) {
+      prefix = key "="
+      for (i = 1; i <= NF; i++) if (index($i, prefix) == 1) return substr($i, length(prefix) + 1)
+      return 0
+    }
+    /^TIMING/ {
+      printf "%8d %4d %9d %4d %9d %9d %s\n", \
+        value("wall_ms"), value("holbuild_n"), value("holbuild_ms"), \
+        value("child_hol_n"), value("child_hol_ms"), value("max_child_hol_ms"), \
+        value("name")
+    }
+  ' | sort -nr
 }
 
 print_timing_summary
