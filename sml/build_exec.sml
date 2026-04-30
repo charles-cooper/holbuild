@@ -90,8 +90,12 @@ fun replace_all needle replacement text =
     if needle = "" then text else loop 0 []
   end
 
-fun copy_rewriting_path {src, dst, old_path, new_path} =
-  write_text dst (replace_all old_path new_path (read_text src))
+fun rewrite_all replacements text =
+  List.foldl (fn ((old_text, new_text), current) => replace_all old_text new_text current)
+             text replacements
+
+fun copy_rewriting_path {src, dst, replacements} =
+  write_text dst (rewrite_all replacements (read_text src))
 
 fun source_file node = #source_path (HolbuildBuildPlan.source_of node)
 fun source_artifacts node = #artifacts (HolbuildBuildPlan.source_of node)
@@ -282,6 +286,66 @@ fun stage_dir (project : HolbuildProject.t) input_key =
 
 fun staged_theory_file stage node ext = Path.concat(Path.concat(stage, ".hol/objs"), logical_name node ^ ext)
 fun staged_dat_reference stage node = Path.concat(stage, logical_name node ^ ".dat")
+
+fun canonical_path path = Path.mkCanonical path handle Path.InvalidArc => path
+
+fun drop_trailing_newline text =
+  if size text > 0 andalso String.sub(text, size text - 1) = #"\n" then
+    String.substring(text, 0, size text - 1)
+  else text
+
+fun has_space text =
+  let
+    fun loop i = i < size text andalso (Char.isSpace (String.sub(text, i)) orelse loop (i + 1))
+  in
+    loop 0
+  end
+
+fun read_holpath_name dir =
+  let
+    val path = Path.concat(dir, ".holpath")
+    val text = read_text path
+    val trimmed = drop_trailing_newline text
+  in
+    if trimmed = "" orelse has_space trimmed then NONE else SOME trimmed
+  end
+  handle _ => NONE
+
+fun path_under_dir path dir =
+  path <> dir andalso String.isPrefix (dir ^ "/") path
+
+fun holpath_reference path dir name =
+  if path_under_dir path dir then
+    SOME ("$(" ^ name ^ ")/" ^ String.extract(path, size dir + 1, NONE))
+  else NONE
+
+fun holpath_stage_references path =
+  let
+    val canonical = canonical_path path
+    fun loop dir refs =
+      let
+        val dir' = canonical_path dir
+        val refs' =
+          case read_holpath_name dir' of
+              SOME name =>
+                (case holpath_reference canonical dir' name of
+                     SOME path_ref => path_ref :: refs
+                   | NONE => refs)
+            | NONE => refs
+        val parent = Path.dir dir'
+      in
+        if parent = dir' then refs' else loop parent refs'
+      end
+  in
+    loop (Path.dir canonical) []
+  end
+
+fun stage_dat_references stage node =
+  let val path = staged_dat_reference stage node
+  in unique_strings (path :: holpath_stage_references path) end
+
+fun stage_dat_replacements stage node final_dat =
+  map (fn path_ref => (path_ref, final_dat)) (stage_dat_references stage node)
 
 fun checkpoint_base (project : HolbuildProject.t) node =
   Path.concat(Path.concat(Path.concat(#root project, ".holbuild/checkpoints"),
@@ -591,7 +655,7 @@ fun copy_blob root hash dst =
     else raise Error ("cache blob missing or corrupt: " ^ hash)
   end
 
-fun publish_theory_cache input_key staged_dat_ref staged_sig staged_sml staged_dat mldeps =
+fun publish_theory_cache input_key dat_replacements staged_sig staged_sml staged_dat mldeps =
   let
     val root = cache_root ()
     val _ = HolbuildCache.ensure_layout root
@@ -599,7 +663,7 @@ fun publish_theory_cache input_key staged_dat_ref staged_sig staged_sml staged_d
     fun cleanup () = FS.remove template handle OS.SysErr _ => ()
     fun publish () =
       let
-        val _ = write_text template (replace_all staged_dat_ref cache_sml_token (read_text staged_sml))
+        val _ = write_text template (rewrite_all dat_replacements (read_text staged_sml))
         val sig_hash = cache_blob root staged_sig
         val sml_hash = cache_blob root template
         val dat_hash = cache_blob root staged_dat
@@ -645,12 +709,15 @@ fun drop_object_suffix path =
 
 fun same_path a b = Path.mkCanonical a = Path.mkCanonical b handle Path.InvalidArc => a = b
 
-fun generated_holdep_stem tc dep =
+fun generated_holdep_stem plan tc dep =
   let
     val stem = drop_object_suffix dep
     val sigobj = Path.concat(#holdir tc, "sigobj")
+    fun same_load_stem node = same_path (load_stem node) stem
   in
-    if same_path (Path.dir stem) sigobj then Path.file stem else stem
+    case List.find same_load_stem plan of
+        SOME node => HolbuildBuildPlan.logical_name node
+      | NONE => if same_path (Path.dir stem) sigobj then Path.file stem else stem
   end
 
 fun holfs_unmapped_theory_artifact path =
@@ -663,12 +730,16 @@ fun holfs_unmapped_theory_artifact path =
     else path
   end
 
-fun generated_holdep_mldeps tc path =
+fun generated_holdep_include_dirs tc plan =
+  unique_strings (Path.concat(#holdir tc, "sigobj") :: map (Path.dir o load_stem) plan)
+
+fun generated_holdep_mldeps plan tc path =
   let
-    val sigobj = Path.concat(#holdir tc, "sigobj")
-    val deps = HolbuildDependencies.resolved_holdep_deps [sigobj] (holfs_unmapped_theory_artifact path)
+    val deps = HolbuildDependencies.resolved_holdep_deps
+                 (generated_holdep_include_dirs tc plan)
+                 (holfs_unmapped_theory_artifact path)
   in
-    unique_strings (map (generated_holdep_stem tc) deps)
+    unique_strings (map (generated_holdep_stem plan tc) deps)
   end
 
 fun read_mldeps_report path =
@@ -895,7 +966,7 @@ fun timeout_text NONE = "none"
 fun bool_text true = "true"
   | bool_text false = "false"
 
-val theory_manifest_version = "2"
+val theory_manifest_version = "1"
 
 fun build_config_lines ({goalfrag, tactic_timeout, ...} : build_options) =
   ["theory_manifest_version=" ^ theory_manifest_version,
@@ -1000,15 +1071,16 @@ fun build_theory policy tc project base_context plan keys toolchain_key node sou
     val _ = copy_binary staged_dat (hfs_remapped_path data_path)
     val _ = copy_binary staged_sig sig_path
     val _ = copy_binary staged_sig (hfs_remapped_path sig_path)
+    val dat_replacements = stage_dat_replacements stage node data_path
+    val cache_replacements = stage_dat_replacements stage node cache_sml_token
     val _ = copy_rewriting_path {src = staged_sml, dst = sml_path,
-                                 old_path = staged_dat_reference stage node,
-                                 new_path = data_path}
+                                 replacements = dat_replacements}
     val _ = copy_binary sml_path (hfs_remapped_path sml_path)
     val mldeps = unique_strings (read_mldeps_report mldeps_report @
-                                  generated_holdep_mldeps tc staged_sml)
+                                  generated_holdep_mldeps plan tc staged_sml)
     val _ =
       if cache_enabled node then
-        publish_theory_cache input_key (staged_dat_reference stage node) staged_sig staged_sml staged_dat mldeps
+        publish_theory_cache input_key cache_replacements staged_sig staged_sml staged_dat mldeps
       else ()
   in
     write_local_theory_manifests plan node mldeps;

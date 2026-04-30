@@ -14,6 +14,7 @@ export HOLBUILD_CACHE="$tmpdir/cache"
 
 project=$tmpdir/project
 mkdir -p "$project/src"
+printf 'HEADERDEPS\n' > "$project/.holpath"
 cat > "$project/holproject.toml" <<'TOML'
 [project]
 name = "headerdeps"
@@ -80,6 +81,10 @@ if grep -q "\.holbuild/stage" "$project/.holbuild/obj/src/ATheory.uo"; then
   echo "transient stage path leaked into generated theory load manifest" >&2
   exit 1
 fi
+if grep -q "\.holbuild/stage" "$project/.holbuild/gen/src/ATheory.sml"; then
+  echo "transient stage dat path leaked into generated theory source" >&2
+  exit 1
+fi
 if grep -q "numLib\|cv_transLib" "$project/.holbuild/obj/src/ATheory.uo"; then
   echo "source-only Libs leaked into generated theory load manifest" >&2
   exit 1
@@ -97,6 +102,10 @@ require_grep "monadsyntax" "$project/.holbuild/obj/src/ATheory.uo"
 require_grep "cv_primTheory" "$project/.holbuild/obj/src/ATheory.uo"
 if grep -q "\.holbuild/stage" "$project/.holbuild/obj/src/ATheory.uo"; then
   echo "cache restore leaked transient stage path into generated theory load manifest" >&2
+  exit 1
+fi
+if grep -q "\.holbuild/stage" "$project/.holbuild/gen/src/ATheory.sml"; then
+  echo "cache restore leaked transient stage dat path into generated theory source" >&2
   exit 1
 fi
 if grep -q "numLib\|cv_transLib" "$project/.holbuild/obj/src/ATheory.uo"; then
