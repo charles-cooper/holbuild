@@ -9,6 +9,8 @@ type t = {
   enabled : bool,
   total : int,
   jobs : int,
+  width : int option ref,
+  width_checked_at : Time.time ref,
   finished : int ref,
   built : int ref,
   up_to_date : int ref,
@@ -48,10 +50,44 @@ fun positive_int s =
       SOME n => if n > 0 then SOME n else NONE
     | NONE => NONE
 
+fun shell_output command =
+  let
+    val proc = Unix.execute ("/bin/sh", ["-c", command])
+    val output = TextIO.inputAll (Unix.textInstreamOf proc)
+  in
+    if OS.Process.isSuccess (Unix.reap proc) then SOME output else NONE
+  end
+  handle OS.SysErr _ => NONE
+
+fun first_positive_int text =
+  let
+    fun first words =
+      case words of
+          [] => NONE
+        | word :: rest =>
+            (case positive_int word of
+                 SOME n => SOME n
+               | NONE => first rest)
+  in
+    first (String.tokens Char.isSpace text)
+  end
+
+fun stty_width () =
+  Option.mapPartial first_positive_int
+    (shell_output "stty size < /dev/tty 2>/dev/null | awk '{print $2}'")
+
+fun tput_width () =
+  Option.mapPartial first_positive_int (shell_output "tput cols 2>/dev/null")
+
+fun env_width () = Option.mapPartial positive_int (OS.Process.getEnv "COLUMNS")
+
 fun terminal_width () =
-  case OS.Process.getEnv "COLUMNS" of
-      SOME s => Option.getOpt (positive_int s, 80)
-    | NONE => 80
+  if terminal_primitives.strmIsTTY TextIO.stdOut then
+    case stty_width () of
+        SOME width => SOME width
+      | NONE => (case tput_width () of SOME width => SOME width | NONE => env_width ())
+  else
+    env_width ()
 
 fun outcome_text Built = "built"
   | outcome_text UpToDate = "is up to date"
@@ -84,14 +120,30 @@ fun line ({total, jobs, finished, built, up_to_date, restored, active, ...} : t)
   end
 
 fun fit width s =
-  if size s <= width then s
-  else if width <= 1 then ""
-  else String.substring (s, 0, width - 1)
+  case width of
+      NONE => s
+    | SOME columns =>
+        if size s <= columns then s
+        else if columns <= 3 then ""
+        else String.substring (s, 0, columns - 3) ^ "..."
 
-fun redraw (status as {enabled, ended, ...} : t) =
+val width_refresh_seconds = 0.5
+
+fun refresh_width_if_stale ({width, width_checked_at, ...} : t) =
+  let
+    val now = Time.now ()
+    val age = Time.toReal (Time.-(now, !width_checked_at))
+  in
+    if age >= width_refresh_seconds then
+      (width := terminal_width (); width_checked_at := now)
+    else ()
+  end
+
+fun redraw (status as {enabled, ended, width, ...} : t) =
   if not enabled orelse !ended then ()
   else
-    (TextIO.output (TextIO.stdOut, "\r" ^ fit (terminal_width ()) (line status) ^ clear_to_eol);
+    (refresh_width_if_stale status;
+     TextIO.output (TextIO.stdOut, "\r" ^ fit (!width) (line status) ^ clear_to_eol);
      TextIO.flushOut TextIO.stdOut)
 
 fun with_lock ({mutex, ...} : t) f =
@@ -104,6 +156,8 @@ fun create {total, jobs} =
       {enabled = enabled_by_default (),
        total = total,
        jobs = jobs,
+       width = ref (terminal_width ()),
+       width_checked_at = ref (Time.now ()),
        finished = ref 0,
        built = ref 0,
        up_to_date = ref 0,

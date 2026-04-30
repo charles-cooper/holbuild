@@ -51,6 +51,30 @@ cli_log=$tmpdir/cli.log
 tr '\r' '\n' < "$cli_log" > "$tmpdir/cli-lines.log"
 require_grep "holbuild done=0/1 running=1/1" "$tmpdir/cli-lines.log"
 
+long_project=$tmpdir/long-project
+long_name=LongStatusTargetNameThatShouldNotBeCutOffAtTheOldEightyColumnFallbackTheory
+long_script=${long_name%Theory}Script.sml
+mkdir -p "$long_project/src"
+cp "$project/holproject.toml" "$long_project/holproject.toml"
+cat > "$long_project/src/$long_script" <<SML
+open HolKernel Parse boolLib bossLib;
+val _ = new_theory "${long_name%Theory}";
+Theorem long_status_thm:
+  T
+Proof
+  ACCEPT_TAC TRUTH
+QED
+val _ = export_theory();
+SML
+long_log=$tmpdir/long.log
+(cd "$long_project" && env -u COLUMNS HOLBUILD_STATUS=1 TERM=xterm "$HOLBUILD_BIN" --holdir "$HOLDIR" build "$long_name") > "$long_log" 2>&1
+tr '\r' '\n' < "$long_log" > "$tmpdir/long-lines.log"
+require_grep "$long_name" "$tmpdir/long-lines.log"
+if grep -q "LongStatusTargetNameThatShouldNotBeCutOffAtTheOldEightyColumnFallbackThe\.\.\." "$tmpdir/long-lines.log"; then
+  echo "status redraw used old 80-column fallback" >&2
+  exit 1
+fi
+
 plain_log=$tmpdir/plain.log
 (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$plain_log" 2>&1
 require_grep "ATheory is up to date" "$plain_log"
