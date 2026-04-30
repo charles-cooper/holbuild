@@ -684,8 +684,15 @@ fun blob_from_manifest role blobs =
       SOME (_, hash) => hash
     | NONE => raise Error ("cache manifest missing blob role: " ^ role)
 
+fun transient_stage_mldep dep = String.isSubstring "/.holbuild/stage/" dep
+
 fun valid_mldep_name dep =
   dep <> "" andalso all_chars (fn c => not (Char.isSpace c)) dep
+
+fun reject_transient_cache_mldeps mldeps =
+  case List.find transient_stage_mldep mldeps of
+      SOME dep => raise Error ("cache manifest contains transient stage mldep: " ^ dep)
+    | NONE => ()
 
 fun add_mldep dep deps =
   if not (valid_mldep_name dep) then
@@ -726,10 +733,14 @@ fun cache_manifest_blobs_from_lines input_key lines =
     val _ = if saw_kind then () else raise Error "cache manifest missing kind"
     val _ = if saw_mldeps then () else raise Error "cache manifest missing mldeps marker"
   in
-    {sig_hash = blob_from_manifest "sig" blobs,
-     sml_hash = blob_from_manifest "sml-template" blobs,
-     dat_hash = blob_from_manifest "dat" blobs,
-     mldeps = rev mldeps}
+    let val stable_mldeps = rev mldeps
+        val _ = reject_transient_cache_mldeps stable_mldeps
+    in
+      {sig_hash = blob_from_manifest "sig" blobs,
+       sml_hash = blob_from_manifest "sml-template" blobs,
+       dat_hash = blob_from_manifest "dat" blobs,
+       mldeps = stable_mldeps}
+    end
   end
 
 fun cache_manifest_blobs root input_key =
@@ -757,12 +768,38 @@ fun copy_blob root hash dst =
     else raise Error ("cache blob missing or corrupt: " ^ hash)
   end
 
+fun file_strings path =
+  let
+    val tmp = FS.tmpName ()
+    fun cleanup () = remove_file tmp
+    fun run () =
+      let val status = OS.Process.system ("strings -a " ^ HolbuildToolchain.quote path ^
+                                          " > " ^ HolbuildToolchain.quote tmp)
+      in
+        if OS.Process.isSuccess status then read_text tmp else ""
+      end
+  in
+    (run () before cleanup ()) handle e => (cleanup (); "")
+  end
+
+fun dat_mentions_stage_key input_key staged_dat =
+  let val text = file_strings staged_dat
+  in
+    String.isSubstring input_key text andalso
+    String.isSubstring ".holbuild" text andalso
+    String.isSubstring "stage" text
+  end
+
 fun publish_theory_cache input_key dat_replacements staged_sig staged_sml staged_dat mldeps =
   let
     val root = cache_root ()
     val _ = HolbuildCache.ensure_layout root
     val template = FS.tmpName ()
+    val cache_mldeps = List.filter (not o transient_stage_mldep) mldeps
+    val cacheable = not (List.exists transient_stage_mldep mldeps andalso dat_mentions_stage_key input_key staged_dat)
+    val manifest_path = HolbuildCache.action_manifest root input_key
     fun cleanup () = FS.remove template handle OS.SysErr _ => ()
+    fun drop_noncacheable () = remove_file manifest_path
     fun publish () =
       let
         val _ = write_text template (rewrite_all dat_replacements (read_text staged_sml))
@@ -771,8 +808,7 @@ fun publish_theory_cache input_key dat_replacements staged_sig staged_sml staged
         val dat_hash = cache_blob root staged_dat
         val manifest = cache_manifest_text {input_key = input_key, sig_hash = sig_hash,
                                             sml_hash = sml_hash, dat_hash = dat_hash,
-                                            mldeps = mldeps}
-        val manifest_path = HolbuildCache.action_manifest root input_key
+                                            mldeps = cache_mldeps}
         val existing = current_metadata manifest_path
       in
         case existing of
@@ -786,7 +822,10 @@ fun publish_theory_cache input_key dat_replacements staged_sig staged_sml staged
       end
     fun skip_locked_publish () = ()
   in
-    (HolbuildCache.with_action_publish_lock root input_key publish skip_locked_publish;
+    ((if cacheable then
+        HolbuildCache.with_action_publish_lock root input_key publish skip_locked_publish
+      else
+        HolbuildCache.with_action_publish_lock root input_key drop_noncacheable skip_locked_publish);
      cleanup ())
     handle e => (cleanup (); warn ("could not publish cache entry: " ^ General.exnMessage e))
   end
@@ -802,7 +841,7 @@ fun mldep_load_stem plan dep =
 fun mldep_load_stems plan mldeps = unique_strings (map (mldep_load_stem plan) mldeps)
 
 fun stable_generated_mldeps mldeps =
-  List.filter (fn dep => not (String.isSubstring "/.holbuild/stage/" dep)) mldeps
+  List.filter (not o transient_stage_mldep) mldeps
 
 fun drop_object_suffix path =
   if has_suffix ".uo" path then String.substring(path, 0, size path - 3)
@@ -1082,7 +1121,7 @@ fun best_replay_candidate project node checkpoints =
       [] => NONE
     | first :: rest => SOME (List.foldl later_candidate first rest)
 
-type build_options = {skip_checkpoints : bool, goalfrag : bool, tactic_timeout : real option}
+type build_options = {use_cache : bool, skip_checkpoints : bool, goalfrag : bool, tactic_timeout : real option}
 
 datatype checkpoint_policy =
   CheckpointPolicy of {checkpoint : bool, goalfrag : bool, tactic_timeout : real option}
@@ -1123,6 +1162,10 @@ fun replay_candidate project node checkpoints =
   if always_reexecute node then NONE
   else best_replay_candidate project node checkpoints
 
+fun checkpoint_resume_message node label =
+  HolbuildStatus.message TextIO.stdOut
+    (String.concat ["resuming ", logical_name node, " from checkpoint ", label, "\n"])
+
 fun write_theory_script policy project base_context plan keys input_key toolchain_key node source_text checkpoints staged_script preload timeout_marker =
   if not (checkpoint_enabled policy) then
     (write_plain_preload plan node preload;
@@ -1135,6 +1178,7 @@ fun write_theory_script policy project base_context plan keys input_key toolchai
       val deps_ok = deps_checkpoint_ok_text deps_key
       fun run_from_deps_checkpoint () =
         (write_text staged_script (instrumented_source policy (SOME timeout_marker) source_text 0 checkpoints);
+         checkpoint_resume_message node "deps_loaded";
          {context = HolState deps_loaded, files = [staged_script]})
       fun run_from_fresh_preload () =
         (write_preload plan node deps_loaded deps_ok preload;
@@ -1145,8 +1189,7 @@ fun write_theory_script policy project base_context plan keys input_key toolchai
           SOME {boundary, path, safe_name} =>
             let
               val _ = write_text staged_script (instrumented_source policy (SOME timeout_marker) source_text boundary checkpoints)
-              val _ = HolbuildStatus.message TextIO.stdOut
-                        (logical_name node ^ " replaying from checkpoint " ^ safe_name ^ "\n")
+              val _ = checkpoint_resume_message node safe_name
             in
               {context = HolState path, files = [staged_script]}
             end
@@ -1155,7 +1198,7 @@ fun write_theory_script policy project base_context plan keys input_key toolchai
             else run_from_fresh_preload ()
     end
 
-fun build_theory policy tc project base_context plan keys toolchain_key node source_text theorem_checkpoints =
+fun build_theory cache_allowed policy tc project base_context plan keys toolchain_key node source_text theorem_checkpoints =
   let
     val input_key = HolbuildBuildPlan.input_key_for keys node
     val stage = stage_dir project input_key
@@ -1232,7 +1275,7 @@ fun build_theory policy tc project base_context plan keys toolchain_key node sou
     val mldeps = unique_strings (read_mldeps_report mldeps_report @
                                   generated_holdep_mldeps plan tc staged_sml)
     val _ =
-      if cache_enabled node then
+      if cache_allowed then
         publish_theory_cache input_key cache_replacements staged_sig staged_sml staged_dat mldeps
       else ()
   in
@@ -1373,7 +1416,7 @@ fun root_package_node project node =
 fun effective_tactic_timeout goalfrag root_package tactic_timeout =
   if goalfrag andalso root_package then tactic_timeout else NONE
 
-fun checkpoint_policy_for_node ({skip_checkpoints, goalfrag, tactic_timeout} : build_options) project node =
+fun checkpoint_policy_for_node ({skip_checkpoints, goalfrag, tactic_timeout, ...} : build_options) project node =
   CheckpointPolicy {checkpoint = not skip_checkpoints,
                     goalfrag = goalfrag,
                     tactic_timeout = effective_tactic_timeout goalfrag (root_package_node project node) tactic_timeout}
@@ -1394,17 +1437,18 @@ fun theory_checkpoints_for_node policy project plan keys toolchain_key node sour
       theorem_checkpoint_specs project node deps_key boundaries
     end
 
-fun build_theory_node options tc project base_context plan keys toolchain_key node input_key =
+fun build_theory_node (options : build_options) tc project base_context plan keys toolchain_key node input_key =
   let
     val policy = checkpoint_policy_for_node options project node
     val metadata_checkpoints = []
     val stage = stage_dir project input_key
+    val cache_allowed = #use_cache options andalso cache_enabled node
   in
     if not (always_reexecute node) andalso
        up_to_date policy project plan keys input_key toolchain_key node metadata_checkpoints then
       (remove_tree_if_exists stage;
        HolbuildStatus.UpToDate)
-    else if cache_enabled node andalso
+    else if cache_allowed andalso
             materialize_theory_cache tc project plan input_key node then
       (remove_tree stage;
        write_metadata policy project plan keys input_key toolchain_key node metadata_checkpoints;
@@ -1416,7 +1460,7 @@ fun build_theory_node options tc project base_context plan keys toolchain_key no
         val theorem_checkpoints =
           theory_checkpoints_for_node policy project plan keys toolchain_key node source_text
       in
-        build_theory policy tc project base_context plan keys toolchain_key node source_text theorem_checkpoints;
+        build_theory cache_allowed policy tc project base_context plan keys toolchain_key node source_text theorem_checkpoints;
         write_metadata policy project plan keys input_key toolchain_key node metadata_checkpoints;
         remove_checkpoint_family project node;
         HolbuildStatus.Built

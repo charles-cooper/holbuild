@@ -149,7 +149,7 @@ write_good_source
 force_rebuild
 fixed_log=$tmpdir/fixed.log
 (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$fixed_log" 2>&1
-require_grep "ATheory replaying from checkpoint first" "$fixed_log"
+require_grep "resuming ATheory from checkpoint first" "$fixed_log"
 if grep -q "parent for this saved state\|goalfrag/checkpoint run failed" "$fixed_log"; then
   echo "suffix recovery hit checkpoint parent mismatch/instrumentation failure" >&2
   exit 1
@@ -164,7 +164,8 @@ write_good_source
 force_rebuild
 missing_ok_log=$tmpdir/missing-ok.log
 (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$missing_ok_log" 2>&1
-if grep -q "replaying from checkpoint" "$missing_ok_log"; then
+require_grep "resuming ATheory from checkpoint deps_loaded" "$missing_ok_log"
+if grep -q "resuming ATheory from checkpoint first" "$missing_ok_log"; then
   echo "missing checkpoint .ok was treated as replayable" >&2
   exit 1
 fi
@@ -180,7 +181,7 @@ if (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$corru
   echo "corrupt checkpoint replay should fail the build, not retry plain source" >&2
   exit 1
 fi
-require_grep "ATheory replaying from checkpoint first" "$corrupt_log"
+require_grep "resuming ATheory from checkpoint first" "$corrupt_log"
 require_grep "ATheory goalfrag/checkpoint run failed" "$corrupt_log"
 require_grep "plain-source fallback disabled" "$corrupt_log"
 if grep -q -- "--- child log tail ---" "$corrupt_log"; then
@@ -199,7 +200,7 @@ write_changed_prefix_source
 force_rebuild
 prefix_log=$tmpdir/prefix-change.log
 (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$prefix_log" 2>&1
-if grep -q "replaying from checkpoint" "$prefix_log"; then
+if grep -q "resuming ATheory from checkpoint first" "$prefix_log"; then
   echo "prefix-changing edit reused stale theorem checkpoint" >&2
   exit 1
 fi

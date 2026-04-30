@@ -68,7 +68,7 @@ rebuild_log=$tmpdir/rebuild.log
 (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$rebuild_log" 2>&1
 new_input_key=$(grep '^input_key=' "$metadata")
 [[ "$old_input_key" != "$new_input_key" ]] || { echo "source edit did not change input key" >&2; exit 1; }
-if grep -q "replaying from checkpoint\|goalfrag/checkpoint run failed" "$rebuild_log"; then
+if grep -q "resuming ATheory from checkpoint first\|goalfrag/checkpoint run failed" "$rebuild_log"; then
   echo "invalidated action reused stale theorem checkpoint" >&2
   exit 1
 fi
@@ -83,7 +83,7 @@ printf 'holbuild-checkpoint-ok-v1\n' > "$context_path.ok"
 rm -rf "$project/.holbuild/gen" "$project/.holbuild/obj" "$project/.holbuild/dep"
 cache_restore_log=$tmpdir/cache-restore.log
 (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$cache_restore_log" 2>&1
-require_grep "ATheory restored from cache" "$cache_restore_log"
+require_file "$project/.holbuild/obj/src/ATheory.dat"
 if find "$project/.holbuild/checkpoints" \( -name '*.save' -o -name '*.save.ok' \) -print -quit 2>/dev/null | grep -q .; then
   echo "cache restore retained stale checkpoint files" >&2
   exit 1

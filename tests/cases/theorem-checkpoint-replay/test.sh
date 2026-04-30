@@ -46,6 +46,16 @@ Proof[exclude_simps = bool_case_thm]
   ACCEPT_TAC TRUTH
 QED
 
+Theorem reverse_cases:
+  !b. b = T \/ b = F
+Proof
+  gen_tac
+  \\ reverse (Cases_on `b`)
+  >- (DISJ2_TAC \\ REFL_TAC)
+  \\ DISJ1_TAC
+  \\ REFL_TAC
+QED
+
 val _ = export_theory();
 SML
 

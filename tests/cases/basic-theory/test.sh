@@ -80,6 +80,49 @@ if find "$project/.holbuild/checkpoints" \( -name '*.save' -o -name '*.save.ok' 
   exit 1
 fi
 
+input_key=$(grep '^input_key=' "$project/.holbuild/dep/basic/src/AScript.sml.key" | cut -d= -f2)
+cache_manifest="$HOLBUILD_CACHE/actions/$input_key/manifest"
+require_file "$cache_manifest"
+printf 'mldep /stale/.holbuild/stage/%s/ATheory\n' "$input_key" >> "$cache_manifest"
+rm -rf "$project/.holbuild"
+stale_cache_log=$tmpdir/stale-cache-manifest.log
+(cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$stale_cache_log" 2>&1
+if grep -q "ATheory restored from cache" "$stale_cache_log"; then
+  echo "cache manifest with transient stage mldep was restored" >&2
+  exit 1
+fi
+require_grep "cache entry unusable for ATheory" "$stale_cache_log"
+require_file "$project/.holbuild/obj/src/ATheory.dat"
+if [[ -e "$cache_manifest" ]] && grep -q "\.holbuild/stage" "$cache_manifest"; then
+  echo "transient stage mldep survived cache manifest republish" >&2
+  exit 1
+fi
+
+rm -rf "$project/.holbuild"
+no_cache_log=$tmpdir/no-cache.log
+(cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --no-cache ATheory) > "$no_cache_log"
+if grep -q "ATheory restored from cache" "$no_cache_log"; then
+  echo "--no-cache restored from cache" >&2
+  exit 1
+fi
+require_file "$project/.holbuild/obj/src/ATheory.dat"
+
+no_cache_publish_project=$tmpdir/no-cache-publish-project
+mkdir -p "$no_cache_publish_project/src"
+cp "$project/holproject.toml" "$no_cache_publish_project/holproject.toml"
+cp "$project/src/AScript.sml" "$no_cache_publish_project/src/AScript.sml"
+no_cache_publish_cache=$tmpdir/no-cache-publish-cache
+no_cache_publish_log=$tmpdir/no-cache-publish.log
+(cd "$no_cache_publish_project" && HOLBUILD_CACHE="$no_cache_publish_cache" "$HOLBUILD_BIN" --holdir "$HOLDIR" build --no-cache ATheory) > "$no_cache_publish_log"
+rm -rf "$no_cache_publish_project/.holbuild"
+no_cache_after_log=$tmpdir/no-cache-after.log
+(cd "$no_cache_publish_project" && HOLBUILD_CACHE="$no_cache_publish_cache" "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$no_cache_after_log"
+if grep -q "ATheory restored from cache" "$no_cache_after_log"; then
+  echo "--no-cache published to cache" >&2
+  exit 1
+fi
+require_file "$no_cache_publish_project/.holbuild/obj/src/ATheory.dat"
+
 skip_project=$tmpdir/skip-project
 mkdir -p "$skip_project/src"
 cp "$project/holproject.toml" "$skip_project/holproject.toml"

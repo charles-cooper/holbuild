@@ -97,7 +97,9 @@ require_grep "dependency_context_key=" "$project/.holbuild/dep/headerdeps/src/AS
 
 rm -rf "$project/.holbuild"
 (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build BTheory) > "$tmpdir/cache.log"
-require_grep "ATheory restored from cache" "$tmpdir/cache.log"
+# If HOL embeds transient stage/worktree strings into ATheory.dat, holbuild must
+# skip that cache entry rather than restore path-dependent bytes.
+require_file "$project/.holbuild/obj/src/ATheory.dat"
 require_grep "monadsyntax" "$project/.holbuild/obj/src/ATheory.uo"
 require_grep "cv_primTheory" "$project/.holbuild/obj/src/ATheory.uo"
 if grep -q "\.holbuild/stage" "$project/.holbuild/obj/src/ATheory.uo"; then

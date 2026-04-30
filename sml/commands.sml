@@ -12,7 +12,7 @@ fun usage () = print
   "holbuild: experimental project-aware build frontend for HOL4\n\n\
   \Usage:\n\
   \  holbuild [--holdir PATH] [-jN] context\n\
-  \  holbuild [--holdir PATH] [-jN] build [--dry-run] [--skip-checkpoints] [--skip-goalfrag] [--tactic-timeout SECONDS] [TARGET ...]\n\
+  \  holbuild [--holdir PATH] [-jN] build [--dry-run] [--no-cache] [--skip-checkpoints] [--skip-goalfrag] [--tactic-timeout SECONDS] [TARGET ...]\n\
   \  holbuild [--holdir PATH] [-jN] heap NAME\n\
   \  holbuild [--holdir PATH] run [ARG ...]\n\
   \  holbuild [--holdir PATH] repl [ARG ...]\n\
@@ -34,30 +34,33 @@ fun tactic_timeout_value text =
 
 fun split_flags args =
   let
-    fun loop dry skip_checkpoints goalfrag tactic_timeout tactic_timeout_set rest =
+    fun loop dry use_cache skip_checkpoints goalfrag tactic_timeout tactic_timeout_set rest =
       case rest of
-          [] => ({dry_run = dry, skip_checkpoints = skip_checkpoints,
+          [] => ({dry_run = dry, use_cache = use_cache,
+                  skip_checkpoints = skip_checkpoints,
                   goalfrag = goalfrag, tactic_timeout = tactic_timeout,
                   tactic_timeout_set = tactic_timeout_set}, [])
         | "--dry-run" :: xs =>
-            loop true skip_checkpoints goalfrag tactic_timeout tactic_timeout_set xs
+            loop true use_cache skip_checkpoints goalfrag tactic_timeout tactic_timeout_set xs
+        | "--no-cache" :: xs =>
+            loop dry false skip_checkpoints goalfrag tactic_timeout tactic_timeout_set xs
         | "--skip-checkpoints" :: xs =>
-            loop dry true goalfrag tactic_timeout tactic_timeout_set xs
+            loop dry use_cache true goalfrag tactic_timeout tactic_timeout_set xs
         | "--skip-goalfrag" :: xs =>
-            loop dry skip_checkpoints false tactic_timeout tactic_timeout_set xs
+            loop dry use_cache skip_checkpoints false tactic_timeout tactic_timeout_set xs
         | "--tactic-timeout" :: seconds :: xs =>
-            loop dry skip_checkpoints goalfrag (tactic_timeout_value seconds) true xs
+            loop dry use_cache skip_checkpoints goalfrag (tactic_timeout_value seconds) true xs
         | "--tactic-timeout" :: [] => raise Error "--tactic-timeout requires SECONDS"
         | x :: xs =>
             if String.isPrefix "--tactic-timeout=" x then
-              loop dry skip_checkpoints goalfrag
+              loop dry use_cache skip_checkpoints goalfrag
                    (tactic_timeout_value (String.extract (x, size "--tactic-timeout=", NONE)))
                    true xs
             else
-              let val (flags, ys) = loop dry skip_checkpoints goalfrag tactic_timeout tactic_timeout_set xs
+              let val (flags, ys) = loop dry use_cache skip_checkpoints goalfrag tactic_timeout tactic_timeout_set xs
               in (flags, x :: ys) end
   in
-    loop false false true (SOME 2.5) false args
+    loop false true false true (SOME 2.5) false args
   end
 
 fun has_suffix suffix s =
@@ -193,12 +196,13 @@ fun build tc cli_jobs args =
   let
     val project = timed_phase "project.discover" load_project
     val jobs = effective_jobs project cli_jobs
-    val ({dry_run, skip_checkpoints, goalfrag, tactic_timeout, tactic_timeout_set}, targets) = split_flags args
+    val ({dry_run, use_cache, skip_checkpoints, goalfrag, tactic_timeout, tactic_timeout_set}, targets) = split_flags args
     val _ =
       if not goalfrag andalso tactic_timeout_set then
         raise Error "--tactic-timeout requires goalfrag; remove --skip-goalfrag"
       else ()
-    val build_options = {skip_checkpoints = skip_checkpoints,
+    val build_options = {use_cache = use_cache,
+                         skip_checkpoints = skip_checkpoints,
                          goalfrag = goalfrag,
                          tactic_timeout = tactic_timeout}
     fun prepare_plan () =
@@ -254,7 +258,7 @@ fun build_heap tc cli_jobs target =
         val toolchain_key = timed_phase "toolchain.key" (fn () => HolbuildToolchain.toolchain_key tc)
         val output_path = HolbuildProject.abs_under (#root project) output
       in
-        HolbuildBuildExec.build {skip_checkpoints = false, goalfrag = true, tactic_timeout = SOME 2.5}
+        HolbuildBuildExec.build {use_cache = true, skip_checkpoints = false, goalfrag = true, tactic_timeout = SOME 2.5}
                                tc project plan toolchain_key jobs;
         HolbuildBuildExec.export_heap tc project plan output_path
       end
