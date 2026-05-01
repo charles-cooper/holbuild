@@ -555,6 +555,20 @@ hook state, and failure diagnostics. Generated per-theory source contains only
 loads, runtime installation/configuration, theorem boundary calls, and original
 source slices.
 
+GoalFrag is the executable stepping IR. Holbuild does not maintain a second
+semantic tactic AST for proof execution. The runtime lowers HOL's `TacticParse`
+AST through `TacticParse.linearize` into a thin, holbuild-owned `goalfrag_step`
+list: open/mid/close structural operations, ordinary tactic `expand`, list-tactic
+`expand_list`, and temporary select markers that are merged into the surrounding
+branch shape. Each step carries the raw source label and source end position used
+for timeout messages, failed-fragment source context, and failed-prefix replay.
+Execution then dispatches directly to `goalFrag.open_*`, `goalFrag.next_*`,
+`goalFrag.close_*`, `goalFrag.expand`, or `goalFrag.expand_list`. Normal tactic
+chains such as `A >> B >> C` should stay as independent `expand` steps; only
+branch/list/select syntax should introduce GoalFrag structure. Avoid
+name-based tactic heuristics for atomicity: opaque tactic calls are leaves, and
+shape-specific merging should be justified by the parsed branch/list/select form.
+
 Attributed proofs and declarations with no parsed tactic body use a conservative
 whole-tactic prover path. Normal theorem bodies should not fall back to timing the
 entire theorem as one coarse tactic; if they need coarser treatment for a
