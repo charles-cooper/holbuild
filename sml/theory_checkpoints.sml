@@ -13,6 +13,7 @@ type checkpoint = {name : string, safe_name : string, theorem_start : int,
                    has_proof_attrs : bool, prefix_hash : string,
                    context_path : string, context_ok : string,
                    end_of_proof_path : string, end_of_proof_ok : string,
+                   failed_prefix_path : string, failed_prefix_ok : string,
                    deps_key : string, checkpoint_key : string}
 
 fun is_ident c = Char.isAlphaNum c orelse c = #"_" orelse c = #"'"
@@ -100,6 +101,7 @@ fun discover_from_report {source, report} : boundary list =
 
 fun begin_theorem_line ({name, tactic_text, context_path, context_ok,
                          end_of_proof_path, end_of_proof_ok,
+                         failed_prefix_path, failed_prefix_ok,
                          has_proof_attrs, ...} : checkpoint) =
   String.concat
     ["val _ = holbuild_begin_theorem(",
@@ -109,6 +111,8 @@ fun begin_theorem_line ({name, tactic_text, context_path, context_ok,
      HolbuildToolchain.sml_string context_ok, ", ",
      HolbuildToolchain.sml_string end_of_proof_path, ", ",
      HolbuildToolchain.sml_string end_of_proof_ok, ", ",
+     HolbuildToolchain.sml_string failed_prefix_path, ", ",
+     HolbuildToolchain.sml_string failed_prefix_ok, ", ",
      if has_proof_attrs then "true" else "false",
      ");\n"]
 

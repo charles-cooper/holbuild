@@ -4,16 +4,24 @@ struct
 structure Path = OS.Path
 structure FS = OS.FileSys
 
-type t = {holdir : string}
+type t = {holdir : string, maxheap : int option}
 
 exception Error of string
 
-fun executable {holdir} parts =
+fun executable {holdir, ...} parts =
   List.foldl (fn (part, acc) => Path.concat(acc, part)) holdir parts
 
 fun hol tc = executable tc ["bin", "hol"]
 fun holmake tc = executable tc ["bin", "Holmake"]
 fun base_state tc = executable tc ["bin", "hol.state"]
+
+fun poly_runtime_args ({maxheap, ...} : t) =
+  case maxheap of
+      NONE => []
+    | SOME n => ["--maxheap", Int.toString n]
+
+fun hol_subcommand_argv tc subcommand =
+  hol tc :: poly_runtime_args tc @ [subcommand]
 
 fun quote s =
   "'" ^ String.translate (fn #"'" => "'\\''" | c => str c) s ^ "'"

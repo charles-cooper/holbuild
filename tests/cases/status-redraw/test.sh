@@ -179,7 +179,7 @@ write_message_good_source
 message_log=$tmpdir/message.log
 (cd "$message_project" && HOLBUILD_STATUS=1 TERM=xterm COLUMNS=160 "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$message_log" 2>&1
 tr '\r' '\n' < "$message_log" > "$tmpdir/message-lines.log"
-require_grep "resuming ATheory from checkpoint first" "$tmpdir/message-lines.log"
+require_grep "resuming ATheory from checkpoint second failed_prefix" "$tmpdir/message-lines.log"
 if grep -q "holbuild .*resuming ATheory from checkpoint" "$tmpdir/message-lines.log"; then
   echo "status redraw line interleaved with ordinary message" >&2
   exit 1

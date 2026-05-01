@@ -10,8 +10,11 @@ type config = {checkpoint_enabled : bool,
 val checkpoint_enabled_ref = ref false
 val tactic_timeout_ref = ref (NONE : real option)
 val tactic_timeout_marker_ref = ref (NONE : string option)
-val theorem_info_ref = ref NONE : (string * string * string * string * string * string * bool * int) option ref
+val theorem_info_ref = ref NONE : (string * string * string * string * string * string * string * string * bool * int) option ref
 val context_info_ref = ref NONE : (string * string * int) option ref
+val active_tactic_text_ref = ref ""
+val successful_step_count_ref = ref 0
+val successful_prefix_end_ref = ref 0
 
 fun env_bool name =
   case OS.Process.getEnv name of
@@ -33,7 +36,7 @@ fun fmt_time t = Real.fmt (StringCvt.FIX (SOME 3)) t
 fun delete_file path = OS.FileSys.remove path handle _ => ()
 
 fun delete_checkpoint path =
-  (delete_file (path ^ ".ok"); delete_file path)
+  (delete_file (path ^ ".ok"); delete_file (path ^ ".meta"); delete_file (path ^ ".prefix"); delete_file path)
 
 fun write_checkpoint_ok path ok_text =
   let val out = TextIO.openOut (path ^ ".ok")
@@ -87,15 +90,36 @@ fun save_checkpoint label default_share path ok_text depth =
         else ()
     in () end
 
+fun write_text_file path text =
+  let val out = TextIO.openOut path
+  in TextIO.output(out, text); TextIO.closeOut out end
+
+fun save_failed_prefix_checkpoint () =
+  case !theorem_info_ref of
+      NONE => ()
+    | SOME (_, _, _, _, _, _, failed_prefix_path, failed_prefix_ok, _, depth) =>
+        if not (!checkpoint_enabled_ref) then ()
+        else
+          let
+            val prefix_end = !successful_prefix_end_ref
+            val prefix_text = String.substring(!active_tactic_text_ref, 0, prefix_end)
+            val meta_text =
+              String.concat ["step_count=", Int.toString (!successful_step_count_ref), "\n",
+                             "prefix_end=", Int.toString prefix_end, "\n"]
+            val _ = save_checkpoint "failed_prefix" false failed_prefix_path failed_prefix_ok depth
+            val _ = write_text_file (failed_prefix_path ^ ".meta") meta_text
+            val _ = write_text_file (failed_prefix_path ^ ".prefix") prefix_text
+          in () end
+
 fun begin_theorem (name, tactic_text, context_path, context_ok,
-                   end_path, end_ok, has_attrs) =
+                   end_path, end_ok, failed_prefix_path, failed_prefix_ok, has_attrs) =
   let val depth = length (PolyML.SaveState.showHierarchy())
   in
     if !checkpoint_enabled_ref then
-      (delete_checkpoint context_path; delete_checkpoint end_path)
+      (delete_checkpoint context_path; delete_checkpoint end_path; delete_checkpoint failed_prefix_path)
     else ();
     theorem_info_ref := SOME (name, tactic_text, context_path, context_ok,
-                              end_path, end_ok, has_attrs, depth);
+                              end_path, end_ok, failed_prefix_path, failed_prefix_ok, has_attrs, depth);
     context_info_ref := SOME (context_path, context_ok, depth)
   end
 
@@ -486,7 +510,7 @@ fun steps body =
         (merge_reverse_steps (merge_by_steps (assign frags 0 []) []) []) []) []
   end
 
-fun report_step_failure label e = (print_goal_state label; raise e)
+fun report_step_failure label e = (save_failed_prefix_checkpoint (); print_goal_state label; raise e)
 
 fun apply_ftac label ftac =
   with_tactic_timeout label (fn () => (proofManagerLib.ef ftac; ())) ()
@@ -548,8 +572,25 @@ fun step ("open", text) =
         ("list tactic fragment failed: " ^ text)
   | step (typ, _) = raise Fail ("unknown fragment type: " ^ typ)
 
-fun run_steps [] = ()
-  | run_steps ((_, typ, text) :: rest) = (step (typ, text); run_steps rest)
+fun run_steps_from _ [] = ()
+  | run_steps_from index ((end_pos, typ, text) :: rest) =
+      (successful_step_count_ref := index;
+       step (typ, text);
+       successful_step_count_ref := index + 1;
+       successful_prefix_end_ref := end_pos;
+       run_steps_from (index + 1) rest)
+
+fun drop_steps 0 steps = steps
+  | drop_steps _ [] = []
+  | drop_steps n (_ :: rest) = drop_steps (n - 1) rest
+
+fun run_steps steps =
+  (successful_step_count_ref := 0;
+   successful_prefix_end_ref := 0;
+   run_steps_from 0 steps)
+
+fun backup_n 0 = ()
+  | backup_n n = (proofManagerLib.b(); backup_n (n - 1))
 
 fun drop_all () = (proofManagerLib.drop_all (); ()) handle _ => ()
 
@@ -559,6 +600,7 @@ fun atomic_prove label g tac =
 
 fun goalfrag_prove name end_path end_ok checkpoint_depth g tac tactic_text =
   let
+    val _ = active_tactic_text_ref := tactic_text
     val _ = proofManagerLib.set_goalfrag g
     val _ = run_steps (steps tactic_text)
     val th = proofManagerLib.top_thm()
@@ -567,16 +609,56 @@ fun goalfrag_prove name end_path end_ok checkpoint_depth g tac tactic_text =
     val _ = proofManagerLib.drop_all()
   in th end
 
+fun common_prefix_size old_text new_text =
+  let
+    val old_n = size old_text
+    val new_n = size new_text
+    val limit = Int.min(old_n, new_n)
+    fun loop i =
+      if i >= limit then i
+      else if String.sub(old_text, i) = String.sub(new_text, i) then loop (i + 1)
+      else i
+  in
+    loop 0
+  end
+
+fun step_count_at_prefix common_bytes plan =
+  let
+    fun loop count [] = count
+      | loop count ((end_pos, _, _) :: rest) =
+          if end_pos <= common_bytes then loop (count + 1) rest else count
+  in
+    loop 0 plan
+  end
+
+fun finish_failed_prefix name old_prefix_text old_step_count tactic_text =
+  let
+    val _ = active_tactic_text_ref := tactic_text
+    val plan = steps tactic_text
+    val common_bytes = common_prefix_size old_prefix_text tactic_text
+    val skip_count = step_count_at_prefix common_bytes plan
+    val backup_count = Int.max(0, old_step_count - skip_count)
+    val _ = backup_n backup_count
+    val _ = successful_step_count_ref := skip_count
+    val _ = successful_prefix_end_ref := common_bytes
+    val _ = run_steps_from skip_count (drop_steps skip_count plan)
+    val th = proofManagerLib.top_thm()
+             handle e => (print_goal_state (name ^ " finish"); raise e)
+    val _ = proofManagerLib.drop_all()
+  in th end
+
 fun goalfrag_prover (g, tac) =
   case !theorem_info_ref of
       NONE => Tactical.TAC_PROOF(g, tac)
-    | SOME (name, tactic_text, _, _, end_path, end_ok, has_attrs, checkpoint_depth) =>
+    | SOME (name, tactic_text, _, _, end_path, end_ok, _, _, has_attrs, checkpoint_depth) =>
         let
-          val _ = theorem_info_ref := NONE
           val atomic = has_attrs orelse tactic_text = ""
+          val th =
+            if atomic then atomic_prove name g tac
+            else goalfrag_prove name end_path end_ok checkpoint_depth g tac tactic_text
+          val _ = theorem_info_ref := NONE
         in
-          if atomic then atomic_prove name g tac
-          else goalfrag_prove name end_path end_ok checkpoint_depth g tac tactic_text
+          th
         end
         handle e =>
           (theorem_info_ref := NONE;

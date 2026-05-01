@@ -514,12 +514,26 @@ action key/cache:        can this whole script action be skipped?
 syntactic checkpoint:    if the action changed, where can replay resume?
 ```
 
-A retained/debug checkpoint action keys replay eligibility by the exact source
-prefix/boundary identity, resolved dependency-context key, toolchain/base-context
-key, and checkpoint schema. Raw `.save` bytes are diagnostic only and must not be
-used as stable semantic keys. The default build does not retain successful
-checkpoints or materialize checkpoints from the global cache; cache restore
-recreates only logical theory artifacts and internal load manifests.
+A retained/debug checkpoint is replay-eligible only under the same resolved
+dependency context, toolchain/base context, and checkpoint schema. Raw `.save`
+bytes are diagnostic only and must not be used as stable semantic keys. The
+default build does not retain successful checkpoints or materialize checkpoints
+from the global cache; cache restore recreates only logical theory artifacts and
+internal load manifests.
+
+Proof-edit incrementality should not key failed-prefix checkpoints by the full
+proof body hash. That would invalidate exactly the state a proof author needs
+after editing a failing suffix. Instead, a failed goalfrag proof may retain a
+proof-navigation checkpoint plus metadata containing the raw source bytes from
+the theorem/proof start through the last successful fragment boundary, the number
+of successful goalfrag history steps, and the initial theorem goal/statement
+fingerprint. On the next rebuild, holbuild compares the retained raw byte prefix
+with the current theorem source, chooses the last current fragment boundary whose
+raw bytes still match, loads the failed-prefix checkpoint, calls goalfrag
+`backup_n` for the difference between saved and current common-prefix step
+counts, and replays the edited suffix. Hashes remain guardrails for dependency
+context and initial goal compatibility; raw byte-prefix comparison decides the
+usable proof prefix.
 
 The prototype currently instruments AST `HOLTheoremDecl` declarations, i.e.
 modern goal/proof forms such as `Theorem ... Proof ... QED`. It parses the HOL

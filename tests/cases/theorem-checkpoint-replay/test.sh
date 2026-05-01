@@ -205,6 +205,28 @@ require_grep "holbuild goal state at failed fragment" "$failure_child_log"
 require_grep "holbuild remaining goals: 1" "$failure_child_log"
 require_grep "holbuild top goal:" "$failure_child_log"
 require_grep "holbuild end top goal" "$failure_child_log"
+a_thm_context=$(find "$failure_project/.holbuild/checkpoints" -name '*a_thm_context.save' -print -quit)
+require_file "$a_thm_context"
+b_thm_failed_prefix=$(find "$failure_project/.holbuild/checkpoints" -name '*b_thm_failed_prefix.save' -print -quit)
+require_file "$b_thm_failed_prefix"
+failure_again_log=$tmpdir/failure-again.log
+if (cd "$failure_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$failure_again_log" 2>&1; then
+  echo "expected repeated failing proof to fail build" >&2
+  exit 1
+fi
+require_grep "resuming ATheory from checkpoint b_thm failed_prefix" "$failure_again_log"
+require_grep "holbuild top goal at failed fragment" "$failure_again_log"
+require_file "$a_thm_context"
+require_file "$b_thm_failed_prefix"
+python3 - <<PY
+from pathlib import Path
+path = Path("$failure_project/src/AScript.sml")
+path.write_text(path.read_text().replace('FAIL_TAC "expected failure"', 'cheat'))
+PY
+failure_fixed_log=$tmpdir/failure-fixed.log
+(cd "$failure_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$failure_fixed_log" 2>&1
+require_grep "resuming ATheory from checkpoint b_thm failed_prefix" "$failure_fixed_log"
+require_grep "ATheory built" "$failure_fixed_log"
 if [[ -e "$failure_project/.holbuild/checkpoints/replay/src/AScript.sml.b_thm_context.save" || \
       -e "$failure_project/.holbuild/checkpoints/replay/src/AScript.sml.b_thm_context.save.ok" || \
       -e "$failure_project/.holbuild/checkpoints/replay/src/AScript.sml.b_thm_end_of_proof.save" || \

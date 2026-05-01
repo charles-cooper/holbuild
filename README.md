@@ -30,7 +30,7 @@ This prototype is intentionally small:
 - records local action metadata and skips unchanged actions
 - publishes/restores simple theory semantic artifacts through the global cache
 - includes the configured toolchain/base context in prototype action keys
-- creates transient local theory checkpoints while building: dependencies-loaded, AST-derived theorem end-of-proof/context checkpoints for modern theorem declarations, and successor-ready final context; successful builds remove them after writing logical artifacts and metadata
+- creates transient local theory checkpoints while building: dependencies-loaded, AST-derived theorem end-of-proof/context checkpoints, failed-prefix proof-navigation checkpoints for modern theorem declarations, and successor-ready final context; successful builds remove them after writing logical artifacts and metadata
 - runs modern theorem proofs through a shared SML goalfrag runtime helper, with tactic parsing/step planning, proof-manager execution, checkpoint saves, timeout handling, and diagnostics kept out of generated per-theory source
 - keeps goalfrag proof execution separate from checkpoint creation; `--skip-checkpoints` avoids theory `.save` files entirely, `--skip-goalfrag` opts out of theorem instrumentation, and `--tactic-timeout SECONDS` controls the root-project per-tactic goalfrag timeout (default 2.5s; `0` disables it)
 - exports explicit project heap targets from `[[heap]]` entries using local SaveState
@@ -93,6 +93,7 @@ timeout policy, and generated theory dependency/path stability.
 export HOLBUILD_HOLDIR=/path/to/HOL
 bin/holbuild build MyTheory
 bin/holbuild -j4 build MyTheory
+bin/holbuild --maxheap 4096 build MyTheory
 bin/holbuild build --skip-checkpoints MyTheory
 bin/holbuild build --tactic-timeout 5 MyTheory
 ```
@@ -119,7 +120,10 @@ commands. `-jN`, `-j N`, or `--jobs N` controls build parallelism for `build`
 and for the build phase of `heap` targets; the default comes from local
 `.holconfig.toml` `[build].jobs` when set, otherwise from CPU detection as
 `max(1, nproc / 2)`. `--no-cache` disables global cache restore/publish for a
-build while preserving local `.holbuild` up-to-date checks.
+build while preserving local `.holbuild` up-to-date checks. `--maxheap MB` and
+`--max-heap MB` pass Poly/ML's maximum heap size to child HOL processes before
+`run`/`repl`, matching HOL's requirement that runtime options precede the
+subcommand.
 `--skip-checkpoints` disables theory checkpoint `.save`/`.ok` creation without
 disabling goalfrag proof execution. By default checkpoints may be created during
 a build but are removed after successful artifact/metadata writes.
@@ -257,7 +261,11 @@ transient PolyML checkpoints at syntactic boundaries: dependencies loaded,
 AST-derived theorem end-of-proof/context boundaries for modern
 `Theorem ... Proof ... QED` declarations, and successor-ready final context.
 Successful builds remove those checkpoint files after writing artifacts and
-metadata; failed/interrupted builds may leave them as debug breadcrumbs. Simple
+metadata; failed/interrupted builds may leave them as debug breadcrumbs. If a
+modern theorem fails after some goalfrag steps, the retained failed-prefix
+checkpoint can be reused on the next rebuild by comparing raw proof-body bytes,
+backing up to the longest matching current fragment boundary, and replaying the
+edited suffix. Simple
 theorem-producing forms such as `Theorem name = thm` still build normally but are
 not theorem checkpoint boundaries in v1. Explicit `holbuild heap NAME` targets
 build their declared logical objects, load the generated theory modules, and save

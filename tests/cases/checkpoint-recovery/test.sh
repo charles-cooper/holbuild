@@ -115,6 +115,11 @@ first_deps_path() {
     -path '*/deps_loaded.save' -print -quit
 }
 
+second_failed_prefix_path() {
+  find "$project/.holbuild/checkpoints/checkpointrecovery/src/AScript.sml.theorems" \
+    -path '*second_failed_prefix.save' -print -quit
+}
+
 run_expect_suffix_failure() {
   local log=$1
   write_bad_suffix_source
@@ -149,7 +154,7 @@ write_good_source
 force_rebuild
 fixed_log=$tmpdir/fixed.log
 (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$fixed_log" 2>&1
-require_grep "resuming ATheory from checkpoint first" "$fixed_log"
+require_grep "resuming ATheory from checkpoint second failed_prefix" "$fixed_log"
 if grep -q "parent for this saved state\|goalfrag/checkpoint run failed" "$fixed_log"; then
   echo "suffix recovery hit checkpoint parent mismatch/instrumentation failure" >&2
   exit 1
@@ -159,7 +164,8 @@ assert_no_checkpoints "successful fixed build retained checkpoint files"
 
 run_expect_suffix_failure "$tmpdir/missing-ok-seed.log"
 missing_context=$(first_context_path)
-rm -f "$missing_context.ok"
+missing_failed_prefix=$(second_failed_prefix_path)
+rm -f "$missing_context.ok" "$missing_failed_prefix" "$missing_failed_prefix.ok" "$missing_failed_prefix.meta" "$missing_failed_prefix.prefix"
 write_good_source
 force_rebuild
 missing_ok_log=$tmpdir/missing-ok.log
@@ -173,6 +179,8 @@ assert_no_checkpoints "missing-checkpoint rebuild retained checkpoint files"
 
 run_expect_suffix_failure "$tmpdir/corrupt-seed.log"
 corrupt_context=$(first_context_path)
+corrupt_failed_prefix=$(second_failed_prefix_path)
+rm -f "$corrupt_failed_prefix" "$corrupt_failed_prefix.ok" "$corrupt_failed_prefix.meta" "$corrupt_failed_prefix.prefix"
 printf 'not a valid PolyML checkpoint\n' > "$corrupt_context"
 write_good_source
 force_rebuild
@@ -202,7 +210,8 @@ assert_no_checkpoints "clean rebuild after corrupt checkpoint retained checkpoin
 run_expect_suffix_failure "$tmpdir/corrupt-deps-seed.log"
 corrupt_deps=$(first_deps_path)
 corrupt_context=$(first_context_path)
-rm -f "$corrupt_context" "$corrupt_context.ok"
+corrupt_failed_prefix=$(second_failed_prefix_path)
+rm -f "$corrupt_context" "$corrupt_context.ok" "$corrupt_failed_prefix" "$corrupt_failed_prefix.ok" "$corrupt_failed_prefix.meta" "$corrupt_failed_prefix.prefix"
 printf 'not a valid PolyML deps checkpoint\n' > "$corrupt_deps"
 write_good_source
 force_rebuild

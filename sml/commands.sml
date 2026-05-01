@@ -11,15 +11,16 @@ fun warn msg = HolbuildStatus.message TextIO.stdErr ("holbuild: warning: " ^ msg
 fun usage () = print
   "holbuild: experimental project-aware build frontend for HOL4\n\n\
   \Usage:\n\
-  \  holbuild [--holdir PATH] [-jN] context\n\
-  \  holbuild [--holdir PATH] [-jN] build [--dry-run] [--no-cache] [--skip-checkpoints] [--skip-goalfrag] [--tactic-timeout SECONDS] [TARGET ...]\n\
-  \  holbuild [--holdir PATH] [-jN] heap NAME\n\
-  \  holbuild [--holdir PATH] run [ARG ...]\n\
-  \  holbuild [--holdir PATH] repl [ARG ...]\n\
+  \  holbuild [--holdir PATH] [--maxheap MB] [-jN] context\n\
+  \  holbuild [--holdir PATH] [--maxheap MB] [-jN] build [--dry-run] [--no-cache] [--skip-checkpoints] [--skip-goalfrag] [--tactic-timeout SECONDS] [TARGET ...]\n\
+  \  holbuild [--holdir PATH] [--maxheap MB] [-jN] heap NAME\n\
+  \  holbuild [--holdir PATH] [--maxheap MB] run [ARG ...]\n\
+  \  holbuild [--holdir PATH] [--maxheap MB] repl [ARG ...]\n\
   \  holbuild cache gc [--retention-days DAYS] [--cache-dir PATH]\n\n\
   \HOLDIR is found from --holdir, HOLBUILD_HOLDIR, or HOLDIR for HOL commands.\n\
   \-j/--jobs controls build parallelism. Default is .holconfig.toml [build].jobs,\n\
-  \or max(1, detected processor count / 2).\n"
+  \or max(1, detected processor count / 2). --maxheap/--max-heap passes Poly/ML\n\
+  \maximum heap size in MB to child HOL processes.\n"
 
 fun nonnegative_real label text =
   case Real.fromString text of
@@ -127,23 +128,29 @@ fun positive_int label text =
 
 fun parse_global_options args =
   let
-    fun loop holdir jobs rest =
+    fun loop holdir jobs maxheap rest =
       case rest of
-          [] => ({holdir = holdir, jobs = jobs}, [])
-        | "--holdir" :: path :: xs => loop (SOME path) jobs xs
-        | "--jobs" :: n :: xs => loop holdir (SOME (positive_int "--jobs" n)) xs
-        | "-j" :: n :: xs => loop holdir (SOME (positive_int "-j" n)) xs
+          [] => ({holdir = holdir, jobs = jobs, maxheap = maxheap}, [])
+        | "--holdir" :: path :: xs => loop (SOME path) jobs maxheap xs
+        | "--jobs" :: n :: xs => loop holdir (SOME (positive_int "--jobs" n)) maxheap xs
+        | "-j" :: n :: xs => loop holdir (SOME (positive_int "-j" n)) maxheap xs
+        | "--maxheap" :: n :: xs => loop holdir jobs (SOME (positive_int "--maxheap" n)) xs
+        | "--max-heap" :: n :: xs => loop holdir jobs (SOME (positive_int "--max-heap" n)) xs
         | arg :: xs =>
             if String.isPrefix "--holdir=" arg then
-              loop (SOME (String.extract (arg, size "--holdir=", NONE))) jobs xs
+              loop (SOME (String.extract (arg, size "--holdir=", NONE))) jobs maxheap xs
             else if String.isPrefix "--jobs=" arg then
-              loop holdir (SOME (positive_int "--jobs" (String.extract (arg, size "--jobs=", NONE)))) xs
+              loop holdir (SOME (positive_int "--jobs" (String.extract (arg, size "--jobs=", NONE)))) maxheap xs
+            else if String.isPrefix "--maxheap=" arg then
+              loop holdir jobs (SOME (positive_int "--maxheap" (String.extract (arg, size "--maxheap=", NONE)))) xs
+            else if String.isPrefix "--max-heap=" arg then
+              loop holdir jobs (SOME (positive_int "--max-heap" (String.extract (arg, size "--max-heap=", NONE)))) xs
             else if String.isPrefix "-j" arg andalso size arg > 2 then
-              loop holdir (SOME (positive_int "-j" (String.extract (arg, 2, NONE)))) xs
+              loop holdir (SOME (positive_int "-j" (String.extract (arg, 2, NONE)))) maxheap xs
             else
-              let val (opts, args') = loop holdir jobs xs in (opts, arg :: args') end
+              let val (opts, args') = loop holdir jobs maxheap xs in (opts, arg :: args') end
   in
-    loop NONE NONE args
+    loop NONE NONE NONE args
   end
 
 fun with_input path f =
@@ -279,13 +286,13 @@ fun hol_args_for_project tc project subcommand user_args =
           NONE => ["--holstate", HolbuildToolchain.base_state tc]
         | SOME heap => ["--holstate", heap]
   in
-    [subcommand] @ heap_args @ [context] @ #run_loads project @ user_args
+    HolbuildToolchain.hol_subcommand_argv tc subcommand @ heap_args @ [context] @ #run_loads project @ user_args
   end
 
 fun run_hol tc subcommand user_args =
   let
     val project = timed_phase "project.discover" load_project
-    val argv = HolbuildToolchain.hol tc :: hol_args_for_project tc project subcommand user_args
+    val argv = hol_args_for_project tc project subcommand user_args
     val status = HolbuildToolchain.run argv
   in
     if HolbuildToolchain.success status then ()
@@ -303,11 +310,11 @@ fun dispatch tc jobs args =
     | "repl" :: rest => run_hol tc "repl" rest
     | cmd :: _ => raise Error ("unknown command: " ^ cmd)
 
-fun dispatch_with_options {holdir, jobs} args =
+fun dispatch_with_options {holdir, jobs, maxheap} args =
   case args of
       "cache" :: rest => HolbuildCache.dispatch rest
     | _ =>
-      let val tc = {holdir = runtime_holdir holdir}
+      let val tc = {holdir = runtime_holdir holdir, maxheap = maxheap}
       in dispatch tc jobs args end
 
 fun main raw_args =
