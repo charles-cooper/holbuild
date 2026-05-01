@@ -564,10 +564,14 @@ branch shape. Each step carries the raw source label and source end position use
 for timeout messages, failed-fragment source context, and failed-prefix replay.
 Execution then dispatches directly to `goalFrag.open_*`, `goalFrag.next_*`,
 `goalFrag.close_*`, `goalFrag.expand`, or `goalFrag.expand_list`. Normal tactic
-chains such as `A >> B >> C` should stay as independent `expand` steps; only
-branch/list/select syntax should introduce GoalFrag structure. Avoid
-name-based tactic heuristics for atomicity: opaque tactic calls are leaves, and
+chains such as `A >> B >> C` should stay as independent `expand` steps; ordinary
+branch/list/select syntax should introduce GoalFrag structure. Avoid name-based
+tactic heuristics for atomicity: opaque tactic calls are leaves, and
 shape-specific merging should be justified by the parsed branch/list/select form.
+The current compatibility exception is `REVERSE` combined with branch/list forms,
+which is still kept grouped because structural replay can trip GoalFrag validation
+shape accounting; treat that as a narrow runtime limitation to remove, not as a
+precedent for broad branch-body atomicity.
 
 Attributed proofs and declarations with no parsed tactic body use a conservative
 whole-tactic prover path. Normal theorem bodies should not fall back to timing the

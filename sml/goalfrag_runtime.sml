@@ -248,22 +248,6 @@ and expr_contains_reverse body e =
     | TacticParse.OOpaque (_, sp) => text_contains_reverse body sp
     | _ => false
 
-fun exprs_contain_branch es = List.exists expr_contains_branch es
-and expr_contains_branch e =
-  case e of
-      TacticParse.Then es => exprs_contain_branch es
-    | TacticParse.ThenLT _ => true
-    | TacticParse.LThen1 _ => true
-    | TacticParse.LTacsToLT _ => true
-    | TacticParse.LNullOk _ => true
-    | TacticParse.LSelectGoal _ => true
-    | TacticParse.LSelectGoals _ => true
-    | TacticParse.LSelectThen _ => true
-    | TacticParse.LSplit _ => true
-    | TacticParse.Group (_, _, e) => expr_contains_branch e
-    | TacticParse.RepairGroup (_, _, e, _) => expr_contains_branch e
-    | _ => false
-
 fun reverse_branch_expr body (TacticParse.ThenLT (lhs, [rhs as TacticParse.LNullOk (TacticParse.LTacsToLT _)])) =
       expr_contains_reverse body lhs orelse expr_contains_reverse body rhs
   | reverse_branch_expr body (TacticParse.ThenLT (lhs, [rhs as TacticParse.LThen1 _])) =
@@ -272,7 +256,7 @@ fun reverse_branch_expr body (TacticParse.ThenLT (lhs, [rhs as TacticParse.LNull
   | reverse_branch_expr _ _ = false
 
 fun group_atom_expr body (TacticParse.FAtom (TacticParse.Group (_, _, e))) =
-      if expr_contains_branch e orelse reverse_branch_expr body e then NONE
+      if reverse_branch_expr body e then NONE
       else if is_composable e then SOME e else NONE
   | group_atom_expr _ _ = NONE
 

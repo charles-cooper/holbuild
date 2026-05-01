@@ -247,6 +247,32 @@ if [[ -e "$failure_project/.holbuild/checkpoints/replay/src/AScript.sml.b_thm_co
   exit 1
 fi
 
+branch_failure_project=$tmpdir/branch-failure-project
+mkdir -p "$branch_failure_project/src"
+cp "$project/holproject.toml" "$branch_failure_project/holproject.toml"
+cat > "$branch_failure_project/src/AScript.sml" <<'SML'
+open HolKernel Parse boolLib bossLib;
+val _ = new_theory "A";
+Theorem branch_failure:
+  T /\ T
+Proof
+  CONJ_TAC >- FAIL_TAC "branch side failed"
+  \\ ACCEPT_TAC TRUTH
+QED
+val _ = export_theory();
+SML
+branch_failure_log=$tmpdir/branch-failure.log
+if (cd "$branch_failure_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$branch_failure_log" 2>&1; then
+  echo "expected branch proof to fail build" >&2
+  exit 1
+fi
+require_grep "tactic fragment failed: FAIL_TAC" "$branch_failure_log"
+require_grep "branch side failed" "$branch_failure_log"
+if grep -q "tactic fragment failed: CONJ_TAC >- FAIL_TAC" "$branch_failure_log"; then
+  echo "branch tactical was emitted as one atomic fragment" >&2
+  exit 1
+fi
+
 timeout_project=$tmpdir/timeout-project
 mkdir -p "$timeout_project/src"
 cp "$project/holproject.toml" "$timeout_project/holproject.toml"
