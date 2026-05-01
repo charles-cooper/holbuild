@@ -46,6 +46,16 @@ Proof[exclude_simps = bool_case_thm]
   ACCEPT_TAC TRUTH
 QED
 
+val prove_subgoal_tac =
+  fn g => (ignore (Tactical.prove (``T``, ACCEPT_TAC TRUTH)); ALL_TAC g);
+
+Theorem reentrant_prover:
+  T
+Proof
+  prove_subgoal_tac
+  \\ ACCEPT_TAC TRUTH
+QED
+
 Theorem reverse_cases:
   !b. b = T \/ b = F
 Proof

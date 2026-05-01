@@ -12,6 +12,7 @@ val tactic_timeout_ref = ref (NONE : real option)
 val tactic_timeout_marker_ref = ref (NONE : string option)
 val theorem_info_ref = ref NONE : (string * string * string * string * string * string * string * string * bool * int) option ref
 val context_info_ref = ref NONE : (string * string * int) option ref
+val proving_with_goalfrag_ref = ref false
 val active_tactic_text_ref = ref ""
 val successful_step_count_ref = ref 0
 val successful_prefix_end_ref = ref 0
@@ -647,24 +648,34 @@ fun finish_failed_prefix name old_prefix_text old_step_count tactic_text =
     val _ = proofManagerLib.drop_all()
   in th end
 
+fun prove_outer_theorem (g, tac) (name, tactic_text, _, _, end_path, end_ok, _, _, has_attrs, checkpoint_depth) =
+  let
+    val atomic = has_attrs orelse tactic_text = ""
+    val _ = proving_with_goalfrag_ref := true
+    val th =
+      (if atomic then atomic_prove name g tac
+       else goalfrag_prove name end_path end_ok checkpoint_depth g tac tactic_text)
+      handle e => (proving_with_goalfrag_ref := false; raise e)
+    val _ = proving_with_goalfrag_ref := false
+    val _ = theorem_info_ref := NONE
+  in
+    th
+  end
+
 fun goalfrag_prover (g, tac) =
-  case !theorem_info_ref of
-      NONE => Tactical.TAC_PROOF(g, tac)
-    | SOME (name, tactic_text, _, _, end_path, end_ok, _, _, has_attrs, checkpoint_depth) =>
-        let
-          val atomic = has_attrs orelse tactic_text = ""
-          val th =
-            if atomic then atomic_prove name g tac
-            else goalfrag_prove name end_path end_ok checkpoint_depth g tac tactic_text
-          val _ = theorem_info_ref := NONE
-        in
-          th
-        end
-        handle e =>
-          (theorem_info_ref := NONE;
-           context_info_ref := NONE;
-           drop_all();
-           raise e)
+  if !proving_with_goalfrag_ref then
+    Tactical.TAC_PROOF(g, tac)
+  else
+    case !theorem_info_ref of
+        NONE => Tactical.TAC_PROOF(g, tac)
+      | SOME info =>
+          prove_outer_theorem (g, tac) info
+          handle e =>
+            (proving_with_goalfrag_ref := false;
+             theorem_info_ref := NONE;
+             context_info_ref := NONE;
+             drop_all();
+             raise e)
 
 fun install ({checkpoint_enabled, tactic_timeout, timeout_marker} : config) =
   (checkpoint_enabled_ref := checkpoint_enabled;
@@ -672,6 +683,7 @@ fun install ({checkpoint_enabled, tactic_timeout, timeout_marker} : config) =
    tactic_timeout_marker_ref := timeout_marker;
    theorem_info_ref := NONE;
    context_info_ref := NONE;
+   proving_with_goalfrag_ref := false;
    Tactical.set_prover goalfrag_prover)
 
 end
