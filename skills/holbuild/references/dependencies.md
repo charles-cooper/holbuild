@@ -56,7 +56,7 @@ The `manifest` path is resolved relative to the consumer's manifest directory.
 
 1. Parse `holproject.toml` and `.holconfig.toml`
 2. For each dependency: check override path → fallback to declared path
-3. Find manifest: dependency's own `holproject.toml` → declared `manifest` → error
+3. Find manifest: `manifest` field (if set) → dependency's own `holproject.toml` → error
 4. Validate: dependency manifest `project.name` must match dependency key name
 5. Resolve dependency's own dependencies recursively (transitive closure)
 6. Each package gets artifacts under `.holbuild/deps/<package-name>/`

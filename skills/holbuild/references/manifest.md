@@ -19,7 +19,7 @@ roots = ["src/MainScript.sml"]  # default build targets when no CLI target given
 git = "https://github.com/org/dep"
 rev = "abc123"          # git commit
 path = "../dep"         # local path (or use .holconfig.toml override)
-manifest = "shim.toml"  # explicit manifest path when dep lacks holproject.toml
+manifest = "shim.toml"  # explicit manifest (if set, dep's own holproject.toml is not used)
 
 # [run] — prototype, not yet functional for consumers
 # heap = "build/main.heap"
@@ -48,8 +48,8 @@ Tables validated: `[holbuild]`, `[project]`, `[build]`, `[run]`, `[dependencies.
 ## Dependency resolution
 
 Each dependency must resolve to a manifest:
-1. Dependency's own `holproject.toml` in its directory
-2. Consumer-supplied `manifest = "shim.toml"` pointing to a manifest file
+1. If `manifest` field is set, that file is used — dependency's own `holproject.toml` is **never consulted**
+2. Otherwise, tries `holproject.toml` in the dependency's directory
 3. If neither exists, build fails with a "no manifest" error
 
 Dependency `name` in `[dependencies.X]` must match the `project.name` in the resolved manifest. Mismatch is an error.
