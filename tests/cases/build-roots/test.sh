@@ -94,9 +94,11 @@ fi
 require_grep "default build should not build ExtraTheory" "$tmpdir/extra.log"
 
 # If [build] exists but omits members, members still defaults to ["."].
-# Source discovery should skip hidden files/directories and unreadable dirs.
+# Source discovery should skip hidden files/directories, unreadable dirs, and symlink dirs.
 dot=$tmpdir/dot
-mkdir -p "$dot/.hidden" "$dot/noaccess"
+symlink_target=$tmpdir/symlink-target
+mkdir -p "$dot/.hidden" "$dot/noaccess" "$symlink_target"
+ln -s "$symlink_target" "$dot/linked-dir"
 chmod 000 "$dot/noaccess"
 cat > "$dot/holproject.toml" <<'TOML'
 [project]
@@ -121,6 +123,9 @@ this hidden file should not be parsed
 SML
 cat > "$dot/.hidden/BadScript.sml" <<'SML'
 this hidden directory should not be scanned
+SML
+cat > "$symlink_target/BadScript.sml" <<'SML'
+this symlink directory should not be scanned
 SML
 
 (cd "$dot" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build) > "$tmpdir/dot.log"

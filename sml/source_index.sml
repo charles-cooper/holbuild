@@ -110,6 +110,7 @@ fun classify package source_root artifact_root policies abs_path =
   end
 
 fun is_dir path = FS.isDir path handle OS.SysErr _ => false
+fun is_link path = FS.isLink path handle OS.SysErr _ => false
 fun is_readable path = FS.access(path, [FS.A_READ]) handle OS.SysErr _ => false
 
 fun glob_match pattern text =
@@ -160,7 +161,8 @@ fun scan_dir package source_root artifact_root policies excludes path acc =
     fun scan_name (name, acc) =
       let val path' = join path name
       in
-        if is_dir path' then
+        if is_link path' then acc
+        else if is_dir path' then
           if skip_dir name orelse not (is_readable path') orelse
              excluded excludes (relative_path source_root path' ^ "/") then acc
           else scan_dir package source_root artifact_root policies excludes path' acc
