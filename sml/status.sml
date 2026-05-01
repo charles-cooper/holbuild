@@ -21,8 +21,54 @@ type t = {
 }
 
 val current_status : t option ref = ref NONE
+val json_mode_ref = ref false
+val json_mutex = Thread.Mutex.mutex ()
 
 val clear_to_eol = "\027[0K"
+
+fun set_json_mode enabled = json_mode_ref := enabled
+fun json_mode () = !json_mode_ref
+
+fun hex_digit n =
+  String.sub("0123456789abcdef", n)
+
+fun unicode_escape code =
+  String.implode [#"\\", #"u", #"0", #"0", hex_digit (code div 16), hex_digit (code mod 16)]
+
+fun json_escape s =
+  String.translate
+    (fn #"\\" => "\\\\"
+      | #"\"" => "\\\""
+      | #"\n" => "\\n"
+      | #"\r" => "\\r"
+      | #"\t" => "\\t"
+      | #"\b" => "\\b"
+      | #"\f" => "\\f"
+      | c => if Char.ord c < 32 then unicode_escape (Char.ord c) else String.str c)
+    s
+
+fun json_string_field name value =
+  "\"" ^ name ^ "\":\"" ^ json_escape value ^ "\""
+
+fun json_int_field name value =
+  "\"" ^ name ^ "\":" ^ Int.toString value
+
+fun json_fields fields = "{" ^ String.concatWith "," fields ^ "}\n"
+
+fun emit_json stream event fields =
+  (Thread.Mutex.lock json_mutex;
+   (TextIO.output(stream, json_fields (json_string_field "event" event :: fields));
+    TextIO.flushOut stream)
+   before Thread.Mutex.unlock json_mutex)
+  handle e => (Thread.Mutex.unlock json_mutex; raise e)
+
+fun json_message stream_name stream text =
+  emit_json stream "message"
+    [json_string_field "stream" stream_name,
+     json_string_field "message" text]
+
+fun error msg =
+  emit_json TextIO.stdErr "error" [json_string_field "message" msg]
 
 fun env_truthy s = s = "1" orelse s = "true" orelse s = "yes" orelse s = "on"
 fun env_falsey s = s = "0" orelse s = "false" orelse s = "no" orelse s = "off"
@@ -41,9 +87,11 @@ fun env_status () =
 fun ansi_stdout () = terminal_primitives.strmIsTTY TextIO.stdOut andalso terminal_primitives.TERM_isANSI ()
 
 fun enabled_by_default () =
-  case env_status () of
-      SOME b => b
-    | NONE => ansi_stdout ()
+  if json_mode () then false
+  else
+    case env_status () of
+        SOME b => b
+      | NONE => ansi_stdout ()
 
 fun positive_int s =
   case Int.fromString s of
@@ -176,23 +224,34 @@ fun start_node status key label =
         let val {enabled, active, ended, ...} = status
         in
           if !ended then ()
-          else if enabled then
+          else
             (active := {key = key, label = label} :: remove_active key (!active);
-             redraw status)
-          else ()
+             if json_mode () then
+               emit_json TextIO.stdOut "node_started"
+                 [json_string_field "key" key,
+                  json_string_field "target" label]
+             else if enabled then redraw status
+             else ())
         end)
 
 fun finish_node status key label outcome =
   with_lock status
     (fn () =>
-        let val {enabled, finished, active, ended, ...} = status
+        let val {enabled, total, finished, active, ended, ...} = status
         in
           if !ended then ()
           else
             (finished := !finished + 1;
              count_outcome status outcome;
              active := remove_active key (!active);
-             if enabled then redraw status
+             if json_mode () then
+               emit_json TextIO.stdOut "node_finished"
+                 [json_string_field "key" key,
+                  json_string_field "target" label,
+                  json_string_field "outcome" (outcome_text outcome),
+                  json_int_field "finished" (!finished),
+                  json_int_field "total" total]
+             else if enabled then redraw status
              else print (label ^ " " ^ outcome_text outcome ^ "\n"))
         end)
 
@@ -208,23 +267,29 @@ fun finish status =
          end);
    current_status := NONE)
 
-fun message stream text =
-  case !current_status of
-      NONE => (TextIO.output (stream, text); TextIO.flushOut stream)
-    | SOME status =>
-        with_lock status
-          (fn () =>
-              let val {enabled, ended, ...} = status
-              in
-                if enabled andalso not (!ended) then
-                  (TextIO.output (TextIO.stdOut, "\r" ^ clear_to_eol);
-                   TextIO.flushOut TextIO.stdOut;
-                   TextIO.output (stream, text);
-                   TextIO.flushOut stream;
-                   redraw status)
-                else
-                  (TextIO.output (stream, text); TextIO.flushOut stream)
-              end)
+fun message_to stream_name stream text =
+  if json_mode () then json_message stream_name stream text
+  else
+    case !current_status of
+        NONE => (TextIO.output (stream, text); TextIO.flushOut stream)
+      | SOME status =>
+          with_lock status
+            (fn () =>
+                let val {enabled, ended, ...} = status
+                in
+                  if enabled andalso not (!ended) then
+                    (TextIO.output (TextIO.stdOut, "\r" ^ clear_to_eol);
+                     TextIO.flushOut TextIO.stdOut;
+                     TextIO.output (stream, text);
+                     TextIO.flushOut stream;
+                     redraw status)
+                  else
+                    (TextIO.output (stream, text); TextIO.flushOut stream)
+                end)
+
+fun message_stdout text = message_to "stdout" TextIO.stdOut text
+fun message_stderr text = message_to "stderr" TextIO.stdErr text
+fun message stream text = message_to "stdout" stream text
 
 fun fail status key label msg =
   (with_lock status

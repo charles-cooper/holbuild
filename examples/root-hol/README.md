@@ -9,7 +9,7 @@ non-build/test/tooling variants that currently collide on logical names or have
 side effects.
 
 The current sketch is a planning boundary, not a bootstrap recipe. It should be
-used as a shim/default-manifest candidate while holbuild still runs from an
+used as holbuild's built-in `HOLDIR` manifest while holbuild still runs from an
 already configured `HOLDIR`.
 
 Probe shape:
@@ -23,9 +23,7 @@ name = "probe"
 [build]
 members = []
 
-[dependencies.HOL]
-path = "$HOLDIR"
-manifest = "$(pwd)/examples/root-hol/holproject.toml"
+[dependencies.HOLDIR]
 EOF
 
 (cd "$tmp" && /path/to/holbuild --holdir "$HOLDIR" build --dry-run)

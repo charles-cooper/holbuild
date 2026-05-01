@@ -63,6 +63,15 @@ exception Error of string
 
 fun die msg = raise Error msg
 
+val holdir_ref : string option ref = ref NONE
+
+fun set_holdir path = holdir_ref := SOME path
+
+fun builtin_holdir_dependency name = name = "HOLDIR"
+
+fun builtin_holdir_manifest () =
+  Path.concat(Path.concat(HolbuildRuntimePaths.source_root, "examples/root-hol"), "holproject.toml")
+
 fun original_dir () =
   case OS.Process.getEnv "HOLBUILD_ORIG_CWD" of
       SOME d => d
@@ -448,14 +457,19 @@ fun dependency_local_path ({root, overrides, ...} : t) (Dependency {name, path, 
   Option.map (abs_under root)
     (case override_path overrides name of
          SOME override => SOME override
-       | NONE => path)
+       | NONE =>
+           case path of
+               SOME p => SOME p
+             | NONE => if builtin_holdir_dependency name then !holdir_ref else NONE)
 
 fun dependency_manifest (project as {manifest = project_manifest, ...} : t) dep =
   case dep of
       Dependency {manifest = SOME manifest, ...} => SOME (abs_under (manifest_root project_manifest) manifest)
-    | Dependency {manifest = NONE, ...} =>
-        Option.map (fn path => Path.concat(path, "holproject.toml"))
-          (dependency_local_path project dep)
+    | Dependency {name, manifest = NONE, ...} =>
+        if builtin_holdir_dependency name then SOME (builtin_holdir_manifest ())
+        else
+          Option.map (fn path => Path.concat(path, "holproject.toml"))
+            (dependency_local_path project dep)
 
 fun heap_to_string (Heap {name, output, objects}) =
   name ^ " -> " ^ output ^ " [" ^ String.concatWith ", " objects ^ "]"

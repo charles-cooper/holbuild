@@ -68,11 +68,12 @@ Transition rule:
 
 ```text
 if dependency X has no holproject.toml, the consumer must provide a shim manifest
-until X adopts one
+until X adopts one; the reserved dependency HOLDIR is the exception and resolves
+through holbuild's built-in root-HOL manifest plus the configured --holdir path
 ```
 
 This keeps resolution explicit without requiring `holbuild` to understand every
-legacy `Holmakefile`.
+legacy `Holmakefile`, while avoiding per-consumer HOLDIR shim manifests.
 
 ## Root HOL
 
@@ -96,10 +97,10 @@ It should not require the user to run a separate global HOL rebuild first, and i
 should not silently depend on a stale configured heap from before the pull.
 
 The root-HOL transition should be explicit rather than inferred from existing
-Holmakefiles. A plausible first in-tree/default manifest has package identity
-`HOL` (or another reserved built-in id), enumerates major source roots as normal
-manifest members, and declares bootstrap/tool phases as manifest concepts rather
-than as ambient directory conventions. External HOL theory dependencies should
+Holmakefiles. The current prototype reserves package identity `HOLDIR` for the
+built-in root-HOL manifest, enumerates major source roots as normal manifest
+members, and declares bootstrap/tool phases as manifest concepts rather than as
+ambient directory conventions. External HOL theory dependencies should
 become normal resolved package nodes with the same action-key and cache rules as
 user packages; they should not be satisfied by loading a configured full HOL heap.
 Any HOL subtree that cannot yet be expressed by the manifest model should use an

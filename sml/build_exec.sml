@@ -578,7 +578,7 @@ fun run_hol_files_to_log tc stage context files log_name error_message =
         log
   in
     if HolbuildToolchain.success status then
-      if echo_child_logs () then HolbuildStatus.message TextIO.stdOut (read_text log handle _ => "") else ()
+      if echo_child_logs () then HolbuildStatus.message_stdout (read_text log handle _ => "") else ()
     else
       raise Error (String.concatWith "\n"
         [error_message,
@@ -592,7 +592,7 @@ fun toolchain_base_context tc = HolState (HolbuildToolchain.base_state tc)
 
 val cache_sml_token = "__HOLBUILD_THEORY_DAT_LOAD__"
 
-fun warn msg = HolbuildStatus.message TextIO.stdErr ("holbuild: warning: " ^ msg ^ "\n")
+fun warn msg = HolbuildStatus.message_stderr ("holbuild: warning: " ^ msg ^ "\n")
 
 fun nonempty_line line = List.exists (not o Char.isSpace) (String.explode line)
 
@@ -1262,7 +1262,7 @@ fun replay_candidate project node checkpoints =
   else best_replay_candidate project node checkpoints
 
 fun checkpoint_resume_message node label =
-  HolbuildStatus.message TextIO.stdOut
+  HolbuildStatus.message_stdout
     (String.concat ["resuming ", logical_name node, " from checkpoint ", label, "\n"])
 
 fun failed_prefix_resume_source policy timeout_marker source checkpoint step_count prefix_text =

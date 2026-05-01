@@ -3,24 +3,27 @@ struct
 
 exception Error of string
 
-fun err msg = (HolbuildStatus.message TextIO.stdErr ("holbuild: " ^ msg ^ "\n");
-               OS.Process.exit OS.Process.failure)
+fun err msg =
+  (if HolbuildStatus.json_mode () then HolbuildStatus.error msg
+   else HolbuildStatus.message_stderr ("holbuild: " ^ msg ^ "\n");
+   OS.Process.exit OS.Process.failure)
 
-fun warn msg = HolbuildStatus.message TextIO.stdErr ("holbuild: warning: " ^ msg ^ "\n")
+fun warn msg = HolbuildStatus.message_stderr ("holbuild: warning: " ^ msg ^ "\n")
 
 fun usage () = print
   "holbuild: experimental project-aware build frontend for HOL4\n\n\
   \Usage:\n\
-  \  holbuild [--holdir PATH] [--maxheap MB] [-jN] context\n\
-  \  holbuild [--holdir PATH] [--maxheap MB] [-jN] build [--dry-run] [--no-cache] [--skip-checkpoints] [--skip-goalfrag] [--tactic-timeout SECONDS] [TARGET ...]\n\
-  \  holbuild [--holdir PATH] [--maxheap MB] [-jN] heap NAME\n\
-  \  holbuild [--holdir PATH] [--maxheap MB] run [ARG ...]\n\
-  \  holbuild [--holdir PATH] [--maxheap MB] repl [ARG ...]\n\
+  \  holbuild [--json] [--holdir PATH] [--maxheap MB] [-jN] context\n\
+  \  holbuild [--json] [--holdir PATH] [--maxheap MB] [-jN] build [--dry-run] [--no-cache] [--skip-checkpoints] [--skip-goalfrag] [--tactic-timeout SECONDS] [TARGET ...]\n\
+  \  holbuild [--json] [--holdir PATH] [--maxheap MB] [-jN] heap NAME\n\
+  \  holbuild [--json] [--holdir PATH] [--maxheap MB] run [ARG ...]\n\
+  \  holbuild [--json] [--holdir PATH] [--maxheap MB] repl [ARG ...]\n\
   \  holbuild cache gc [--retention-days DAYS] [--cache-dir PATH]\n\n\
   \HOLDIR is found from --holdir, HOLBUILD_HOLDIR, or HOLDIR for HOL commands.\n\
   \-j/--jobs controls build parallelism. Default is .holconfig.toml [build].jobs,\n\
   \or max(1, detected processor count / 2). --maxheap/--max-heap passes Poly/ML\n\
-  \maximum heap size in MB to child HOL processes.\n"
+  \maximum heap size in MB to child HOL processes. --json emits newline-delimited\n\
+  \JSON for build status, messages, and errors.\n"
 
 fun nonnegative_real label text =
   case Real.fromString text of
@@ -128,29 +131,30 @@ fun positive_int label text =
 
 fun parse_global_options args =
   let
-    fun loop holdir jobs maxheap rest =
+    fun loop holdir jobs maxheap json rest =
       case rest of
-          [] => ({holdir = holdir, jobs = jobs, maxheap = maxheap}, [])
-        | "--holdir" :: path :: xs => loop (SOME path) jobs maxheap xs
-        | "--jobs" :: n :: xs => loop holdir (SOME (positive_int "--jobs" n)) maxheap xs
-        | "-j" :: n :: xs => loop holdir (SOME (positive_int "-j" n)) maxheap xs
-        | "--maxheap" :: n :: xs => loop holdir jobs (SOME (positive_int "--maxheap" n)) xs
-        | "--max-heap" :: n :: xs => loop holdir jobs (SOME (positive_int "--max-heap" n)) xs
+          [] => ({holdir = holdir, jobs = jobs, maxheap = maxheap, json = json}, [])
+        | "--json" :: xs => loop holdir jobs maxheap true xs
+        | "--holdir" :: path :: xs => loop (SOME path) jobs maxheap json xs
+        | "--jobs" :: n :: xs => loop holdir (SOME (positive_int "--jobs" n)) maxheap json xs
+        | "-j" :: n :: xs => loop holdir (SOME (positive_int "-j" n)) maxheap json xs
+        | "--maxheap" :: n :: xs => loop holdir jobs (SOME (positive_int "--maxheap" n)) json xs
+        | "--max-heap" :: n :: xs => loop holdir jobs (SOME (positive_int "--max-heap" n)) json xs
         | arg :: xs =>
             if String.isPrefix "--holdir=" arg then
-              loop (SOME (String.extract (arg, size "--holdir=", NONE))) jobs maxheap xs
+              loop (SOME (String.extract (arg, size "--holdir=", NONE))) jobs maxheap json xs
             else if String.isPrefix "--jobs=" arg then
-              loop holdir (SOME (positive_int "--jobs" (String.extract (arg, size "--jobs=", NONE)))) maxheap xs
+              loop holdir (SOME (positive_int "--jobs" (String.extract (arg, size "--jobs=", NONE)))) maxheap json xs
             else if String.isPrefix "--maxheap=" arg then
-              loop holdir jobs (SOME (positive_int "--maxheap" (String.extract (arg, size "--maxheap=", NONE)))) xs
+              loop holdir jobs (SOME (positive_int "--maxheap" (String.extract (arg, size "--maxheap=", NONE)))) json xs
             else if String.isPrefix "--max-heap=" arg then
-              loop holdir jobs (SOME (positive_int "--max-heap" (String.extract (arg, size "--max-heap=", NONE)))) xs
+              loop holdir jobs (SOME (positive_int "--max-heap" (String.extract (arg, size "--max-heap=", NONE)))) json xs
             else if String.isPrefix "-j" arg andalso size arg > 2 then
-              loop holdir (SOME (positive_int "-j" (String.extract (arg, 2, NONE)))) maxheap xs
+              loop holdir (SOME (positive_int "-j" (String.extract (arg, 2, NONE)))) maxheap json xs
             else
-              let val (opts, args') = loop holdir jobs maxheap xs in (opts, arg :: args') end
+              let val (opts, args') = loop holdir jobs maxheap json xs in (opts, arg :: args') end
   in
-    loop NONE NONE NONE args
+    loop NONE NONE NONE false args
   end
 
 fun with_input path f =
@@ -205,7 +209,9 @@ fun build tc cli_jobs args =
     val jobs = effective_jobs project cli_jobs
     val ({dry_run, use_cache, skip_checkpoints, goalfrag, tactic_timeout, tactic_timeout_set}, targets) = split_flags args
     val _ =
-      if not goalfrag andalso tactic_timeout_set then
+      if HolbuildStatus.json_mode () andalso dry_run then
+        raise Error "--json does not support build --dry-run yet"
+      else if not goalfrag andalso tactic_timeout_set then
         raise Error "--tactic-timeout requires goalfrag; remove --skip-goalfrag"
       else ()
     val build_options = {use_cache = use_cache,
@@ -299,26 +305,37 @@ fun run_hol tc subcommand user_args =
     else raise Error ("hol " ^ subcommand ^ " failed")
   end
 
+fun reject_json command =
+  if HolbuildStatus.json_mode () then
+    raise Error ("--json does not support " ^ command ^ " yet")
+  else ()
+
 fun dispatch tc jobs args =
   case args of
-      [] => context ()
-    | "context" :: [] => context ()
+      [] => (reject_json "context"; context ())
+    | "context" :: [] => (reject_json "context"; context ())
     | "build" :: rest => build tc jobs rest
-    | "heap" :: [target] => build_heap tc jobs target
+    | "heap" :: [target] => (reject_json "heap"; build_heap tc jobs target)
     | "heap" :: _ => raise Error "usage: holbuild heap NAME"
-    | "run" :: rest => run_hol tc "run" rest
-    | "repl" :: rest => run_hol tc "repl" rest
+    | "run" :: rest => (reject_json "run"; run_hol tc "run" rest)
+    | "repl" :: rest => (reject_json "repl"; run_hol tc "repl" rest)
     | cmd :: _ => raise Error ("unknown command: " ^ cmd)
 
-fun dispatch_with_options {holdir, jobs, maxheap} args =
-  case args of
-      "cache" :: rest => HolbuildCache.dispatch rest
-    | _ =>
-      let val tc = {holdir = runtime_holdir holdir, maxheap = maxheap}
-      in dispatch tc jobs args end
+fun dispatch_with_options {holdir, jobs, maxheap, json} args =
+  (HolbuildStatus.set_json_mode json;
+   case args of
+       "cache" :: rest => (reject_json "cache"; HolbuildCache.dispatch rest)
+     | _ =>
+       let
+         val tc = {holdir = runtime_holdir holdir, maxheap = maxheap}
+         val _ = HolbuildProject.set_holdir (#holdir tc)
+       in
+         dispatch tc jobs args
+       end)
 
 fun main raw_args =
   (let
+     val _ = HolbuildStatus.set_json_mode (List.exists (fn s => s = "--json") raw_args)
      val _ =
        if List.exists (fn s => s = "--help" orelse s = "-h" orelse s = "help") raw_args
        then (usage (); OS.Process.exit OS.Process.success)

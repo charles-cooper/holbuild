@@ -6,7 +6,7 @@
 schema = 1
 
 [project]
-name = "HOL"
+name = "HOLDIR"
 version = "bootstrap-sketch"
 
 [build]

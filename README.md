@@ -96,6 +96,7 @@ bin/holbuild -j4 build MyTheory
 bin/holbuild --maxheap 4096 build MyTheory
 bin/holbuild build --skip-checkpoints MyTheory
 bin/holbuild build --tactic-timeout 5 MyTheory
+bin/holbuild --json build MyTheory
 ```
 
 Useful inspection/maintenance commands:
@@ -133,7 +134,8 @@ the default is 2.5 seconds, and `0` disables the timeout. Dependency packages
 build with no tactic timeout. Combining `--skip-goalfrag` with
 `--tactic-timeout` is an error because the timeout is implemented by the
 goalfrag runtime. Goalfrag/checkpoint/timeout policy affects execution and
-diagnostics, not final theory artifact action keys. `cache gc` uses `$HOLBUILD_CACHE`,
+diagnostics, not final theory artifact action keys. `--json` emits newline-delimited
+JSON status/message/error events for build output. `cache gc` uses `$HOLBUILD_CACHE`,
 `$XDG_CACHE_HOME/holbuild`, or `$HOME/.cache/holbuild` and does not require a HOL
 toolchain.
 
@@ -194,7 +196,9 @@ exclude = ["worktrees/*"]
 ```
 
 The override changes only where the package is found locally. The package still
-needs its own `holproject.toml` or an explicit shim manifest from the consumer.
+needs its own `holproject.toml` or an explicit shim manifest from the consumer,
+except for the reserved `[dependencies.HOLDIR]` package, which uses holbuild's
+built-in root-HOL manifest and the runtime `--holdir`/`HOLBUILD_HOLDIR` path.
 There is no `.holpath`, ambient `HOLPATH`, or user-facing include-path schema in
 project mode; dependency locations are resolved through manifests plus local
 overrides. Local config paths are literal today; shell-style `$HOME` expansion is
