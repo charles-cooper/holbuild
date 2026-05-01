@@ -99,6 +99,16 @@ Proof
      [ACCEPT_TAC TRUTH, ACCEPT_TAC TRUTH, ACCEPT_TAC TRUTH]
 QED
 
+Theorem reverse_multi_goal_order:
+  (T /\ (F ==> F)) /\ T
+Proof
+  CONJ_TAC
+  \\ reverse (TRY CONJ_TAC) THENL
+     [DISCH_TAC \\ FIRST_ASSUM ACCEPT_TAC,
+      ACCEPT_TAC TRUTH,
+      ACCEPT_TAC TRUTH]
+QED
+
 Theorem branch_body_all_subgoals:
   (T /\ T) /\ T
 Proof
