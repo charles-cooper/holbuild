@@ -81,6 +81,13 @@ stale_hash_log=$tmpdir/stale-output-hash.log
 (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$stale_hash_log"
 require_grep "ATheory is up to date" "$stale_hash_log"
 
+input_key=$(grep '^input_key=' "$project/.holbuild/dep/basic/src/AScript.sml.key" | cut -d= -f2)
+cache_manifest="$HOLBUILD_CACHE/actions/$input_key/manifest"
+require_file "$cache_manifest"
+touch -d '10 days ago' "$cache_manifest"
+cache_hit_marker=$tmpdir/cache-hit-marker
+touch -d '1 minute ago' "$cache_hit_marker"
+
 rm -rf "$project/.holbuild"
 cache_log=$tmpdir/cache-restore.log
 (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$cache_log"
@@ -92,9 +99,10 @@ if find "$project/.holbuild/checkpoints" \( -name '*.save' -o -name '*.save.ok' 
   echo "cache restore retained checkpoint files" >&2
   exit 1
 fi
-
-input_key=$(grep '^input_key=' "$project/.holbuild/dep/basic/src/AScript.sml.key" | cut -d= -f2)
-cache_manifest="$HOLBUILD_CACHE/actions/$input_key/manifest"
+if [[ ! "$cache_manifest" -nt "$cache_hit_marker" ]]; then
+  echo "cache hit did not refresh action manifest retention time" >&2
+  exit 1
+fi
 require_file "$cache_manifest"
 printf 'mldep /stale/.holbuild/stage/%s/ATheory\n' "$input_key" >> "$cache_manifest"
 rm -rf "$project/.holbuild"

@@ -981,7 +981,7 @@ fun publish_theory_cache input_key dat_replacements staged_sig staged_sml staged
       in
         case existing of
             SOME old =>
-              if old = manifest then ()
+              if old = manifest then HolbuildCache.touch manifest_path
               else if cache_entry_usable root input_key old then
                 warn ("cache entry already exists with different outputs: " ^ input_key)
               else
@@ -1097,7 +1097,6 @@ fun materialize_theory_cache _ project plan input_key node =
     val root = cache_root ()
     val manifest = HolbuildCache.action_manifest root input_key
     val _ = if file_exists manifest then () else raise Error "cache entry not found"
-    val _ = FS.setTime (manifest, NONE) handle OS.SysErr _ => ()
     val {sig_hash, sml_hash, dat_hash, mldeps} = cache_manifest_blobs root input_key
     val {sig_path, sml_path, data_path, ...} = theory_outputs node
     val template = FS.tmpName ()
@@ -1112,6 +1111,7 @@ fun materialize_theory_cache _ project plan input_key node =
        write_text (hfs_remapped_path sml_path) (read_text sml_path);
        write_local_theory_manifests plan node mldeps;
        remove_checkpoint_family project node;
+       HolbuildCache.touch manifest;
        true)
   in
     (install () before cleanup ()) handle e => (cleanup (); raise e)

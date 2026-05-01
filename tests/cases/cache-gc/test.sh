@@ -25,7 +25,7 @@ touch -d '10 days ago' \
   "$cache/actions/nomani" \
   "$cache/locks/action-stale.lock"
 
-env -u HOLDIR -u HOLBUILD_HOLDIR HOLBUILD_CACHE="$cache" "$HOLBUILD_BIN" cache gc > "$tmpdir/cache-gc.log"
+env -u HOLDIR -u HOLBUILD_HOLDIR HOLBUILD_CACHE="$cache" "$HOLBUILD_BIN" gc --cache-only > "$tmpdir/cache-gc.log"
 
 require_file "$cache/blobs/live"
 [[ ! -e "$cache/blobs/dead" ]] || { echo "unreferenced blob survived" >&2; exit 1; }

@@ -407,7 +407,8 @@ state for shareable dependencies. On a cache hit, holbuild copies blobs into loc
 `.holbuild/`, rewrites local path references, writes local `.uo/.ui` load
 manifests plus `HOLFileSys` remap copies, and materializes the checkpoint/state
 needed by downstream actions. Missing or corrupt cache entries warn and fall back
-to source build.
+to source build. A successful cache hit refreshes the action manifest mtime for
+retention; this avoids relying on filesystem atime policy.
 
 Materialization preference for v1:
 
@@ -434,24 +435,29 @@ views. The state bundle is still only an accelerator: if validation, relocation,
 or toolchain checks fail, holbuild rebuilds the dependency from source or earlier
 validated state.
 
-## Cache GC
+## GC / local-state cleanup
 
-Global cache retention should be bounded by default. Initial policy:
-
-```text
-retain global cache entries for 7 days by default
-```
-
-Expose:
+Project-local residue and global cache retention should be bounded by default. Initial policy:
 
 ```text
-holbuild cache gc
-holbuild cache gc --retention-days 7
-holbuild cache gc --cache-dir /path/to/cache
+retain project-local residue and global cache entries for 7 days by default
 ```
 
-The cache root is `$HOLBUILD_CACHE`, else `$XDG_CACHE_HOME/holbuild`, else
-`$HOME/.cache/holbuild`.
+Expose one user-facing maintenance command:
+
+```text
+holbuild gc
+holbuild gc --retention-days 7
+holbuild gc --cache-dir /path/to/cache
+holbuild gc --clean-only
+holbuild gc --cache-only
+```
+
+By default `holbuild gc` takes the project lock, removes stale project-local
+`.holbuild/stage`, `.holbuild/logs`, and checkpoint artifacts, then runs global
+cache GC. `--clean-only` skips cache GC. `--cache-only` skips project discovery
+and locking, so it works without a HOL toolchain. The cache root is
+`$HOLBUILD_CACHE`, else `$XDG_CACHE_HOME/holbuild`, else `$HOME/.cache/holbuild`.
 
 Future in-tree spelling may be:
 
@@ -459,9 +465,9 @@ Future in-tree spelling may be:
 hol build --gc
 ```
 
-GC should remove stale tmp dirs, remove old action manifests, mark blobs still
-reachable from non-expired manifests, and sweep old unreferenced blobs. Races
-with builds should degrade to cache misses and source rebuilds. The prototype
+GC should remove stale tmp dirs, remove old action manifests by refreshed mtime,
+mark blobs still reachable from non-expired manifests, and sweep old unreferenced
+blobs. Races with builds should degrade to cache misses and source rebuilds. The prototype
 uses a cache-local `locks/gc.lock` directory to avoid concurrent GC runs.
 
 ## Heaps and checkpoints

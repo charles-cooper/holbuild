@@ -34,7 +34,7 @@ This prototype is intentionally small:
 - runs modern theorem proofs through a shared SML goalfrag runtime helper, with tactic parsing/step planning, proof-manager execution, checkpoint saves, timeout handling, and diagnostics kept out of generated per-theory source
 - keeps goalfrag proof execution separate from checkpoint creation; `--skip-checkpoints` avoids theory `.save` files entirely, `--skip-goalfrag` opts out of theorem instrumentation, and `--tactic-timeout SECONDS` controls the root-project per-tactic goalfrag timeout (default 2.5s; `0` disables it)
 - exports explicit project heap targets from `[[heap]]` entries using local SaveState
-- exposes `holbuild cache gc` with a 7-day default global-cache retention policy
+- exposes `holbuild gc` for project-local residue cleanup plus global-cache GC with a 7-day default retention policy
 - does not delegate build semantics to Holmake
 - treats `.uo`/`.ui` as internal ML artifacts, never user-requestable targets
 - delegates execution to `$HOLDIR/bin/hol run` / `hol repl` for now
@@ -104,7 +104,7 @@ Useful inspection/maintenance commands:
 ```sh
 bin/holbuild context
 bin/holbuild build --dry-run MyTheory
-bin/holbuild clean
+bin/holbuild gc
 ```
 
 Additional prototype commands exist for project-context execution and explicit
@@ -135,10 +135,11 @@ build with no tactic timeout. Combining `--skip-goalfrag` with
 `--tactic-timeout` is an error because the timeout is implemented by the
 goalfrag runtime. Goalfrag/checkpoint/timeout policy affects execution and
 diagnostics, not final theory artifact action keys. `--json` emits newline-delimited
-JSON status/message/error events for build output. `clean` removes stale project-local
+JSON status/message/error events for build output. `gc` removes stale project-local
 `.holbuild` stage/log/checkpoint residue and runs global cache GC using `$HOLBUILD_CACHE`,
-`$XDG_CACHE_HOME/holbuild`, or `$HOME/.cache/holbuild`; it does not require a HOL
-toolchain. `cache gc` remains available as the cache-only low-level form.
+`$XDG_CACHE_HOME/holbuild`, or `$HOME/.cache/holbuild`; `gc --clean-only` skips the
+cache and `gc --cache-only` skips project discovery/locking and does not require a HOL
+toolchain.
 
 See `DESIGN.md` for the intended long-term model: manifest-based package
 resolution, project-local `.holbuild/` materialization, action-key invalidation,
@@ -280,9 +281,10 @@ The optional global cache stores simple theory semantic artifacts by action key:
 `Theory.sig`, a path-rebased `Theory.sml` template, and `Theory.dat`. On a cache
 hit, holbuild materializes artifacts into local `.holbuild/`, writes local load
 manifests, and validates hashes before dependents use them. It does not restore
-successful-build checkpoint files by default. `holbuild cache gc` removes stale
-temporary entries, stale action manifests, and old unreferenced blobs after 7
-days by default.
+successful-build checkpoint files by default. Successful cache hits refresh the
+action manifest mtime for retention, rather than relying on filesystem atime.
+`holbuild gc` removes stale project-local build residue and stale global-cache
+temporary entries, action manifests, and old unreferenced blobs after 7 days by default.
 
 `holbuild run` and `holbuild repl` generate `.holbuild/holbuild-run-context.sml`
 in the project root before loading `[run].loads` and user-supplied arguments.

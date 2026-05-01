@@ -18,8 +18,7 @@ fun usage () = print
   \  holbuild [--json] [--holdir PATH] [--maxheap MB] [-jN] heap NAME\n\
   \  holbuild [--json] [--holdir PATH] [--maxheap MB] run [ARG ...]\n\
   \  holbuild [--json] [--holdir PATH] [--maxheap MB] repl [ARG ...]\n\
-  \  holbuild clean [--retention-days DAYS] [--cache-dir PATH]\n\
-  \  holbuild cache gc [--retention-days DAYS] [--cache-dir PATH]\n\n\
+  \  holbuild gc [--retention-days DAYS] [--cache-dir PATH] [--clean-only|--cache-only]\n\n\
   \HOLDIR is found from --holdir, HOLBUILD_HOLDIR, or HOLDIR for HOL commands.\n\
   \-j/--jobs controls build parallelism. Default is .holconfig.toml [build].jobs,\n\
   \or max(1, detected processor count / 2). --maxheap/--max-heap passes Poly/ML\n\
@@ -322,34 +321,49 @@ fun dispatch tc jobs args =
     | "repl" :: rest => (reject_json "repl"; run_hol tc "repl" rest)
     | cmd :: _ => raise Error ("unknown command: " ^ cmd)
 
-fun parse_clean_args args =
+fun parse_gc_args args =
   let
-    fun loop root days rest =
+    fun result root days clean_only cache_only =
+      case (clean_only, cache_only) of
+          (true, true) => raise Error "--clean-only and --cache-only are mutually exclusive"
+        | (true, false) => (root, days, true, false)
+        | (false, true) => (root, days, false, true)
+        | (false, false) => (root, days, true, true)
+    fun loop root days clean_only cache_only rest =
       case rest of
-          [] => (root, days)
-        | "--cache-dir" :: path :: xs => loop (SOME path) days xs
-        | "--retention-days" :: n :: xs => loop root (HolbuildCache.parse_days n) xs
-        | "--days" :: n :: xs => loop root (HolbuildCache.parse_days n) xs
-        | arg :: _ => raise Error ("unknown clean option: " ^ arg)
+          [] => result root days clean_only cache_only
+        | "--cache-dir" :: path :: xs => loop (SOME path) days clean_only cache_only xs
+        | "--retention-days" :: n :: xs => loop root (HolbuildCache.parse_days n) clean_only cache_only xs
+        | "--days" :: n :: xs => loop root (HolbuildCache.parse_days n) clean_only cache_only xs
+        | "--clean-only" :: xs => loop root days true cache_only xs
+        | "--cache-only" :: xs => loop root days clean_only true xs
+        | arg :: _ => raise Error ("unknown gc option: " ^ arg)
   in
-    loop NONE HolbuildCache.default_retention_days args
+    loop NONE HolbuildCache.default_retention_days false false args
   end
 
-fun clean args =
+fun run_project_gc days =
   let
-    val (cache_root, days) = parse_clean_args args
     val project = load_project ()
     fun clean_project () = HolbuildBuildExec.clean_project project days
   in
-    HolbuildBuildExec.with_project_lock project "clean" clean_project;
-    HolbuildCache.gc_root (Option.getOpt(cache_root, HolbuildCache.cache_root ())) days
+    HolbuildBuildExec.with_project_lock project "gc" clean_project
+  end
+
+fun gc args =
+  let
+    val (cache_root, days, clean_project, clean_cache) = parse_gc_args args
+    val _ = if clean_project then run_project_gc days else ()
+    val _ = if clean_cache then HolbuildCache.gc_root (Option.getOpt(cache_root, HolbuildCache.cache_root ())) days else ()
+  in
+    ()
   end
 
 fun dispatch_with_options {holdir, jobs, maxheap, json} args =
   (HolbuildStatus.set_json_mode json;
    case args of
-       "cache" :: rest => (reject_json "cache"; HolbuildCache.dispatch rest)
-     | "clean" :: rest => (reject_json "clean"; clean rest)
+       "gc" :: rest => (reject_json "gc"; gc rest)
+     | "cache" :: rest => (reject_json "cache"; HolbuildCache.dispatch rest)
      | _ =>
        let
          val tc = {holdir = runtime_holdir holdir, maxheap = maxheap}

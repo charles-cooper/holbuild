@@ -39,6 +39,8 @@ fun action_dir root key = Path.concat(actions_dir root, key)
 fun action_manifest root key = Path.concat(action_dir root key, "manifest")
 fun blob_path root hash = Path.concat(blobs_dir root, hash)
 
+fun touch path = FS.setTime(path, NONE) handle OS.SysErr _ => ()
+
 fun ensure_layout root =
   (ensure_dir (actions_dir root); ensure_dir (blobs_dir root); ensure_dir (tmp_dir root))
 
