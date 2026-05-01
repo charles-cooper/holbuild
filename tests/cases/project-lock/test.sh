@@ -62,7 +62,7 @@ if grep -q "holbuild-project-lock-v1" "$second_log"; then
 fi
 
 locked_bad_project=$tmpdir/locked-bad-project
-mkdir -p "$locked_bad_project/.holbuild/locks/project.lock"
+mkdir -p "$locked_bad_project/.holbuild/locks"
 cat > "$locked_bad_project/holproject.toml" <<'TOML'
 [project]
 name = "locked-bad-project"
@@ -70,20 +70,38 @@ name = "locked-bad-project"
 [build]
 members = ["missing"]
 TOML
-cat > "$locked_bad_project/.holbuild/locks/project.lock/owner" <<TOML
-holbuild-project-lock-v1
-command=build
-pid=$$
-cwd=$locked_bad_project
-host=$(cat /proc/sys/kernel/hostname)
-started=live-lock-test
-TOML
+python3 - "$locked_bad_project/.holbuild/locks/project.lock" "$locked_bad_project/.holbuild/locks/project.lock.owner" "$locked_bad_project" <<'PY' &
+import fcntl
+import os
+import sys
+import time
+
+lock, owner, cwd = sys.argv[1:]
+fd = os.open(lock, os.O_RDWR | os.O_CREAT, 0o666)
+fcntl.lockf(fd, fcntl.LOCK_EX)
+with open(owner, 'w', encoding='utf-8') as out:
+    out.write('holbuild-project-lock-v2\n')
+    out.write('command=build\n')
+    out.write(f'pid={os.getpid()}\n')
+    out.write(f'cwd={cwd}\n')
+while True:
+    time.sleep(1)
+PY
+lock_holder=$!
+for _ in $(seq 1 100); do
+  [[ -f "$locked_bad_project/.holbuild/locks/project.lock.owner" ]] && break
+  sleep 0.05
+done
 locked_bad_log=$tmpdir/locked-bad.log
 if (cd "$locked_bad_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build) > "$locked_bad_log" 2>&1; then
   echo "locked project with missing member unexpectedly succeeded" >&2
+  kill "$lock_holder" 2>/dev/null || true
+  wait "$lock_holder" 2>/dev/null || true
   wait "$first_pid" || true
   exit 1
 fi
+kill "$lock_holder" 2>/dev/null || true
+wait "$lock_holder" 2>/dev/null || true
 require_grep "project is already being modified" "$locked_bad_log"
 if grep -q "member does not exist" "$locked_bad_log"; then
   echo "locked build discovered sources before checking the project lock" >&2
@@ -100,45 +118,16 @@ third_log=$tmpdir/third.log
 (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$third_log" 2>&1
 require_grep "ATheory is up to date" "$third_log"
 
-rm -f "$lock"
+rm -f "$lock" "$owner"
 mkdir -p "$lock"
-cat > "$lock/owner" <<TOML
-holbuild-project-lock-v1
-command=build
-pid=999999999
-cwd=$project
-host=$(hostname)
-started=stale-test
-TOML
-stale_log=$tmpdir/stale.log
-(cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$stale_log" 2>&1
-require_grep "removing stale project lock" "$stale_log"
-require_grep "ATheory is up to date" "$stale_log"
-[[ -f "$lock" ]] || { echo "stale legacy project lock was not replaced by lock file" >&2; exit 1; }
-[[ ! -e "$owner" ]] || { echo "project lock owner survived stale recovery build" >&2; exit 1; }
+obsolete_dir_log=$tmpdir/obsolete-dir.log
+(cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$obsolete_dir_log" 2>&1
+require_grep "removing obsolete directory project lock" "$obsolete_dir_log"
+require_grep "ATheory is up to date" "$obsolete_dir_log"
+[[ -f "$lock" ]] || { echo "obsolete directory lock was not replaced by lock file" >&2; exit 1; }
 
 rm -f "$owner"
 missing_owner_log=$tmpdir/missing-owner.log
 (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$missing_owner_log" 2>&1
 require_grep "ATheory is up to date" "$missing_owner_log"
 [[ ! -e "$owner" ]] || { echo "project lock owner survived missing-owner recovery build" >&2; exit 1; }
-
-sleep 30 &
-unrelated_pid=$!
-rm -f "$lock"
-mkdir -p "$lock"
-cat > "$lock/owner" <<TOML
-holbuild-project-lock-v1
-command=build
-pid=$unrelated_pid
-cwd=$project
-host=$(hostname)
-started=namespace-stale-test
-TOML
-namespace_stale_log=$tmpdir/namespace-stale.log
-(cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$namespace_stale_log" 2>&1
-kill "$unrelated_pid" 2>/dev/null || true
-wait "$unrelated_pid" 2>/dev/null || true
-require_grep "removing stale project lock" "$namespace_stale_log"
-require_grep "ATheory is up to date" "$namespace_stale_log"
-[[ -f "$lock" ]] || { echo "namespace-stale legacy project lock was not replaced by lock file" >&2; exit 1; }

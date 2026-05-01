@@ -423,11 +423,40 @@ fun remove_tree path =
 fun remove_tree_if_exists path =
   if path_exists path then remove_tree path else ()
 
+fun children dir =
+  if not (path_exists dir) then []
+  else
+    let
+      val stream = FS.openDir dir
+      fun loop acc =
+        case FS.readDir stream of
+            NONE => rev acc
+          | SOME name =>
+              if name = "." orelse name = ".." then loop acc
+              else loop (Path.concat(dir, name) :: acc)
+      val result = loop [] handle e => (FS.closeDir stream; raise e)
+    in
+      FS.closeDir stream;
+      result
+    end
+
+fun stale cutoff path = Time.<(FS.modTime path, cutoff) handle OS.SysErr _ => false
+
+fun retention_cutoff days =
+  if days < 0 then raise Error "retention days must be non-negative"
+  else Time.-(Time.now(), Time.fromSeconds (IntInf.fromInt (days * 86400)))
+
+fun remove_stale_children cutoff dir =
+  List.foldl
+    (fn (path, removed) =>
+        if stale cutoff path then (remove_tree path; removed + 1) else removed)
+    0
+    (children dir)
+
 fun project_lock_path (project : HolbuildProject.t) =
   Path.concat(Path.concat(#root project, ".holbuild/locks"), "project.lock")
 
 fun project_lock_owner_path lock = lock ^ ".owner"
-fun legacy_project_lock_owner_path lock = Path.concat(lock, "owner")
 
 fun env_default name default = Option.getOpt(OS.Process.getEnv name, default)
 
@@ -490,9 +519,6 @@ fun project_lock_owner command =
 fun current_lock_owner lock =
   SOME (read_text (project_lock_owner_path lock)) handle _ => NONE
 
-fun current_legacy_lock_owner lock =
-  SOME (read_text (legacy_project_lock_owner_path lock)) handle _ => NONE
-
 fun owner_lines owner = String.tokens (fn c => c = #"\n") owner
 
 fun owner_value key owner =
@@ -512,35 +538,6 @@ fun owner_value key owner =
     first (owner_lines owner)
   end
 
-fun local_pid_alive pid = FS.access(Path.concat("/proc", pid), []) handle OS.SysErr _ => false
-
-fun string_contains needle text =
-  let
-    val needle_len = size needle
-    val text_len = size text
-    fun loop i =
-      i + needle_len <= text_len andalso
-      (String.substring(text, i, needle_len) = needle orelse loop (i + 1))
-  in
-    needle_len = 0 orelse loop 0
-  end
-
-fun pid_looks_like_holbuild pid =
-  let
-    val proc = Path.concat("/proc", pid)
-    val cmdline = read_text (Path.concat(proc, "cmdline")) handle _ => ""
-    val comm = read_text (Path.concat(proc, "comm")) handle _ => ""
-  in
-    string_contains "holbuild" cmdline orelse string_contains "holbuild" comm
-  end
-
-fun legacy_pid_owner_alive pid = local_pid_alive pid andalso pid_looks_like_holbuild pid
-
-fun stale_legacy_project_lock owner =
-  case (owner_value "host" owner, owner_value "pid" owner) of
-      (SOME host, SOME pid) => host = current_host () andalso not (legacy_pid_owner_alive pid)
-    | _ => false
-
 fun owner_summary owner =
   let
     fun field name =
@@ -550,13 +547,6 @@ fun owner_summary owner =
   in
     String.concatWith " " [field "command", field "pid", field "cwd"]
   end
-
-fun remove_stale_legacy_project_lock lock owner =
-  (HolbuildStatus.message_stderr
-     ("holbuild: warning: removing stale project lock: " ^ lock ^
-      " (" ^ owner_summary owner ^ ")\n");
-   remove_file (legacy_project_lock_owner_path lock);
-   FS.rmDir lock handle OS.SysErr _ => ())
 
 fun project_lock_error lock owner =
   Error ("project is already being modified by another holbuild process\n" ^
@@ -606,20 +596,18 @@ fun unavailable_owner fd =
 
 fun path_is_dir path = FS.isDir path handle OS.SysErr _ => false
 
-fun reject_or_remove_legacy_project_lock lock =
+fun remove_obsolete_lock_dir lock =
   if path_is_dir lock then
-    case current_legacy_lock_owner lock of
-        SOME owner =>
-          if stale_legacy_project_lock owner then remove_stale_legacy_project_lock lock owner
-          else raise project_lock_error lock owner
-      | NONE => raise project_lock_error lock "owner unavailable\n"
+    (HolbuildStatus.message_stderr
+       ("holbuild: warning: removing obsolete directory project lock: " ^ lock ^ "\n");
+     remove_tree lock)
   else ()
 
 fun acquire_project_lock project command =
   let
     val lock = project_lock_path project
     val _ = ensure_parent lock
-    val _ = reject_or_remove_legacy_project_lock lock
+    val _ = remove_obsolete_lock_dir lock
     val fd = open_project_lock_file lock
     val _ = set_close_on_exec fd
   in
@@ -640,6 +628,43 @@ fun with_project_lock project command f =
   in
     (f () before release_project_lock lock)
     handle e => (release_project_lock lock; raise e)
+  end
+
+fun project_state_dir (project : HolbuildProject.t) name =
+  Path.concat(Path.concat(#root project, ".holbuild"), name)
+
+fun checkpoint_clean_artifact path =
+  has_suffix ".save" path orelse has_suffix ".save.ok" path orelse
+  has_suffix ".meta" path orelse has_suffix ".prefix" path
+
+fun remove_empty_dir path = FS.rmDir path handle OS.SysErr _ => ()
+
+fun remove_stale_checkpoint_artifacts cutoff dir =
+  if not (path_exists dir) then 0
+  else
+    let
+      fun clean_path path removed =
+        if FS.isDir path handle OS.SysErr _ => false then
+          let val removed' = clean_dir path removed
+          in remove_empty_dir path; removed' end
+        else if checkpoint_clean_artifact path andalso stale cutoff path then
+          (remove_file path; removed + 1)
+        else removed
+      and clean_dir path removed = List.foldl (fn (child, count) => clean_path child count) removed (children path)
+    in
+      clean_dir dir 0
+    end
+
+fun clean_project project days =
+  let
+    val cutoff = retention_cutoff days
+    val stage_removed = remove_stale_children cutoff (project_state_dir project "stage")
+    val log_removed = remove_stale_children cutoff (project_state_dir project "logs")
+    val checkpoint_removed = remove_stale_checkpoint_artifacts cutoff (project_state_dir project "checkpoints")
+  in
+    print ("project clean: removed stage=" ^ Int.toString stage_removed ^
+           " logs=" ^ Int.toString log_removed ^
+           " checkpoints=" ^ Int.toString checkpoint_removed ^ "\n")
   end
 
 fun file_exists path = FS.access(path, [FS.A_READ]) handle OS.SysErr _ => false

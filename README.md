@@ -104,7 +104,7 @@ Useful inspection/maintenance commands:
 ```sh
 bin/holbuild context
 bin/holbuild build --dry-run MyTheory
-bin/holbuild cache gc
+bin/holbuild clean
 ```
 
 Additional prototype commands exist for project-context execution and explicit
@@ -135,9 +135,10 @@ build with no tactic timeout. Combining `--skip-goalfrag` with
 `--tactic-timeout` is an error because the timeout is implemented by the
 goalfrag runtime. Goalfrag/checkpoint/timeout policy affects execution and
 diagnostics, not final theory artifact action keys. `--json` emits newline-delimited
-JSON status/message/error events for build output. `cache gc` uses `$HOLBUILD_CACHE`,
-`$XDG_CACHE_HOME/holbuild`, or `$HOME/.cache/holbuild` and does not require a HOL
-toolchain.
+JSON status/message/error events for build output. `clean` removes stale project-local
+`.holbuild` stage/log/checkpoint residue and runs global cache GC using `$HOLBUILD_CACHE`,
+`$XDG_CACHE_HOME/holbuild`, or `$HOME/.cache/holbuild`; it does not require a HOL
+toolchain. `cache gc` remains available as the cache-only low-level form.
 
 See `DESIGN.md` for the intended long-term model: manifest-based package
 resolution, project-local `.holbuild/` materialization, action-key invalidation,
