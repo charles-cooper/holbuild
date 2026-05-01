@@ -1531,12 +1531,14 @@ fun build_theory cache_allowed policy tc project base_context plan keys toolchai
     fun tactic_timeout_error () =
       let
         val words = String.tokens Char.isSpace (read_text timeout_marker)
+        val failure_log = preserve_checkpoint_failure_log project node input_key stage
+        val log_line = case failure_log of NONE => "" | SOME path => "\ninstrumented log: " ^ path
       in
         case rev words of
             seconds :: rev_label_words =>
               Error ("tactic timed out after " ^ seconds ^ "s while building " ^
-                     logical_name node ^ ": " ^ String.concatWith " " (rev rev_label_words))
-          | [] => Error ("tactic timed out while building " ^ logical_name node)
+                     logical_name node ^ ": " ^ String.concatWith " " (rev rev_label_words) ^ log_line)
+          | [] => Error ("tactic timed out while building " ^ logical_name node ^ log_line)
       end
     fun discard_failure_checkpoints () =
       List.app remove_checkpoint (#failure_checkpoints run_spec)

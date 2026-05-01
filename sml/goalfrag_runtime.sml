@@ -213,40 +213,6 @@ fun text_contains_reverse body sp =
   in String.isSubstring "REVERSE" s orelse String.isSubstring "reverse" s end
 
 fun opaque_text body sp = span_text body sp
-fun opaque_named body name sp = String.isPrefix name (opaque_text body sp)
-fun opaque_is_induction body sp = opaque_named body "Induct_on" sp orelse opaque_named body "Induct" sp
-fun opaque_is_case_split body sp = opaque_named body "Cases_on" sp
-fun opaque_is_conj_tac body sp = opaque_named body "CONJ_TAC" sp orelse opaque_named body "conj_tac" sp
-
-fun expr_is_conj_tac body e =
-  case e of
-      TacticParse.Opaque (_, sp) => opaque_is_conj_tac body sp
-    | TacticParse.Group (_, _, e) => expr_is_conj_tac body e
-    | _ => false
-
-fun expr_can_create_shared_subgoals body e =
-  case e of
-      TacticParse.Opaque (_, sp) => opaque_is_induction body sp orelse opaque_is_case_split body sp
-    | TacticParse.Repeat e => expr_is_conj_tac body e
-    | TacticParse.Try e => expr_is_conj_tac body e
-    | TacticParse.Group (_, _, e) => expr_can_create_shared_subgoals body e
-    | TacticParse.RepairGroup (_, _, e, _) => expr_can_create_shared_subgoals body e
-    | _ => false
-
-fun then_requires_atomic body [] = false
-  | then_requires_atomic body [_] = false
-  | then_requires_atomic body (e :: rest) =
-      expr_can_create_shared_subgoals body e orelse
-      expr_requires_atomic body e orelse
-      then_requires_atomic body rest
-and expr_requires_atomic body e =
-  case e of
-      TacticParse.Then es => then_requires_atomic body es
-    | TacticParse.Group (_, _, e) => expr_requires_atomic body e
-    | TacticParse.RepairGroup (_, _, e, _) => expr_requires_atomic body e
-    | _ => false
-
-fun body_requires_atomic body = expr_requires_atomic body (parse_tactic body) handle _ => false
 
 fun exprs_contain_reverse body es = List.exists (expr_contains_reverse body) es
 and expr_contains_reverse body e =
@@ -432,35 +398,6 @@ fun merge_reverse_steps [] acc = rev acc
       merge_reverse_steps rest ((tacEnd, "expand", "Tactical.REVERSE (" ^ tacText ^ ")") :: acc)
   | merge_reverse_steps (step :: rest) acc = merge_reverse_steps rest (step :: acc)
 
-fun join_then_tactic [] = "ALL_TAC"
-  | join_then_tactic [t] = t
-  | join_then_tactic ts = String.concatWith " >> " ts
-
-fun is_branch_open "open_then1" = true
-  | is_branch_open "open_first" = true
-  | is_branch_open _ = false
-
-fun collect_branch_body steps =
-  let
-    fun go [] _ _ = NONE
-      | go ((_, "close", closeText) :: rest) acc last = SOME (join_then_tactic (rev acc), last, closeText, rest)
-      | go ((endp, "expand", text) :: rest) acc _ = go rest (text :: acc) endp
-      | go _ _ _ = NONE
-  in go steps [] 0 end
-
-fun merge_branch_body_steps [] acc = rev acc
-  | merge_branch_body_steps ((openStep as (_, "open", openText)) :: rest) acc =
-      if is_branch_open openText then
-        (case collect_branch_body rest of
-             SOME (bodyText, bodyEnd, closeText, after) =>
-               if body_requires_atomic bodyText then
-                 merge_branch_body_steps after ((bodyEnd, "close", closeText) ::
-                                                (bodyEnd, "expand", bodyText) :: openStep :: acc)
-               else merge_branch_body_steps rest (openStep :: acc)
-           | NONE => merge_branch_body_steps rest (openStep :: acc))
-      else merge_branch_body_steps rest (openStep :: acc)
-  | merge_branch_body_steps (step :: rest) acc = merge_branch_body_steps rest (step :: acc)
-
 fun merge_select_steps [] acc = rev acc
   | merge_select_steps ((endP, kind, patText) :: rest) acc =
       if is_select kind then
@@ -507,8 +444,7 @@ fun steps body =
           end
   in
     merge_select_steps
-      (merge_branch_body_steps
-        (merge_reverse_steps (merge_by_steps (assign frags 0 []) []) []) []) []
+      (merge_reverse_steps (merge_by_steps (assign frags 0 []) []) []) []
   end
 
 fun report_step_failure label e = (save_failed_prefix_checkpoint (); print_goal_state label; raise e)
