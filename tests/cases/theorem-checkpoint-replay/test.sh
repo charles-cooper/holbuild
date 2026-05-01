@@ -265,7 +265,7 @@ if (cd "$timeout_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --tactic-t
   echo "expected looping tactic to time out" >&2
   exit 1
 fi
-require_grep "tactic timed out while building ATheory" "$timeout_log"
+require_grep "tactic timed out after 0.1s while building ATheory: loop_tac" "$timeout_log"
 if grep -q "goalfrag/checkpoint run failed\|plain-source fallback disabled" "$timeout_log"; then
   echo "timeout was reported as generic instrumentation failure" >&2
   exit 1

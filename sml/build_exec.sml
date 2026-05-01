@@ -1529,8 +1529,15 @@ fun build_theory cache_allowed policy tc project base_context plan keys toolchai
     val run_spec = write_theory_script policy project base_context plan keys input_key toolchain_key node
                                     source_text theorem_checkpoints staged_script preload timeout_marker
     fun tactic_timeout_error () =
-      Error ("tactic timed out while building " ^ logical_name node ^ ": " ^
-             String.concatWith " " (String.tokens Char.isSpace (read_text timeout_marker)))
+      let
+        val words = String.tokens Char.isSpace (read_text timeout_marker)
+      in
+        case rev words of
+            seconds :: rev_label_words =>
+              Error ("tactic timed out after " ^ seconds ^ "s while building " ^
+                     logical_name node ^ ": " ^ String.concatWith " " (rev rev_label_words))
+          | [] => Error ("tactic timed out while building " ^ logical_name node)
+      end
     fun discard_failure_checkpoints () =
       List.app remove_checkpoint (#failure_checkpoints run_spec)
     fun checkpoint_failure_error msg =

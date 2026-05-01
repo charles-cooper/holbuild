@@ -105,7 +105,7 @@ if (cd "$root_timeout_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --tac
   echo "expected root project tactic to time out" >&2
   exit 1
 fi
-require_grep "tactic timed out while building ATheory" "$root_timeout_log"
+require_grep "tactic timed out after 0.1s while building ATheory: slow_tac" "$root_timeout_log"
 
 root_default_project=$tmpdir/root-default
 mkdir -p "$root_default_project/src"
