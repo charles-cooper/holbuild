@@ -568,9 +568,10 @@ chains such as `A >> B >> C` should stay as independent `expand` steps; ordinary
 branch/list/select syntax should introduce GoalFrag structure. Avoid name-based
 tactic heuristics for atomicity: opaque tactic calls are leaves, and
 shape-specific merging should be justified by the parsed branch/list/select form.
-The current compatibility exception is `REVERSE` combined with branch/list forms,
-which is still kept grouped because structural replay can trip GoalFrag validation
-shape accounting; treat that as a narrow runtime limitation to remove, not as a
+Current compatibility exceptions are `REVERSE` combined with branch/list forms
+and `THENL`/`TACS_TO_LT` list tacticals, which are still kept grouped because
+fully structural replay can trip GoalFrag validation shape accounting even when
+all goals are solved; treat these as narrow runtime limitations to remove, not as
 precedent for broad branch-body atomicity.
 
 Attributed proofs and declarations with no parsed tactic body use a conservative
