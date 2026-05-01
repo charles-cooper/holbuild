@@ -862,6 +862,24 @@ fun reject_transient_cache_mldeps mldeps =
       SOME dep => raise Error ("cache manifest contains transient stage mldep: " ^ dep)
     | NONE => ()
 
+fun cache_manifest_contains_transient_stage_mldep text =
+  List.exists
+    (fn line =>
+        case String.tokens Char.isSpace line of
+            ["mldep", dep] => transient_stage_mldep dep
+          | _ => false)
+    (cache_manifest_lines text)
+
+fun drop_cache_manifest_if_unchanged root input_key manifest old_text =
+  let
+    fun drop () =
+      case current_metadata manifest of
+          SOME current => if current = old_text then remove_file manifest else ()
+        | NONE => ()
+  in
+    HolbuildCache.with_action_publish_lock root input_key drop (fn () => ())
+  end
+
 fun add_mldep dep deps =
   if not (valid_mldep_name dep) then
     raise Error ("cache manifest invalid mldep: " ^ dep)
@@ -1097,7 +1115,13 @@ fun materialize_theory_cache _ project plan input_key node =
     val root = cache_root ()
     val manifest = HolbuildCache.action_manifest root input_key
     val _ = if file_exists manifest then () else raise Error "cache entry not found"
-    val {sig_hash, sml_hash, dat_hash, mldeps} = cache_manifest_blobs root input_key
+    val manifest_text = read_text manifest
+    val _ =
+      if cache_manifest_contains_transient_stage_mldep manifest_text then
+        drop_cache_manifest_if_unchanged root input_key manifest manifest_text
+      else ()
+    val {sig_hash, sml_hash, dat_hash, mldeps} =
+      cache_manifest_blobs_from_lines input_key (cache_manifest_lines manifest_text)
     val {sig_path, sml_path, data_path, ...} = theory_outputs node
     val template = FS.tmpName ()
     fun cleanup () = FS.remove template handle OS.SysErr _ => ()

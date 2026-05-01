@@ -407,8 +407,11 @@ state for shareable dependencies. On a cache hit, holbuild copies blobs into loc
 `.holbuild/`, rewrites local path references, writes local `.uo/.ui` load
 manifests plus `HOLFileSys` remap copies, and materializes the checkpoint/state
 needed by downstream actions. Missing or corrupt cache entries warn and fall back
-to source build. A successful cache hit refreshes the action manifest mtime for
-retention; this avoids relying on filesystem atime policy.
+to source build. Cache manifests that contain transient `.holbuild/stage` mldeps
+are removed under the per-action cache lock as soon as restore detects them, so
+an interrupted fallback rebuild should not warn repeatedly about the same known-bad
+entry. A successful cache hit refreshes the action manifest mtime for retention;
+this avoids relying on filesystem atime policy.
 
 Materialization preference for v1:
 

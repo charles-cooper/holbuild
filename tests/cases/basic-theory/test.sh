@@ -119,6 +119,33 @@ if [[ -e "$cache_manifest" ]] && grep -q "\.holbuild/stage" "$cache_manifest"; t
   exit 1
 fi
 
+cp "$project/src/AScript.sml" "$tmpdir/AScript.good.sml"
+cat >> "$project/src/AScript.sml" <<'SML'
+val _ = raise Fail "forced source failure after cache miss";
+SML
+bad_key=$(cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --dry-run ATheory | awk '/input_key:/ {print $2; exit}')
+bad_manifest="$HOLBUILD_CACHE/actions/$bad_key/manifest"
+mkdir -p "$(dirname "$bad_manifest")"
+cat > "$bad_manifest" <<EOF
+holbuild-cache-action-v1
+input_key=$bad_key
+kind=theory
+mldeps
+mldep /stale/.holbuild/stage/$bad_key/ATheory
+blob sig 0000000000000000000000000000000000000000
+blob sml-template 0000000000000000000000000000000000000000
+blob dat 0000000000000000000000000000000000000000
+EOF
+rm -rf "$project/.holbuild"
+bad_manifest_log=$tmpdir/stale-cache-manifest-source-fails.log
+if (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$bad_manifest_log" 2>&1; then
+  echo "source failure test unexpectedly succeeded" >&2
+  exit 1
+fi
+require_grep "cache entry unusable for ATheory" "$bad_manifest_log"
+[[ ! -e "$bad_manifest" ]] || { echo "transient stage mldep manifest survived failed source rebuild" >&2; exit 1; }
+cp "$tmpdir/AScript.good.sml" "$project/src/AScript.sml"
+
 rm -rf "$project/.holbuild"
 no_cache_log=$tmpdir/no-cache.log
 (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --no-cache ATheory) > "$no_cache_log"
