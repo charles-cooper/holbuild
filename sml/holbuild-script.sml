@@ -9,6 +9,11 @@ fun compile_holdir () =
 
 val compile_time_holdir = compile_holdir ();
 
+structure HolbuildRuntimePaths =
+struct
+  val source_root = OS.FileSys.getDir ()
+end
+
 fun use_hol rel = use (OS.Path.concat(compile_time_holdir, rel));
 
 use_hol("tools/Holmake/toml/TOMLvalue_dtype.sml");
