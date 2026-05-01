@@ -28,7 +28,7 @@ datatype dependency =
 
 datatype override = Override of {name : string, path : string}
 
-datatype local_config = LocalConfig of {overrides : override list, build_excludes : string list, build_jobs : int option}
+datatype local_config = LocalConfig of {overrides : override list, build_excludes : string list, build_jobs : int option, build_tactic_timeout : real option}
 
 datatype package =
   Package of
@@ -53,6 +53,7 @@ type t =
     overrides : override list,
     local_build_excludes : string list,
     local_build_jobs : int option,
+    build_tactic_timeout : real option,
     run_heap : string option,
     run_loads : string list,
     heaps : heap list,
@@ -116,6 +117,12 @@ fun int_at table key =
       NONE => NONE
     | SOME (TOML.INTEGER n) => SOME n
     | SOME _ => die (key_text key ^ " must be an integer")
+
+fun real_at table key =
+  case lookup table key of
+      NONE => NONE
+    | SOME (TOML.FLOAT r) => SOME r
+    | SOME _ => die (key_text key ^ " must be a real number")
 
 fun positive_int_field context n =
   if n >= IntInf.fromInt 1 then
@@ -240,7 +247,7 @@ fun validate_manifest_table table =
               ["holbuild", "project", "build", "dependencies", "run", "heap", "actions"] table
     val _ = Option.app (require_known_fields "project" ["name", "version"])
               (table_field table ["project"])
-    val _ = Option.app (require_known_fields "build" ["members", "exclude", "roots"])
+    val _ = Option.app (require_known_fields "build" ["members", "exclude", "roots", "tactic_timeout"])
               (table_field table ["build"])
     val _ = Option.app (require_known_fields "run" ["heap", "loads"])
               (table_field table ["run"])
@@ -263,7 +270,7 @@ fun validate_override_table (name, table) =
   require_known_fields ("overrides." ^ name) ["path"] table
 
 fun validate_local_build_table table =
-  require_known_fields ".holconfig.toml build" ["exclude", "jobs"] table
+  require_known_fields ".holconfig.toml build" ["exclude", "jobs", "tactic_timeout"] table
 
 fun validate_local_config_table table =
   (require_known_fields ".holconfig.toml" ["overrides", "build"] table;
@@ -317,6 +324,16 @@ fun local_build_jobs table =
       NONE => NONE
     | SOME build => Option.map (positive_int_field ".holconfig.toml build.jobs") (int_at build ["jobs"])
 
+fun local_build_tactic_timeout table =
+  case table_field table ["build"] of
+      NONE => NONE
+    | SOME build => real_at build ["tactic_timeout"]
+
+fun build_tactic_timeout_from_manifest build =
+  case build of
+      NONE => NONE
+    | SOME t => real_at t ["tactic_timeout"]
+
 fun parse_local_config root =
   let val config = Path.concat(root, ".holconfig.toml")
   in
@@ -326,9 +343,10 @@ fun parse_local_config root =
         validate_local_config_table table;
         LocalConfig {overrides = overrides_at table,
                      build_excludes = local_build_excludes table,
-                     build_jobs = local_build_jobs table}
+                     build_jobs = local_build_jobs table,
+                     build_tactic_timeout = local_build_tactic_timeout table}
       end
-    else LocalConfig {overrides = [], build_excludes = [], build_jobs = NONE}
+    else LocalConfig {overrides = [], build_excludes = [], build_jobs = NONE, build_tactic_timeout = NONE}
   end
 
 fun parse_at {manifest, root, local_config} =
@@ -343,10 +361,11 @@ fun parse_at {manifest, root, local_config} =
       case build of
           NONE => default
         | SOME t => Option.getOpt(string_array_field_opt t name, default)
-    val LocalConfig {overrides, build_excludes, build_jobs} = local_config
+    val LocalConfig {overrides, build_excludes, build_jobs, build_tactic_timeout} = local_config
     val members = package_relative_paths "build.members" (build_strings "members" ["."])
     val excludes = package_relative_paths "build.exclude" (build_strings "exclude" []) @ build_excludes
     val roots = package_relative_paths "build.roots" (build_strings "roots" [])
+    val manifest_timeout = build_tactic_timeout_from_manifest build
   in
     { root = root,
       manifest = manifest,
@@ -359,6 +378,7 @@ fun parse_at {manifest, root, local_config} =
       overrides = overrides,
       local_build_excludes = build_excludes,
       local_build_jobs = build_jobs,
+      build_tactic_timeout = case build_tactic_timeout of NONE => manifest_timeout | some => some,
       run_heap = Option.mapPartial (fn t => string_field t "heap") run,
       run_loads = from run (fn t => string_array_field t "loads") [],
       heaps = heaps_at table,
@@ -479,7 +499,8 @@ fun dependency_project (project : t) (dep as Dependency {name, ...}) =
     val dep_project = parse_at {manifest = dep_manifest, root = dep_root,
                                 local_config = LocalConfig {overrides = #overrides project,
                                                             build_excludes = #local_build_excludes project,
-                                                            build_jobs = #local_build_jobs project}}
+                                                            build_jobs = #local_build_jobs project,
+                                                            build_tactic_timeout = #build_tactic_timeout project}}
     val declared_name = #name dep_project
     val _ =
       case declared_name of
@@ -532,7 +553,7 @@ fun packages (project : t) =
 fun describe (project : t) =
   let
     val {root, manifest, name, version, members, excludes, roots, dependencies,
-         overrides, local_build_excludes, local_build_jobs, run_heap, run_loads, heaps, action_policies} = project
+         overrides, local_build_excludes, local_build_jobs, build_tactic_timeout, run_heap, run_loads, heaps, action_policies} = project
     fun opt label value =
       case value of NONE => () | SOME s => print (label ^ s ^ "\n")
   in
@@ -546,6 +567,7 @@ fun describe (project : t) =
     List.app (fn dep => print ("dependency: " ^ dependency_to_string project dep ^ "\n")) dependencies;
     List.app (fn override => print ("override: " ^ override_to_string override ^ "\n")) overrides;
     Option.app (fn jobs => print ("local build.jobs: " ^ Int.toString jobs ^ "\n")) local_build_jobs;
+    Option.app (fn t => print ("build.tactic_timeout: " ^ Real.toString t ^ "\n")) build_tactic_timeout;
     opt "run.heap: " run_heap;
     print ("run.loads: " ^ String.concatWith ", " run_loads ^ "\n");
     List.app (fn heap => print ("heap: " ^ heap_to_string heap ^ "\n")) heaps;

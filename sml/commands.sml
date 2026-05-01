@@ -60,7 +60,7 @@ fun split_flags args =
               let val (flags, ys) = loop dry use_cache skip_checkpoints goalfrag tactic_timeout tactic_timeout_set xs
               in (flags, x :: ys) end
   in
-    loop false true false true (SOME 2.5) false args
+    loop false true false true NONE false args
   end
 
 fun has_suffix suffix s =
@@ -204,7 +204,12 @@ fun build tc cli_jobs args =
     val build_options = {use_cache = use_cache,
                          skip_checkpoints = skip_checkpoints,
                          goalfrag = goalfrag,
-                         tactic_timeout = tactic_timeout}
+                         tactic_timeout =
+                           case tactic_timeout of
+                               SOME _ => tactic_timeout
+                             | NONE => (case #build_tactic_timeout project of
+                                          NONE => SOME 2.5
+                                        | some => some)}
     fun prepare_plan () =
       let
         val index = timed_phase "source.discover" (fn () => HolbuildSourceIndex.discover project)
