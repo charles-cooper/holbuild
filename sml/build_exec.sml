@@ -1175,7 +1175,7 @@ fun write_theory_script policy project base_context plan keys input_key toolchai
   if not (checkpoint_enabled policy) then
     (write_plain_preload plan node preload;
      write_text staged_script (instrumented_source policy (SOME timeout_marker) source_text 0 checkpoints);
-     {context = base_context, files = [preload, staged_script]})
+     {context = base_context, files = [preload, staged_script], failure_checkpoints = []})
   else
     let
       val deps_key = dependency_context_key toolchain_key plan keys node
@@ -1184,11 +1184,11 @@ fun write_theory_script policy project base_context plan keys input_key toolchai
       fun run_from_deps_checkpoint () =
         (write_text staged_script (instrumented_source policy (SOME timeout_marker) source_text 0 checkpoints);
          checkpoint_resume_message node "deps_loaded";
-         {context = HolState deps_loaded, files = [staged_script]})
+         {context = HolState deps_loaded, files = [staged_script], failure_checkpoints = [deps_loaded]})
       fun run_from_fresh_preload () =
         (write_preload plan node deps_loaded deps_ok preload;
          write_text staged_script (instrumented_source policy (SOME timeout_marker) source_text 0 checkpoints);
-         {context = base_context, files = [preload, staged_script]})
+         {context = base_context, files = [preload, staged_script], failure_checkpoints = []})
     in
       case replay_candidate project node checkpoints of
           SOME {boundary, path, safe_name} =>
@@ -1196,7 +1196,7 @@ fun write_theory_script policy project base_context plan keys input_key toolchai
               val _ = write_text staged_script (instrumented_source policy (SOME timeout_marker) source_text boundary checkpoints)
               val _ = checkpoint_resume_message node safe_name
             in
-              {context = HolState path, files = [staged_script]}
+              {context = HolState path, files = [staged_script], failure_checkpoints = [path, deps_loaded]}
             end
         | NONE =>
             if deps_checkpoint_exists deps_loaded deps_key then run_from_deps_checkpoint ()
@@ -1245,8 +1245,11 @@ fun build_theory cache_allowed policy tc project base_context plan keys toolchai
     fun tactic_timeout_error () =
       Error ("tactic timed out while building " ^ logical_name node ^ ": " ^
              String.concatWith " " (String.tokens Char.isSpace (read_text timeout_marker)))
+    fun discard_failure_checkpoints () =
+      List.app remove_checkpoint (#failure_checkpoints run_spec)
     fun checkpoint_failure_error msg =
       let
+        val _ = discard_failure_checkpoints ()
         val failure_log = preserve_checkpoint_failure_log project node input_key stage
         val reason = Option.mapPartial summarize_log failure_log
         val detail =
@@ -1402,8 +1405,15 @@ fun metadata_input_key_matches input_key text =
    commits to source hash, dependency keys, toolchain key, and declared action
    policy, so do not rebuild full diagnostic metadata here; doing so recomputes
    dependency-context closures for every unchanged node. *)
+fun file_nonempty path = file_exists path andalso OS.FileSys.fileSize path > 0
+
+fun output_exists_for_node node path =
+  case #kind (HolbuildBuildPlan.source_of node) of
+      HolbuildSourceIndex.TheoryScript => file_nonempty path
+    | _ => file_exists path
+
 fun up_to_date checkpoint_policy project _ _ input_key _ node _ =
-  List.all file_exists (output_paths checkpoint_policy project node) andalso
+  List.all (output_exists_for_node node) (output_paths checkpoint_policy project node) andalso
   (case current_metadata (metadata_path project node) of
        SOME text => metadata_input_key_matches input_key text
      | NONE => false)

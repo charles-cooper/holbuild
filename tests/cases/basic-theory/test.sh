@@ -61,6 +61,19 @@ second_log=$tmpdir/second.log
 (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$second_log"
 require_grep "ATheory is up to date" "$second_log"
 
+: > "$project/.holbuild/gen/src/ATheory.sml"
+: > "$project/.holbuild/gen/src/ATheory.sig"
+zero_output_log=$tmpdir/zero-output.log
+(cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$zero_output_log"
+if grep -q "ATheory is up to date" "$zero_output_log"; then
+  echo "zero-byte theory outputs were treated as up to date" >&2
+  exit 1
+fi
+if [[ ! -s "$project/.holbuild/gen/src/ATheory.sml" || ! -s "$project/.holbuild/gen/src/ATheory.sig" ]]; then
+  echo "zero-byte theory outputs were not repaired" >&2
+  exit 1
+fi
+
 metadata="$project/.holbuild/dep/basic/src/AScript.sml.key"
 require_grep "^output-sha1=" "$metadata"
 sed -i 's/^output-sha1=.*/output-sha1=stale-diagnostic-hash/' "$metadata"
