@@ -311,15 +311,22 @@ fun close_name TacticParse.FClose = "close_paren"
   | close_name TacticParse.FCloseRepeat = "close_repeat"
   | close_name TacticParse.FCloseFirstLT = "close_first_lt"
 
-fun frag_type (TacticParse.FAtom (TacticParse.LSelectGoal _)) = "select"
-  | frag_type (TacticParse.FAtom (TacticParse.LSelectGoals _)) = "selects"
-  | frag_type (TacticParse.FAtom TacticParse.LReverse) = "expand_list"
-  | frag_type (TacticParse.FAtom (TacticParse.LTacsToLT _)) = "expand_list"
-  | frag_type (TacticParse.FAtom _) = "expand"
-  | frag_type (TacticParse.FFOpen _) = "open"
-  | frag_type (TacticParse.FFMid _) = "mid"
-  | frag_type (TacticParse.FFClose _) = "close"
-  | frag_type _ = ""
+datatype goalfrag_step =
+    StepOpen of {end_pos : int, label : string}
+  | StepMid of {end_pos : int, label : string}
+  | StepClose of {end_pos : int, label : string}
+  | StepExpand of {end_pos : int, label : string}
+  | StepExpandList of {end_pos : int, label : string}
+  | StepSelect of {end_pos : int, label : string}
+  | StepSelects of {end_pos : int, label : string}
+
+fun step_end (StepOpen {end_pos, ...}) = end_pos
+  | step_end (StepMid {end_pos, ...}) = end_pos
+  | step_end (StepClose {end_pos, ...}) = end_pos
+  | step_end (StepExpand {end_pos, ...}) = end_pos
+  | step_end (StepExpandList {end_pos, ...}) = end_pos
+  | step_end (StepSelect {end_pos, ...}) = end_pos
+  | step_end (StepSelects {end_pos, ...}) = end_pos
 
 fun substring s (a, b) = String.substring(s, a, b - a)
 
@@ -348,9 +355,13 @@ fun frag_text body (TacticParse.FAtom a) =
   | frag_text _ (TacticParse.FFClose cls) = close_name cls
   | frag_text _ _ = ""
 
-fun is_select "select" = true
-  | is_select "selects" = true
-  | is_select _ = false
+fun is_select_step (StepSelect _) = true
+  | is_select_step (StepSelects _) = true
+  | is_select_step _ = false
+
+fun select_prefix_step (StepSelect {label, ...}) = "Q.SELECT_GOAL_LT " ^ label
+  | select_prefix_step (StepSelects {label, ...}) = "Q.SELECT_GOALS_LT " ^ label
+  | select_prefix_step _ = raise Fail "expected select step"
 
 fun subgoal_term subgoalText =
   if String.isPrefix "sg " subgoalText then SOME (String.extract(subgoalText, 3, NONE)) else NONE
@@ -362,67 +373,83 @@ fun join_tactic [] = "ALL_TAC"
 fun collect_then1_steps steps =
   let
     fun go [] _ _ = NONE
-      | go ((_, "close", _) :: rest) acc last = SOME (join_tactic (rev acc), last, rest)
-      | go ((endp, "expand", text) :: rest) acc _ = go rest (text :: acc) endp
+      | go (StepClose _ :: rest) acc last = SOME (join_tactic (rev acc), last, rest)
+      | go (StepExpand {end_pos, label} :: rest) acc _ = go rest (label :: acc) end_pos
       | go _ _ _ = NONE
   in go steps [] 0 end
 
 fun merge_subgoal_then1 connective term bodySteps acc =
   case collect_then1_steps bodySteps of
       SOME (tacText, tacEnd, rest) =>
-        SOME (merge_by_steps rest ((tacEnd, "expand", term ^ connective ^ "(" ^ tacText ^ ")") :: acc))
+        SOME (merge_by_steps rest (StepExpand {end_pos = tacEnd, label = term ^ connective ^ "(" ^ tacText ^ ")"} :: acc))
     | NONE => NONE
 and merge_by_steps [] acc = rev acc
-  | merge_by_steps ((subEnd, "expand", subgoalText) ::
-                    (reverseStep as (_, "expand_list", "Tactical.REVERSE_LT")) ::
-                    (openStep as (_, "open", "open_then1")) :: rest) acc =
+  | merge_by_steps ((subgoalStep as StepExpand {end_pos = subEnd, label = subgoalText}) ::
+                    (reverseStep as StepExpandList {label = "Tactical.REVERSE_LT", ...}) ::
+                    (openStep as StepOpen {label = "open_then1", ...}) :: rest) acc =
       (case subgoal_term subgoalText of
            SOME term =>
              (case merge_subgoal_then1 " suffices_by " term rest acc of
                   SOME steps => steps
-                | NONE => merge_by_steps (reverseStep :: openStep :: rest) ((subEnd, "expand", subgoalText) :: acc))
-         | NONE => merge_by_steps (reverseStep :: openStep :: rest) ((subEnd, "expand", subgoalText) :: acc))
-  | merge_by_steps ((subEnd, "expand", subgoalText) ::
-                    (openStep as (_, "open", "open_then1")) :: rest) acc =
+                | NONE => merge_by_steps (reverseStep :: openStep :: rest) (subgoalStep :: acc))
+         | NONE => merge_by_steps (reverseStep :: openStep :: rest) (subgoalStep :: acc))
+  | merge_by_steps ((subgoalStep as StepExpand {label = subgoalText, ...}) ::
+                    (openStep as StepOpen {label = "open_then1", ...}) :: rest) acc =
       (case subgoal_term subgoalText of
            SOME term =>
              (case merge_subgoal_then1 " by " term rest acc of
                   SOME steps => steps
-                | NONE => merge_by_steps (openStep :: rest) ((subEnd, "expand", subgoalText) :: acc))
-         | NONE => merge_by_steps (openStep :: rest) ((subEnd, "expand", subgoalText) :: acc))
+                | NONE => merge_by_steps (openStep :: rest) (subgoalStep :: acc))
+         | NONE => merge_by_steps (openStep :: rest) (subgoalStep :: acc))
   | merge_by_steps (step :: rest) acc = merge_by_steps rest (step :: acc)
 
 fun merge_reverse_steps [] acc = rev acc
-  | merge_reverse_steps ((_, "expand_list", "Tactical.REVERSE_LT") :: rest)
-                        ((tacEnd, "expand", tacText) :: acc) =
-      merge_reverse_steps rest ((tacEnd, "expand", "Tactical.REVERSE (" ^ tacText ^ ")") :: acc)
+  | merge_reverse_steps (StepExpandList {label = "Tactical.REVERSE_LT", ...} :: rest)
+                        (StepExpand {end_pos, label} :: acc) =
+      merge_reverse_steps rest (StepExpand {end_pos = end_pos, label = "Tactical.REVERSE (" ^ label ^ ")"} :: acc)
   | merge_reverse_steps (step :: rest) acc = merge_reverse_steps rest (step :: acc)
 
 fun merge_select_steps [] acc = rev acc
-  | merge_select_steps ((endP, kind, patText) :: rest) acc =
-      if is_select kind then
+  | merge_select_steps (selectStep :: rest) acc =
+      if is_select_step selectStep then
         let
           fun collect [] sels = (rev sels, [])
-            | collect ((ep, k, t) :: rest') sels =
-                if is_select k then collect rest' (t :: sels) else (rev sels, (ep, k, t) :: rest')
-          val (sels, afterSels) = collect rest [patText]
+            | collect (step :: rest') sels =
+                if is_select_step step then collect rest' (step :: sels) else (rev sels, step :: rest')
+          val (sels, afterSels) = collect rest [selectStep]
           fun prefix [] = ""
-            | prefix [p] = "Q.SELECT_GOAL_LT " ^ p
-            | prefix (p::ps) =
-                "Q.SELECT_GOAL_LT " ^ p ^ " >>~ Q.SELECT_GOALS_LT " ^
-                String.concatWith " >>~ Q.SELECT_GOALS_LT " ps
+            | prefix (first :: rest) =
+                String.concatWith " >>~ " (map select_prefix_step (first :: rest))
           val selectPrefix = prefix sels
-          fun consume ((_, "open", "open_then1") :: (tacEnd, "expand", tacText) :: (_, "close", _) :: rest') =
-                SOME (selectPrefix ^ " >- " ^ tacText, tacEnd, rest')
-            | consume ((_, "open", "open_first") :: (tacEnd, "expand", tacText) :: (_, "close", _) :: rest') =
-                SOME (selectPrefix ^ " >- " ^ tacText, tacEnd, rest')
+          fun consume (StepOpen {label = "open_then1", ...} :: StepExpand {end_pos, label} :: StepClose _ :: rest') =
+                SOME (selectPrefix ^ " >- " ^ label, end_pos, rest')
+            | consume (StepOpen {label = "open_first", ...} :: StepExpand {end_pos, label} :: StepClose _ :: rest') =
+                SOME (selectPrefix ^ " >- " ^ label, end_pos, rest')
             | consume _ = NONE
         in
           case consume afterSels of
-              SOME (text, tacEnd, rest') => merge_select_steps rest' ((tacEnd, "expand_list", text) :: acc)
+              SOME (text, tacEnd, rest') => merge_select_steps rest' (StepExpandList {end_pos = tacEnd, label = text} :: acc)
             | NONE => merge_select_steps afterSels acc
         end
-      else merge_select_steps rest ((endP, kind, patText) :: acc)
+      else merge_select_steps rest (selectStep :: acc)
+
+fun step_of_frag end_pos label (TacticParse.FAtom (TacticParse.LSelectGoal _)) =
+      SOME (StepSelect {end_pos = end_pos, label = label})
+  | step_of_frag end_pos label (TacticParse.FAtom (TacticParse.LSelectGoals _)) =
+      SOME (StepSelects {end_pos = end_pos, label = label})
+  | step_of_frag end_pos label (TacticParse.FAtom TacticParse.LReverse) =
+      SOME (StepExpandList {end_pos = end_pos, label = label})
+  | step_of_frag end_pos label (TacticParse.FAtom (TacticParse.LTacsToLT _)) =
+      SOME (StepExpandList {end_pos = end_pos, label = label})
+  | step_of_frag end_pos label (TacticParse.FAtom _) =
+      SOME (StepExpand {end_pos = end_pos, label = label})
+  | step_of_frag end_pos label (TacticParse.FFOpen _) =
+      SOME (StepOpen {end_pos = end_pos, label = label})
+  | step_of_frag end_pos label (TacticParse.FFMid _) =
+      SOME (StepMid {end_pos = end_pos, label = label})
+  | step_of_frag end_pos label (TacticParse.FFClose _) =
+      SOME (StepClose {end_pos = end_pos, label = label})
+  | step_of_frag _ _ _ = NONE
 
 fun steps body =
   let
@@ -432,15 +459,17 @@ fun steps body =
     fun assign [] _ acc = rev acc
       | assign (f::rest) last acc =
           let
-            val typ = frag_type f
             val txt = frag_text body f
             val (endPos, last') =
               case f of
                   TacticParse.FAtom _ => let val e = frag_end f in (e, e) end
                 | _ => (last, last)
           in
-            if String.size txt > 0 then assign rest last' ((endPos, typ, txt) :: acc)
-            else assign rest last acc
+            if String.size txt = 0 then assign rest last acc
+            else
+              case step_of_frag endPos txt f of
+                  SOME step => assign rest last' (step :: acc)
+                | NONE => assign rest last acc
           end
   in
     merge_select_steps
@@ -458,63 +487,61 @@ fun eval_step label program fail_msg =
     (fn () => if smlExecute.quse_string program then () else raise Fail fail_msg) ()
   handle e => report_step_failure label e
 
-fun step ("open", text) =
-      let
-        val ftac =
-          if String.isPrefix "open_nth_goal " text then
-            goalFrag.open_nth_goal (Option.valOf (Int.fromString (String.extract(text, 14, NONE))))
-          else if String.isPrefix "open_split_lt " text then
-            goalFrag.open_split_lt (Option.valOf (Int.fromString (String.extract(text, 14, NONE))))
-          else
-            case text of
-                "open_paren" => goalFrag.open_paren
-              | "open_then1" => goalFrag.open_then1
-              | "open_first" => goalFrag.open_first
-              | "open_repeat" => goalFrag.open_repeat
-              | "open_tacs_to_lt" => goalFrag.open_tacs_to_lt
-              | "open_null_ok" => goalFrag.open_null_ok
-              | "open_last_goal" => goalFrag.open_last_goal
-              | "open_head_goal" => goalFrag.open_head_goal
-              | "open_select_lt" => goalFrag.open_select_lt
-              | "open_first_lt" => goalFrag.open_first_lt
-              | _ => raise Fail ("unknown open frag: " ^ text)
-      in apply_ftac text ftac end
-  | step ("mid", text) =
-      let
-        val ftac =
-          case text of
-              "next_first" => goalFrag.next_first
-            | "next_tacs_to_lt" => goalFrag.next_tacs_to_lt
-            | "next_split_lt" => goalFrag.next_split_lt
-            | "next_select_lt" => goalFrag.next_select_lt
-            | _ => raise Fail ("unknown mid frag: " ^ text)
-      in apply_ftac text ftac end
-  | step ("close", text) =
-      let
-        val ftac =
-          case text of
-              "close_paren" => goalFrag.close_paren
-            | "close_first" => goalFrag.close_first
-            | "close_repeat" => goalFrag.close_repeat
-            | "close_first_lt" => goalFrag.close_first_lt
-            | _ => raise Fail ("unknown close frag: " ^ text)
-      in apply_ftac text ftac end
-  | step ("expand", text) =
-      eval_step text
-        ("proofManagerLib.ef(goalFrag.expand((" ^ text ^ ")));")
-        ("tactic fragment failed: " ^ text)
-  | step ("expand_list", text) =
-      eval_step text
-        ("proofManagerLib.ef(goalFrag.expand_list((" ^ text ^ ")));")
-        ("list tactic fragment failed: " ^ text)
-  | step (typ, _) = raise Fail ("unknown fragment type: " ^ typ)
+fun open_ftac label =
+  if String.isPrefix "open_nth_goal " label then
+    goalFrag.open_nth_goal (Option.valOf (Int.fromString (String.extract(label, 14, NONE))))
+  else if String.isPrefix "open_split_lt " label then
+    goalFrag.open_split_lt (Option.valOf (Int.fromString (String.extract(label, 14, NONE))))
+  else
+    case label of
+        "open_paren" => goalFrag.open_paren
+      | "open_then1" => goalFrag.open_then1
+      | "open_first" => goalFrag.open_first
+      | "open_repeat" => goalFrag.open_repeat
+      | "open_tacs_to_lt" => goalFrag.open_tacs_to_lt
+      | "open_null_ok" => goalFrag.open_null_ok
+      | "open_last_goal" => goalFrag.open_last_goal
+      | "open_head_goal" => goalFrag.open_head_goal
+      | "open_select_lt" => goalFrag.open_select_lt
+      | "open_first_lt" => goalFrag.open_first_lt
+      | _ => raise Fail ("unknown open frag: " ^ label)
+
+fun mid_ftac label =
+  case label of
+      "next_first" => goalFrag.next_first
+    | "next_tacs_to_lt" => goalFrag.next_tacs_to_lt
+    | "next_split_lt" => goalFrag.next_split_lt
+    | "next_select_lt" => goalFrag.next_select_lt
+    | _ => raise Fail ("unknown mid frag: " ^ label)
+
+fun close_ftac label =
+  case label of
+      "close_paren" => goalFrag.close_paren
+    | "close_first" => goalFrag.close_first
+    | "close_repeat" => goalFrag.close_repeat
+    | "close_first_lt" => goalFrag.close_first_lt
+    | _ => raise Fail ("unknown close frag: " ^ label)
+
+fun step (StepOpen {label, ...}) = apply_ftac label (open_ftac label)
+  | step (StepMid {label, ...}) = apply_ftac label (mid_ftac label)
+  | step (StepClose {label, ...}) = apply_ftac label (close_ftac label)
+  | step (StepExpand {label, ...}) =
+      eval_step label
+        ("proofManagerLib.ef(goalFrag.expand((" ^ label ^ ")));")
+        ("tactic fragment failed: " ^ label)
+  | step (StepExpandList {label, ...}) =
+      eval_step label
+        ("proofManagerLib.ef(goalFrag.expand_list((" ^ label ^ ")));")
+        ("list tactic fragment failed: " ^ label)
+  | step (StepSelect {label, ...}) = raise Fail ("unmerged select fragment: " ^ label)
+  | step (StepSelects {label, ...}) = raise Fail ("unmerged select fragments: " ^ label)
 
 fun run_steps_from _ [] = ()
-  | run_steps_from index ((end_pos, typ, text) :: rest) =
+  | run_steps_from index (step' :: rest) =
       (successful_step_count_ref := index;
-       step (typ, text);
+       step step';
        successful_step_count_ref := index + 1;
-       successful_prefix_end_ref := end_pos;
+       successful_prefix_end_ref := step_end step';
        run_steps_from (index + 1) rest)
 
 fun drop_steps 0 steps = steps
@@ -562,8 +589,8 @@ fun common_prefix_size old_text new_text =
 fun step_count_at_prefix common_bytes plan =
   let
     fun loop count [] = count
-      | loop count ((end_pos, _, _) :: rest) =
-          if end_pos <= common_bytes then loop (count + 1) rest else count
+      | loop count (step' :: rest) =
+          if step_end step' <= common_bytes then loop (count + 1) rest else count
   in
     loop 0 plan
   end
