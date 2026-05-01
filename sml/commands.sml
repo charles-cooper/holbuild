@@ -372,6 +372,9 @@ fun dispatch_with_options {holdir, jobs, maxheap, json} args =
          dispatch tc jobs args
        end)
 
+fun is_broken_pipe (IO.Io {cause = OS.SysErr (msg, _), ...}) = msg = "Broken pipe"
+  | is_broken_pipe _ = false
+
 fun main raw_args =
   (let
      val _ = HolbuildStatus.set_json_mode (List.exists (fn s => s = "--json") raw_args)
@@ -392,6 +395,7 @@ fun main raw_args =
        | HolbuildBuildPlan.Error msg => err msg
        | HolbuildBuildExec.Error msg => err msg
        | HolbuildCache.Error msg => err msg
-       | e => err (General.exnMessage e)
+       | e => if is_broken_pipe e then OS.Process.exit OS.Process.success
+              else err (General.exnMessage e)
 
 end

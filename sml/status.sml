@@ -16,6 +16,7 @@ type t = {
   up_to_date : int ref,
   restored : int ref,
   active : active_node list ref,
+  started_at : Time.time,
   ended : bool ref,
   mutex : Thread.Mutex.mutex
 }
@@ -147,6 +148,12 @@ fun count_outcome ({built, up_to_date, restored, ...} : t) outcome =
     | UpToDate => up_to_date := !up_to_date + 1
     | Restored => restored := !restored + 1
 
+fun elapsed ({started_at, ...} : t) = Time.-(Time.now (), started_at)
+
+fun elapsed_seconds_text status = Real.fmt (StringCvt.FIX (SOME 3)) (Time.toReal (elapsed status)) ^ "s"
+
+fun elapsed_ms status = Real.round (Time.toReal (elapsed status) * 1000.0)
+
 fun remove_active key active = List.filter (fn {key = k, ...} => k <> key) active
 
 fun active_labels active = map (fn {label, ...} => label) active
@@ -166,6 +173,10 @@ fun line ({total, jobs, finished, built, up_to_date, restored, active, ...} : t)
         [] => prefix
       | _ => prefix ^ " :: " ^ String.concatWith ", " running
   end
+
+fun final_line status = line status ^ " elapsed=" ^ elapsed_seconds_text status
+
+fun finish_text status = "holbuild finished in " ^ elapsed_seconds_text status ^ "\n"
 
 fun fit width s =
   case width of
@@ -211,6 +222,7 @@ fun create {total, jobs} =
        up_to_date = ref 0,
        restored = ref 0,
        active = ref [],
+       started_at = Time.now (),
        ended = ref false,
        mutex = Thread.Mutex.mutex ()}
   in
@@ -258,11 +270,23 @@ fun finish_node status key label outcome =
 fun finish status =
   (with_lock status
      (fn () =>
-         let val {enabled, ended, ...} = status
+         let val {enabled, ended, total, finished, built, restored, up_to_date, ...} = status
          in
            if !ended then ()
            else
-             (if enabled then (redraw status; TextIO.output (TextIO.stdOut, "\n"); TextIO.flushOut TextIO.stdOut) else ();
+             (if json_mode () then
+                emit_json TextIO.stdOut "build_finished"
+                  [json_int_field "elapsed_ms" (elapsed_ms status),
+                   json_int_field "total" total,
+                   json_int_field "built" (!built),
+                   json_int_field "from_cache" (!restored),
+                   json_int_field "unchanged" (!up_to_date)]
+              else if enabled then
+                (TextIO.output (TextIO.stdOut, "\r" ^ fit (!(#width status)) (final_line status) ^ clear_to_eol ^ "\n");
+                 TextIO.flushOut TextIO.stdOut)
+              else if !finished = total then
+                (TextIO.output (TextIO.stdOut, finish_text status); TextIO.flushOut TextIO.stdOut)
+              else ();
               ended := true)
          end);
    current_status := NONE)

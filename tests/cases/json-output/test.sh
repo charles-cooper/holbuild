@@ -53,6 +53,8 @@ for line in lines:
     events.append(json.loads(line))
 if not any(e.get('event') == 'node_finished' and e.get('target') == 'JTheory' and e.get('outcome') == 'built' for e in events):
     raise SystemExit('missing JTheory built node_finished event')
+if not any(e.get('event') == 'build_finished' and isinstance(e.get('elapsed_ms'), int) for e in events):
+    raise SystemExit('missing build_finished elapsed event')
 if any('\x1b' in line or '\r' in line for line in lines):
     raise SystemExit('status redraw escaped into json output')
 PY

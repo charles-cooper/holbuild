@@ -45,6 +45,7 @@ require_file "$project/.holbuild/obj/src/ATheory.dat"
 tr '\r' '\n' < "$status_log" > "$tmpdir/status-lines.log"
 require_grep "holbuild done=0/1 running=1/3" "$tmpdir/status-lines.log"
 require_grep "holbuild done=1/1 running=0/3 built=1 from_cache=0 unchanged=0" "$tmpdir/status-lines.log"
+require_grep "elapsed=" "$tmpdir/status-lines.log"
 
 cli_log=$tmpdir/cli.log
 (cd "$project" && HOLBUILD_STATUS=1 TERM=xterm COLUMNS=120 "$HOLBUILD_BIN" --holdir "$HOLDIR" -j1 build ATheory) > "$cli_log" 2>&1
@@ -78,6 +79,7 @@ fi
 plain_log=$tmpdir/plain.log
 (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$plain_log" 2>&1
 require_grep "ATheory is up to date" "$plain_log"
+require_grep "holbuild finished in " "$plain_log"
 if grep -q $'\033\\[0K' "$plain_log"; then
   echo "status redraw escaped into non-tty output" >&2
   exit 1
@@ -108,6 +110,7 @@ SML
 plain_build_log=$tmpdir/plain-build.log
 (cd "$plain_build_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build BTheory) > "$plain_build_log" 2>&1
 require_grep "BTheory built" "$plain_build_log"
+require_grep "holbuild finished in " "$plain_build_log"
 if grep -q $'\033\\[0K' "$plain_build_log"; then
   echo "status redraw escaped into non-tty build output" >&2
   exit 1
