@@ -1064,42 +1064,52 @@ fun dat_mentions_stage_key input_key staged_dat =
     String.isSubstring "stage" text
   end
 
-fun publish_theory_cache input_key dat_replacements staged_sig staged_sml staged_dat mldeps =
+fun path_dependent_cache_key project input_key =
+  HolbuildHash.string_sha1
+    (String.concatWith "\n"
+       ["holbuild-path-dependent-cache-v1",
+        "input_key=" ^ input_key,
+        "root=" ^ canonical_path (#root project)] ^ "\n")
+
+fun publish_cache_manifest root cache_key cache_replacements staged_sig staged_sml staged_dat cache_mldeps template =
+  let
+    val manifest_path = HolbuildCache.action_manifest root cache_key
+    val _ = write_text template (rewrite_all cache_replacements (read_text staged_sml))
+    val sig_hash = cache_blob root staged_sig
+    val sml_hash = cache_blob root template
+    val dat_hash = cache_blob root staged_dat
+    val manifest = cache_manifest_text {input_key = cache_key, sig_hash = sig_hash,
+                                        sml_hash = sml_hash, dat_hash = dat_hash,
+                                        mldeps = cache_mldeps}
+    val existing = current_metadata manifest_path
+  in
+    case existing of
+        SOME old =>
+          if old = manifest then HolbuildCache.touch manifest_path
+          else if cache_entry_usable root cache_key old then
+            warn ("cache entry already exists with different outputs: " ^ cache_key)
+          else
+            write_text manifest_path manifest
+      | NONE => write_text manifest_path manifest
+  end
+
+fun publish_theory_cache project input_key dat_replacements staged_sig staged_sml staged_dat mldeps =
   let
     val root = cache_root ()
     val _ = HolbuildCache.ensure_layout root
     val template = FS.tmpName ()
     val cache_mldeps = List.filter (not o transient_stage_mldep) mldeps
-    val cacheable = not (List.exists transient_stage_mldep mldeps andalso dat_mentions_stage_key input_key staged_dat)
-    val manifest_path = HolbuildCache.action_manifest root input_key
+    val path_dependent = List.exists transient_stage_mldep mldeps andalso dat_mentions_stage_key input_key staged_dat
+    val cache_key = if path_dependent then path_dependent_cache_key project input_key else input_key
     fun cleanup () = FS.remove template handle OS.SysErr _ => ()
-    fun drop_noncacheable () = remove_file manifest_path
-    fun publish () =
-      let
-        val _ = write_text template (rewrite_all dat_replacements (read_text staged_sml))
-        val sig_hash = cache_blob root staged_sig
-        val sml_hash = cache_blob root template
-        val dat_hash = cache_blob root staged_dat
-        val manifest = cache_manifest_text {input_key = input_key, sig_hash = sig_hash,
-                                            sml_hash = sml_hash, dat_hash = dat_hash,
-                                            mldeps = cache_mldeps}
-        val existing = current_metadata manifest_path
-      in
-        case existing of
-            SOME old =>
-              if old = manifest then HolbuildCache.touch manifest_path
-              else if cache_entry_usable root input_key old then
-                warn ("cache entry already exists with different outputs: " ^ input_key)
-              else
-                write_text manifest_path manifest
-          | NONE => write_text manifest_path manifest
-      end
+    fun drop_stable_path_dependent () = remove_file (HolbuildCache.action_manifest root input_key)
+    fun publish () = publish_cache_manifest root cache_key dat_replacements staged_sig staged_sml staged_dat cache_mldeps template
     fun skip_locked_publish () = ()
   in
-    ((if cacheable then
-        HolbuildCache.with_action_publish_lock root input_key publish skip_locked_publish
-      else
-        HolbuildCache.with_action_publish_lock root input_key drop_noncacheable skip_locked_publish);
+    ((if path_dependent then
+        HolbuildCache.with_action_publish_lock root input_key drop_stable_path_dependent skip_locked_publish
+      else ());
+     HolbuildCache.with_action_publish_lock root cache_key publish skip_locked_publish;
      cleanup ())
     handle e => (cleanup (); warn ("could not publish cache entry: " ^ General.exnMessage e))
   end
@@ -1198,18 +1208,18 @@ fun remove_failed_cache_outputs project node =
     remove_checkpoint_family project node
   end
 
-fun materialize_theory_cache _ project plan input_key node =
+fun materialize_theory_cache_key project plan cache_key node =
   let
     val root = cache_root ()
-    val manifest = HolbuildCache.action_manifest root input_key
+    val manifest = HolbuildCache.action_manifest root cache_key
     val _ = if file_exists manifest then () else raise Error "cache entry not found"
     val manifest_text = read_text manifest
     val _ =
       case transient_stage_mldep_in_manifest manifest_text of
-          SOME dep => transient_cache_manifest_error root input_key manifest manifest_text dep
+          SOME dep => transient_cache_manifest_error root cache_key manifest manifest_text dep
         | NONE => ()
     val {sig_hash, sml_hash, dat_hash, mldeps} =
-      cache_manifest_blobs_from_lines input_key (cache_manifest_lines manifest_text)
+      cache_manifest_blobs_from_lines cache_key (cache_manifest_lines manifest_text)
     val {sig_path, sml_path, data_path, ...} = theory_outputs node
     val template = FS.tmpName ()
     fun cleanup () = FS.remove template handle OS.SysErr _ => ()
@@ -1232,6 +1242,10 @@ fun materialize_theory_cache _ project plan input_key node =
        | e => (remove_failed_cache_outputs project node;
                warn ("cache entry unusable for " ^ logical_name node ^ ": " ^ General.exnMessage e);
                false)
+
+fun materialize_theory_cache _ project plan input_key node =
+  materialize_theory_cache_key project plan input_key node orelse
+  materialize_theory_cache_key project plan (path_dependent_cache_key project input_key) node
 
 fun metadata_path (project : HolbuildProject.t) node =
   let
@@ -1657,7 +1671,7 @@ fun build_theory cache_allowed policy tc project base_context plan keys toolchai
                                   generated_holdep_mldeps plan tc staged_sml)
     val _ =
       if cache_allowed then
-        publish_theory_cache input_key cache_replacements staged_sig staged_sml staged_dat mldeps
+        publish_theory_cache project input_key cache_replacements staged_sig staged_sml staged_dat mldeps
       else ()
   in
     write_local_theory_manifests plan node mldeps;
