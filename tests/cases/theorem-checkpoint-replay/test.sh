@@ -209,6 +209,8 @@ require_grep "top goal exceeded 4 KiB" "$failure_log"
 require_grep "full top goal is in the instrumented log above" "$failure_log"
 require_grep "begin top goal" "$failure_log"
 require_grep "end top goal" "$failure_log"
+require_grep "holbuild failed fragment source context (best effort)" "$failure_log"
+require_grep "FAIL_TAC \"expected failure\"" "$failure_log"
 failure_child_log=$(find "$failure_project/.holbuild/logs" -name '*-ATheory-instrumented-failure.log' -print -quit)
 require_file "$failure_child_log"
 require_grep "holbuild goal state at failed fragment" "$failure_child_log"

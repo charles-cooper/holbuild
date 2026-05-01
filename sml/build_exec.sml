@@ -732,6 +732,14 @@ val goal_state_limit = 4096
 val goal_state_start_marker = "holbuild top goal:"
 val goal_state_end_marker = "holbuild end top goal"
 
+fun first_some f values =
+  case values of
+      [] => NONE
+    | x :: xs =>
+        case f x of
+            SOME y => SOME y
+          | NONE => first_some f xs
+
 fun take_until_goal_state_end [] acc = NONE
   | take_until_goal_state_end (line :: rest) acc =
       if line = goal_state_end_marker then SOME (String.concatWith "\n" (rev acc) ^ "\n")
@@ -741,6 +749,72 @@ fun find_top_goal_state [] = NONE
   | find_top_goal_state (line :: rest) =
       if line = goal_state_start_marker then take_until_goal_state_end rest []
       else find_top_goal_state rest
+
+val failed_fragment_prefix = "holbuild goal state at failed fragment: "
+
+fun find_failed_fragment_label lines =
+  first_some
+    (fn line =>
+        if String.isPrefix failed_fragment_prefix line then
+          SOME (String.extract(line, size failed_fragment_prefix, NONE))
+        else NONE)
+    lines
+
+fun line_number_at text offset =
+  let
+    val limit = Int.min(offset, size text)
+    fun loop i line =
+      if i >= limit then line
+      else if String.sub(text, i) = #"\n" then loop (i + 1) (line + 1)
+      else loop (i + 1) line
+  in
+    loop 0 1
+  end
+
+fun find_substring needle haystack =
+  let
+    val n = size needle
+    val h = size haystack
+    fun at i = i + n <= h andalso String.substring(haystack, i, n) = needle
+    fun loop i = if i + n > h then NONE else if at i then SOME i else loop (i + 1)
+  in
+    if n = 0 then NONE else loop 0
+  end
+
+fun source_context_text source_text line =
+  let
+    val lines = String.fields (fn c => c = #"\n") source_text
+    val start = Int.max(1, line - 2)
+    val stop = Int.min(length lines, line + 2)
+    fun nth n = List.nth(lines, n - 1) handle _ => ""
+    fun row n =
+      String.concat [if n = line then "> " else "  ", Int.toString n, " | ", nth n, "\n"]
+    fun loop n acc = if n > stop then rev acc else loop (n + 1) (row n :: acc)
+  in
+    String.concat (loop start [])
+  end
+
+fun failed_fragment_source_summary source_path source_text checkpoints label =
+  let
+    fun locate checkpoint =
+      Option.map
+        (fn relative => #tactic_start checkpoint + relative)
+        (find_substring label (#tactic_text checkpoint))
+  in
+    case first_some locate checkpoints of
+        NONE => NONE
+      | SOME offset =>
+        let val line = line_number_at source_text offset
+        in
+          SOME (String.concat
+            ["holbuild failed fragment source context (best effort):\n",
+             "source: ", source_path, "\n",
+             "line: ", Int.toString line, "\n",
+             "----- begin source context -----\n",
+             source_context_text source_text line,
+             "----- end source context -----\n"])
+        end
+  end
 
 fun truncate_goal_state text =
   if size text <= goal_state_limit then (false, text)
@@ -766,6 +840,15 @@ fun goal_state_summary text =
 
 fun summarize_goal_state path =
   Option.map goal_state_summary (find_top_goal_state (String.fields (fn c => c = #"\n") (read_text path)))
+  handle _ => NONE
+
+fun summarize_failed_fragment_source source_path source_text checkpoints path =
+  let val lines = String.fields (fn c => c = #"\n") (read_text path)
+  in
+    Option.mapPartial
+      (failed_fragment_source_summary source_path source_text checkpoints)
+      (find_failed_fragment_label lines)
+  end
   handle _ => NONE
 
 fun summarize_log path =
@@ -810,14 +893,6 @@ fun cache_manifest_text {input_key, sig_hash, sml_hash, dat_hash, mldeps} =
       "blob dat " ^ dat_hash]) ^ "\n"
 
 fun cache_manifest_lines text = String.tokens (fn c => c = #"\n") text
-
-fun first_some f values =
-  case values of
-      [] => NONE
-    | x :: xs =>
-        case f x of
-            SOME y => SOME y
-          | NONE => first_some f xs
 
 fun is_hex_digit c =
   (#"0" <= c andalso c <= #"9") orelse
@@ -1547,12 +1622,14 @@ fun build_theory cache_allowed policy tc project base_context plan keys toolchai
         val failure_log = preserve_checkpoint_failure_log project node input_key stage
         val reason = Option.mapPartial summarize_log failure_log
         val goal_state = Option.mapPartial summarize_goal_state failure_log
+        val source_context = Option.mapPartial (summarize_failed_fragment_source (source_file node) source_text theorem_checkpoints) failure_log
         val _ = if Option.isSome goal_state then () else discard_failure_checkpoints ()
         val detail =
           String.concat
             [logical_name node,
              " goalfrag/checkpoint run failed\n",
              case failure_log of NONE => "" | SOME path => "instrumented log: " ^ path ^ "\n",
+             case source_context of NONE => "" | SOME text => text,
              case goal_state of NONE => "" | SOME text => text,
              case reason of NONE => "" | SOME line => "last log line: " ^ line ^ "\n"]
       in
