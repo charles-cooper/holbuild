@@ -862,22 +862,35 @@ fun reject_transient_cache_mldeps mldeps =
       SOME dep => raise Error ("cache manifest contains transient stage mldep: " ^ dep)
     | NONE => ()
 
-fun cache_manifest_contains_transient_stage_mldep text =
-  List.exists
+fun transient_stage_mldep_in_manifest text =
+  first_some
     (fn line =>
         case String.tokens Char.isSpace line of
-            ["mldep", dep] => transient_stage_mldep dep
-          | _ => false)
+            ["mldep", dep] => if transient_stage_mldep dep then SOME dep else NONE
+          | _ => NONE)
     (cache_manifest_lines text)
 
 fun drop_cache_manifest_if_unchanged root input_key manifest old_text =
   let
+    val dropped = ref false
     fun drop () =
       case current_metadata manifest of
-          SOME current => if current = old_text then remove_file manifest else ()
+          SOME current =>
+            if current = old_text then
+              (remove_file manifest; dropped := true)
+            else ()
         | NONE => ()
+    val _ = HolbuildCache.with_action_publish_lock root input_key drop (fn () => ())
   in
-    HolbuildCache.with_action_publish_lock root input_key drop (fn () => ())
+    !dropped
+  end
+
+fun transient_cache_manifest_error root input_key manifest manifest_text dep =
+  let
+    val dropped = drop_cache_manifest_if_unchanged root input_key manifest manifest_text
+    val action = if dropped then "; deleted cache manifest" else "; cache manifest not deleted because action lock is busy or manifest changed"
+  in
+    raise Error ("cache manifest contains transient stage mldep: " ^ dep ^ action)
   end
 
 fun add_mldep dep deps =
@@ -1117,9 +1130,9 @@ fun materialize_theory_cache _ project plan input_key node =
     val _ = if file_exists manifest then () else raise Error "cache entry not found"
     val manifest_text = read_text manifest
     val _ =
-      if cache_manifest_contains_transient_stage_mldep manifest_text then
-        drop_cache_manifest_if_unchanged root input_key manifest manifest_text
-      else ()
+      case transient_stage_mldep_in_manifest manifest_text of
+          SOME dep => transient_cache_manifest_error root input_key manifest manifest_text dep
+        | NONE => ()
     val {sig_hash, sml_hash, dat_hash, mldeps} =
       cache_manifest_blobs_from_lines input_key (cache_manifest_lines manifest_text)
     val {sig_path, sml_path, data_path, ...} = theory_outputs node

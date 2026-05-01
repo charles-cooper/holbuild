@@ -113,6 +113,7 @@ if grep -q "ATheory restored from cache" "$stale_cache_log"; then
   exit 1
 fi
 require_grep "cache entry unusable for ATheory" "$stale_cache_log"
+require_grep "deleted cache manifest" "$stale_cache_log"
 require_file "$project/.holbuild/obj/src/ATheory.dat"
 if [[ -e "$cache_manifest" ]] && grep -q "\.holbuild/stage" "$cache_manifest"; then
   echo "transient stage mldep survived cache manifest republish" >&2
@@ -143,6 +144,7 @@ if (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$bad_m
   exit 1
 fi
 require_grep "cache entry unusable for ATheory" "$bad_manifest_log"
+require_grep "deleted cache manifest" "$bad_manifest_log"
 [[ ! -e "$bad_manifest" ]] || { echo "transient stage mldep manifest survived failed source rebuild" >&2; exit 1; }
 cp "$tmpdir/AScript.good.sml" "$project/src/AScript.sml"
 
