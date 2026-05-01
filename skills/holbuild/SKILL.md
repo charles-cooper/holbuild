@@ -40,7 +40,7 @@ members = ["src"]
 | `--no-cache` | Skip global cache restore/publish |
 | `--skip-checkpoints` | No `.save` files (goalfrag still runs) |
 | `--skip-goalfrag` | No theorem instrumentation (incompatible with `--tactic-timeout`) |
-| `--tactic-timeout SECONDS` | Root-package per-tactic timeout (default 2.5s, `0` disables) |
+| `--tactic-timeout SECONDS` | Root-package per-tactic timeout (default 2.5s, `0` disables). Also settable via `tactic_timeout` in manifest or `.holconfig`. |
 
 ## Output layout
 

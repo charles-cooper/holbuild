@@ -14,6 +14,7 @@ version = "0.1.0"      # optional
 members = ["src", "lib"]   # source dirs/files relative to package root. Default: ["."]
 exclude = ["*/selftest.sml", "*/examples/*"]  # glob patterns, package-root-relative
 roots = ["src/MainScript.sml"]  # default build targets when no CLI target given
+tactic_timeout = 60.0            # per-tactic timeout in seconds (CLI --tactic-timeout overrides)
 
 [dependencies.depname]
 git = "https://github.com/org/dep"

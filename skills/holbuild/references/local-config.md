@@ -9,6 +9,7 @@ path = "../dep-dev"    # local override for dependency "depname"
 [build]
 exclude = ["worktrees/*"]   # appends to manifest excludes
 jobs = 16                   # default -j when not specified on CLI
+tactic_timeout = 30.0       # per-tactic timeout (overrides manifest [build].tactic_timeout)
 ```
 
 ## Override semantics
