@@ -106,17 +106,19 @@ fun save_theorem_context () =
         (context_info_ref := NONE;
          save_checkpoint "theorem_context" false context_path context_ok depth)
 
+fun top_goal_text [] = "<no open goals>\n"
+  | top_goal_text (goal :: _) = PP.pp_to_string 100 proofManagerLib.std_goal_pp goal ^ "\n"
+
 fun print_goal_state label =
   let
-    val proof = proofManagerLib.p()
     val goals = proofManagerLib.top_goals()
   in
     TextIO.output(TextIO.stdErr,
       String.concat ["\nholbuild goal state at failed fragment: ", label,
-                     "\nholbuild remaining goals: ", Int.toString (length goals), "\n"]);
-    PP.prettyPrint(fn s => TextIO.output(TextIO.stdErr, s), 100)
-                  (proofManagerLib.pp_proof proof);
-    TextIO.output(TextIO.stdErr, "\n")
+                     "\nholbuild remaining goals: ", Int.toString (length goals), "\n",
+                     "holbuild top goal:\n",
+                     top_goal_text goals,
+                     "holbuild end top goal\n"])
   end
   handle e =>
     TextIO.output(TextIO.stdErr,

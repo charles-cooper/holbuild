@@ -605,6 +605,48 @@ fun truncate_text limit text =
   if size text <= limit then text
   else String.substring(text, 0, limit - 3) ^ "..."
 
+val goal_state_limit = 4096
+val goal_state_start_marker = "holbuild top goal:"
+val goal_state_end_marker = "holbuild end top goal"
+
+fun take_until_goal_state_end [] acc = NONE
+  | take_until_goal_state_end (line :: rest) acc =
+      if line = goal_state_end_marker then SOME (String.concatWith "\n" (rev acc) ^ "\n")
+      else take_until_goal_state_end rest (line :: acc)
+
+fun find_top_goal_state [] = NONE
+  | find_top_goal_state (line :: rest) =
+      if line = goal_state_start_marker then take_until_goal_state_end rest []
+      else find_top_goal_state rest
+
+fun truncate_goal_state text =
+  if size text <= goal_state_limit then (false, text)
+  else (true, String.substring(text, 0, goal_state_limit))
+
+fun goal_state_summary text =
+  let
+    val (truncated, preview) = truncate_goal_state text
+    val truncation_line =
+      if truncated then
+        String.concat ["holbuild goal state truncated: true; preview_bytes=",
+                       Int.toString (size preview), "; full_bytes=",
+                       Int.toString (size text),
+                       "; full goal state is in instrumented log\n"]
+      else
+        String.concat ["holbuild goal state truncated: false; bytes=",
+                       Int.toString (size text), "\n"]
+  in
+    String.concat
+      ["top goal at failed fragment (4 KiB max):\n",
+       truncation_line,
+       preview,
+       if truncated andalso (size preview = 0 orelse String.sub(preview, size preview - 1) <> #"\n") then "\n" else ""]
+  end
+
+fun summarize_goal_state path =
+  Option.map goal_state_summary (find_top_goal_state (String.fields (fn c => c = #"\n") (read_text path)))
+  handle _ => NONE
+
 fun summarize_log path =
   Option.map (truncate_text 240) (last_nonempty_line (read_text path))
   handle _ => NONE
@@ -1252,12 +1294,14 @@ fun build_theory cache_allowed policy tc project base_context plan keys toolchai
         val _ = discard_failure_checkpoints ()
         val failure_log = preserve_checkpoint_failure_log project node input_key stage
         val reason = Option.mapPartial summarize_log failure_log
+        val goal_state = Option.mapPartial summarize_goal_state failure_log
         val detail =
           String.concat
             [logical_name node,
              " goalfrag/checkpoint run failed\n",
              "plain-source fallback disabled; use --skip-checkpoints to avoid replay or --skip-goalfrag to run source directly\n",
              case failure_log of NONE => "" | SOME path => "instrumented log: " ^ path ^ "\n",
+             case goal_state of NONE => "" | SOME text => text,
              case reason of NONE => "" | SOME line => "last log line: " ^ line ^ "\n"]
       in
         Error detail

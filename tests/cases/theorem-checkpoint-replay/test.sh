@@ -178,8 +178,13 @@ cp "$project/holproject.toml" "$failure_project/holproject.toml"
 python3 - <<PY
 from pathlib import Path
 src = Path("$project/src/AScript.sml").read_text()
-src = src.replace('CONJ_TAC >- ACCEPT_TAC TRUTH >- ACCEPT_TAC TRUTH',
-                  'CONJ_TAC >- FAIL_TAC "expected failure" >- ACCEPT_TAC TRUTH')
+long_goal = "p" * 5000
+b_thm = "Theorem b_thm:\n  T /" + chr(92) + " T\nProof\n  CONJ_TAC >- ACCEPT_TAC TRUTH >- ACCEPT_TAC TRUTH\nQED"
+src = src.replace(b_thm, f'''Theorem b_thm:
+  {long_goal}
+Proof
+  FAIL_TAC "expected failure"
+QED''')
 Path("$failure_project/src/AScript.sml").write_text(src)
 PY
 
@@ -189,10 +194,15 @@ if (cd "$failure_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) >
   exit 1
 fi
 require_grep "expected failure" "$failure_log"
+require_grep "top goal at failed fragment (4 KiB max)" "$failure_log"
+require_grep "holbuild goal state truncated: true" "$failure_log"
+require_grep "full goal state is in instrumented log" "$failure_log"
 failure_child_log=$(find "$failure_project/.holbuild/logs" -name '*-ATheory-instrumented-failure.log' -print -quit)
 require_file "$failure_child_log"
 require_grep "holbuild goal state at failed fragment" "$failure_child_log"
 require_grep "holbuild remaining goals: 1" "$failure_child_log"
+require_grep "holbuild top goal:" "$failure_child_log"
+require_grep "holbuild end top goal" "$failure_child_log"
 if [[ -e "$failure_project/.holbuild/checkpoints/replay/src/AScript.sml.b_thm_context.save" || \
       -e "$failure_project/.holbuild/checkpoints/replay/src/AScript.sml.b_thm_context.save.ok" || \
       -e "$failure_project/.holbuild/checkpoints/replay/src/AScript.sml.b_thm_end_of_proof.save" || \
