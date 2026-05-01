@@ -628,19 +628,17 @@ fun goal_state_summary text =
     val (truncated, preview) = truncate_goal_state text
     val truncation_line =
       if truncated then
-        String.concat ["holbuild goal state truncated: true; preview_bytes=",
-                       Int.toString (size preview), "; full_bytes=",
-                       Int.toString (size text),
-                       "; full goal state is in instrumented log\n"]
-      else
-        String.concat ["holbuild goal state truncated: false; bytes=",
-                       Int.toString (size text), "\n"]
+        String.concat ["top goal exceeded 4 KiB; showing first ",
+                       Int.toString (size preview), " bytes; full top goal is in the instrumented log above\n"]
+      else ""
   in
     String.concat
-      ["top goal at failed fragment (4 KiB max):\n",
+      ["holbuild top goal at failed fragment (first open goal, 4 KiB max):\n",
        truncation_line,
+       "----- begin top goal -----\n",
        preview,
-       if truncated andalso (size preview = 0 orelse String.sub(preview, size preview - 1) <> #"\n") then "\n" else ""]
+       if size preview = 0 orelse String.sub(preview, size preview - 1) <> #"\n" then "\n" else "",
+       "----- end top goal -----\n"]
   end
 
 fun summarize_goal_state path =
@@ -1299,7 +1297,6 @@ fun build_theory cache_allowed policy tc project base_context plan keys toolchai
           String.concat
             [logical_name node,
              " goalfrag/checkpoint run failed\n",
-             "plain-source fallback disabled; use --skip-checkpoints to avoid replay or --skip-goalfrag to run source directly\n",
              case failure_log of NONE => "" | SOME path => "instrumented log: " ^ path ^ "\n",
              case goal_state of NONE => "" | SOME text => text,
              case reason of NONE => "" | SOME line => "last log line: " ^ line ^ "\n"]

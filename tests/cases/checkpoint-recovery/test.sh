@@ -183,7 +183,7 @@ if (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$corru
 fi
 require_grep "resuming ATheory from checkpoint first" "$corrupt_log"
 require_grep "ATheory goalfrag/checkpoint run failed" "$corrupt_log"
-require_grep "plain-source fallback disabled" "$corrupt_log"
+require_grep "instrumented log:" "$corrupt_log"
 if grep -q -- "--- child log tail ---" "$corrupt_log"; then
   echo "checkpoint failure duplicated full child log tail" >&2
   exit 1
