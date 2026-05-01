@@ -11,10 +11,11 @@ and cacheable builds that never require users to reason about the cache.
 - `.uo` and `.ui` are internal ML load artifacts. Users must never request them.
 - Project mode is manifest based. `Holmakefile` semantics are not interpreted.
 - The source tree is user-owned; build products live under project `.holbuild/`.
-- Build actions do not use configured/global HOL heaps such as `hol.state` as
-  semantic bases. A host tool state may run holbuild itself, but target build
-  contexts are produced by holbuild from declared sources, predecessor
-  checkpoints, or validated shared dependency state.
+- Target build contexts should be produced by holbuild from declared sources,
+  predecessor checkpoints, or validated shared dependency state. The external
+  prototype still starts child HOL actions from the configured `HOLDIR/bin/hol.state`
+  and keys that seed in the toolchain; eliminating that bootstrap dependency is a
+  root-HOL transition goal, not current behavior.
 - The cache is an optional accelerator. Local `.holbuild/` is the authoritative
   materialized build view.
 - When unsure, rebuild. A bad cache hit is worse than a missed cache hit.
@@ -521,11 +522,20 @@ checkpoints or materialize checkpoints from the global cache; cache restore
 recreates only logical theory artifacts and internal load manifests.
 
 The prototype currently instruments AST `HOLTheoremDecl` declarations, i.e.
-modern goal/proof forms such as `Theorem ... Proof ... QED` (including proof
-attributes, with conservative whole-tactic fallback for attributed proofs). It
-parses the HOL source AST before expansion to ML, uses theorem/tactic spans to
-insert a theorem marker before expansion, then runs the proof through
-`proofManagerLib`/`goalFrag` fragments where possible. The
+modern goal/proof forms such as `Theorem ... Proof ... QED`. It parses the HOL
+source AST before expansion to ML, uses theorem/tactic spans to insert a theorem
+marker before expansion, then runs ordinary proof bodies through a shared SML
+goalfrag runtime helper. That helper owns tactic parsing, step planning,
+proof-manager/`goalFrag` execution, timeout wrappers, checkpoint saves, prover
+hook state, and failure diagnostics. Generated per-theory source contains only
+loads, runtime installation/configuration, theorem boundary calls, and original
+source slices.
+
+Attributed proofs and declarations with no parsed tactic body use a conservative
+whole-tactic prover path. Normal theorem bodies should not fall back to timing the
+entire theorem as one coarse tactic; if they need coarser treatment for a
+validation-shape bug, the runtime should merge the specific branch/list/select
+shape rather than hide the whole theorem inside `TAC_PROOF`. The
 `<thm>_end_of_proof.save` checkpoint is saved before `drop_all`, so it preserves
 proof-manager history for navigation; `<thm>_context.save` is saved after the
 expanded theorem declaration stores the theorem in the theory context. If a later
@@ -544,8 +554,8 @@ instrumentation with `--skip-goalfrag`, which also means no theorem-boundary
 checkpoints or tactic timeout enforcement for that build.
 
 When goalfrag is enabled, holbuild applies a tactic timeout to each goalfrag
-step, and to the conservative whole-tactic fallback used for attributed proofs.
-The CLI default is 2.5 seconds per tactic step for the root package;
+step, and to the conservative whole-tactic path used for attributed/opaque proof
+cases. The CLI default is 2.5 seconds per tactic step for the root package;
 `--tactic-timeout SECONDS` changes that root-package timeout, and
 `--tactic-timeout 0` disables it. Dependency package builds use no tactic timeout,
 so a consumer's proof-debug timeout does not make dependency builds fail. Because
@@ -561,7 +571,11 @@ an instrumentation bug to fix, not a separate artifact identity. Checkpoint
 validity remains separate and is represented by checkpoint paths plus `.ok`
 metadata keyed by dependency context and source prefix. On timeout, holbuild
 reports the timed-out tactic and does not retry the script through the plain
-non-goalfrag fallback, since that would remove the only timeout guard.
+non-goalfrag fallback, since that would remove the only timeout guard. Current
+production dogfooding has shown that some legitimate root-project simplification
+steps exceed 30s; use `--tactic-timeout 0` for full semantic production builds
+and a larger finite timeout such as 60s for root timeout smoke testing when
+appropriate.
 
 Other theorem-producing syntax, such as simple `Theorem name = thm` declarations,
 `store_thm` calls, `Resume`, or `Finalise`, is not checkpoint-instrumented in v1.

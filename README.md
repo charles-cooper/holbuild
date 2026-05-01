@@ -15,7 +15,7 @@ This prototype is intentionally small:
 - reuses HOL's existing SML TOML parser from `$HOLDIR/tools/Holmake/toml`
 - accepts logical build targets such as `MyTheory`, not object filenames such as `MyTheory.uo`
 - owns source discovery and maps outputs to project-level `.holbuild/`
-- extracts simple theory dependencies from source text and orders dry-run build plans
+- infers theory/module dependencies with HOL/Holdep machinery over the resolved project graph and orders build plans
 - parses transitive dependency manifests and local `.holconfig.toml` path overrides
 - materializes dependency plans under project `.holbuild/deps/<package>/`
 - rejects duplicate logical theory/module names across the resolved graph, except
@@ -25,12 +25,13 @@ This prototype is intentionally small:
 - rejects source-level `use "file"` in project build actions; declare/load project modules instead
 - supports per-action policy for explicit logical dependencies/loadable modules, extra inputs, cache disabling, and always-rerun actions
 - computes prototype source/resolved-dependency input keys for planned actions
-- schedules build actions serially by default or in DAG-ready parallel order with `-jN`
+- schedules build actions in DAG-ready parallel order with `-jN`, local `[build].jobs`, or a CPU-derived default
 - executes simple theory-script builds into project `.holbuild/` without Holmake
 - records local action metadata and skips unchanged actions
 - publishes/restores simple theory semantic artifacts through the global cache
-- includes the resolved holbuild-produced base context/toolchain in prototype action keys
+- includes the configured toolchain/base context in prototype action keys
 - creates transient local theory checkpoints while building: dependencies-loaded, AST-derived theorem end-of-proof/context checkpoints for modern theorem declarations, and successor-ready final context; successful builds remove them after writing logical artifacts and metadata
+- runs modern theorem proofs through a shared SML goalfrag runtime helper, with tactic parsing/step planning, proof-manager execution, checkpoint saves, timeout handling, and diagnostics kept out of generated per-theory source
 - keeps goalfrag proof execution separate from checkpoint creation; `--skip-checkpoints` avoids theory `.save` files entirely, `--skip-goalfrag` opts out of theorem instrumentation, and `--tactic-timeout SECONDS` controls the root-project per-tactic goalfrag timeout (default 2.5s; `0` disables it)
 - exports explicit project heap targets from `[[heap]]` entries using local SaveState
 - exposes `holbuild cache gc` with a 7-day default global-cache retention policy
@@ -44,6 +45,17 @@ and includes that heap in the toolchain key; it does not create a project-local
 copy under `.holbuild/checkpoints/_base`. The target design replaces this
 configured seed with bootstrap/checkpoint state that `hol build` can rebuild or
 restore hermetically under `.holbuild/` after `git pull`. See `DESIGN.md`.
+
+## Current validation status
+
+This is still an alpha prototype, but it is now production-dogfooded beyond toy
+cases. The full holbuild test suite passes against the local HOL checkout. The
+Vyper HOL project worktree has passed rooted project builds with goalfrag and
+transient checkpoints enabled using `--no-cache --tactic-timeout 0`; focused
+finite-timeout smoke testing for the large `instIdxIndepTheory` target passes at
+`--tactic-timeout 60`. The default root timeout remains intentionally strict
+(2.5s) for proof-debug feedback and is not expected to be a universal production
+setting for all root projects.
 
 ## Build
 
@@ -67,12 +79,13 @@ The compiler loads HOL's existing SML TOML parser from `$(HOLDIR)` and embeds it
 in `bin/holbuild`. Tests live under `tests/cases/*/test.sh` so they can move into
 HOL's selftest layout with minimal reshaping; `tests/run.sh` is the repo-local
 runner and can run cases in parallel with `HOLBUILD_TEST_JOBS`. Current cases
-cover simple theory builds, package overrides, cross-package SML load
-resolution, dependency cycle rejection, conservative invalidation, theorem
-checkpoint creation/cleanup, logical-name conflict rejection, cache
-restoration/corruption/concurrency fallback, parallel diamonds, same-project
-write locking, explicit heaps, object-target rejection, manifest schema
-validation, and cache GC.
+cover simple theory builds, package overrides, local build excludes, build roots,
+cross-package SML load resolution, dependency cycle rejection, conservative
+invalidation, checkpoint replay/recovery, process cleanup on interrupt,
+logical-name conflict rejection, cache restoration/corruption/concurrency/GC,
+parallel diamonds, same-project write locking, explicit heaps, object-target
+rejection, manifest schema validation, status output, root/dependency tactic
+timeout policy, and generated theory dependency/path stability.
 
 ## Usage
 
@@ -103,15 +116,20 @@ bin/holbuild heap main
 
 `--holdir PATH` can be used instead of `HOLBUILD_HOLDIR` at runtime for HOL
 commands. `-jN`, `-j N`, or `--jobs N` controls build parallelism for `build`
-and for the build phase of `heap` targets; the default is `-j1`.
+and for the build phase of `heap` targets; the default comes from local
+`.holconfig.toml` `[build].jobs` when set, otherwise from CPU detection as
+`max(1, nproc / 2)`. `--no-cache` disables global cache restore/publish for a
+build while preserving local `.holbuild` up-to-date checks.
 `--skip-checkpoints` disables theory checkpoint `.save`/`.ok` creation without
 disabling goalfrag proof execution. By default checkpoints may be created during
-a build but are removed after successful artifact/metadata writes. `--skip-goalfrag` opts out of modern
-theorem instrumentation. `--tactic-timeout SECONDS` sets the root-project per-tactic goalfrag
-timeout; the default is 2.5 seconds, and `0` disables the timeout. Dependency
-packages build with no tactic timeout. Combining
-`--skip-goalfrag` with `--tactic-timeout` is an error because the timeout is
-implemented by the goalfrag runtime. `cache gc` uses `$HOLBUILD_CACHE`,
+a build but are removed after successful artifact/metadata writes.
+`--skip-goalfrag` opts out of modern theorem instrumentation.
+`--tactic-timeout SECONDS` sets the root-project per-tactic goalfrag timeout;
+the default is 2.5 seconds, and `0` disables the timeout. Dependency packages
+build with no tactic timeout. Combining `--skip-goalfrag` with
+`--tactic-timeout` is an error because the timeout is implemented by the
+goalfrag runtime. Goalfrag/checkpoint/timeout policy affects execution and
+diagnostics, not final theory artifact action keys. `cache gc` uses `$HOLBUILD_CACHE`,
 `$XDG_CACHE_HOME/holbuild`, or `$HOME/.cache/holbuild` and does not require a HOL
 toolchain.
 
@@ -159,19 +177,26 @@ objects = ["MyProjectLib"]
 ## Local dependency overrides
 
 Use an uncommitted `.holconfig.toml` when a declared dependency lives at a
-different local path on your machine:
+different local path on your machine or when a workstation needs local build
+settings:
 
 ```toml
 [overrides.foo]
 path = "../foo-dev"
+
+[build]
+jobs = 16
+exclude = ["worktrees/*"]
 ```
 
 The override changes only where the package is found locally. The package still
 needs its own `holproject.toml` or an explicit shim manifest from the consumer.
 There is no `.holpath`, ambient `HOLPATH`, or user-facing include-path schema in
 project mode; dependency locations are resolved through manifests plus local
-overrides. `[build].roots` lists package-root-relative source paths for default
-entry points when `holbuild build` has no CLI target; root source paths must be
+overrides. Local config paths are literal today; shell-style `$HOME` expansion is
+a future wishlist item, not current behavior. `[build].roots` lists
+package-root-relative source paths for default entry points when `holbuild build`
+has no CLI target; root source paths must be
 discoverable through `[build].members`. `[build].members` remains the source
 discovery scope. When roots are configured, no-target `build` warns about
 discoverable theory scripts outside the roots' dependency closure.
