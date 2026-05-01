@@ -426,7 +426,8 @@ fun remove_tree_if_exists path =
 fun project_lock_path (project : HolbuildProject.t) =
   Path.concat(Path.concat(#root project, ".holbuild/locks"), "project.lock")
 
-fun project_lock_owner_path lock = Path.concat(lock, "owner")
+fun project_lock_owner_path lock = lock ^ ".owner"
+fun legacy_project_lock_owner_path lock = Path.concat(lock, "owner")
 
 fun env_default name default = Option.getOpt(OS.Process.getEnv name, default)
 
@@ -440,8 +441,10 @@ fun env_bool name default =
     | SOME "no" => false
     | _ => default
 
-fun current_pid_text () =
-  LargeInt.toString (SysWord.toLargeInt (Posix.Process.pidToWord (Posix.ProcEnv.getpid ())))
+fun pid_text pid =
+  LargeInt.toString (SysWord.toLargeInt (Posix.Process.pidToWord pid))
+
+fun current_pid_text () = pid_text (Posix.ProcEnv.getpid ())
 
 fun trim_trailing_newline text =
   if size text > 0 andalso String.sub(text, size text - 1) = #"\n" then
@@ -452,17 +455,43 @@ fun current_host () =
   trim_trailing_newline (read_text "/proc/sys/kernel/hostname")
   handle _ => env_default "HOSTNAME" "unknown"
 
+fun current_pid_namespace () = FS.readLink "/proc/self/ns/pid" handle _ => "unknown"
+fun current_boot_id () = trim_trailing_newline (read_text "/proc/sys/kernel/random/boot_id") handle _ => "unknown"
+
+fun proc_starttime pid =
+  let
+    val stat = read_text (Path.concat(Path.concat("/proc", pid), "stat"))
+    val chars = String.explode stat
+    fun after_comm [] = NONE
+      | after_comm (#")" :: #" " :: rest) = SOME (String.implode rest)
+      | after_comm (_ :: rest) = after_comm rest
+    val rest =
+      case after_comm chars of
+          SOME text => text
+        | NONE => raise Error "could not parse proc stat"
+    val fields = String.tokens Char.isSpace rest
+  in
+    List.nth(fields, 19)
+  end
+  handle _ => "unknown"
+
 fun project_lock_owner command =
   String.concatWith "\n"
-    ["holbuild-project-lock-v1",
+    ["holbuild-project-lock-v2",
      "command=" ^ command,
      "pid=" ^ current_pid_text (),
+     "pid_ns=" ^ current_pid_namespace (),
+     "starttime=" ^ proc_starttime "self",
+     "boot_id=" ^ current_boot_id (),
      "cwd=" ^ FS.getDir (),
      "host=" ^ current_host (),
      "started=" ^ Time.toString (Time.now ())] ^ "\n"
 
 fun current_lock_owner lock =
   SOME (read_text (project_lock_owner_path lock)) handle _ => NONE
+
+fun current_legacy_lock_owner lock =
+  SOME (read_text (legacy_project_lock_owner_path lock)) handle _ => NONE
 
 fun owner_lines owner = String.tokens (fn c => c = #"\n") owner
 
@@ -485,9 +514,31 @@ fun owner_value key owner =
 
 fun local_pid_alive pid = FS.access(Path.concat("/proc", pid), []) handle OS.SysErr _ => false
 
-fun stale_project_lock owner =
+fun string_contains needle text =
+  let
+    val needle_len = size needle
+    val text_len = size text
+    fun loop i =
+      i + needle_len <= text_len andalso
+      (String.substring(text, i, needle_len) = needle orelse loop (i + 1))
+  in
+    needle_len = 0 orelse loop 0
+  end
+
+fun pid_looks_like_holbuild pid =
+  let
+    val proc = Path.concat("/proc", pid)
+    val cmdline = read_text (Path.concat(proc, "cmdline")) handle _ => ""
+    val comm = read_text (Path.concat(proc, "comm")) handle _ => ""
+  in
+    string_contains "holbuild" cmdline orelse string_contains "holbuild" comm
+  end
+
+fun legacy_pid_owner_alive pid = local_pid_alive pid andalso pid_looks_like_holbuild pid
+
+fun stale_legacy_project_lock owner =
   case (owner_value "host" owner, owner_value "pid" owner) of
-      (SOME host, SOME pid) => host = current_host () andalso not (local_pid_alive pid)
+      (SOME host, SOME pid) => host = current_host () andalso not (legacy_pid_owner_alive pid)
     | _ => false
 
 fun owner_summary owner =
@@ -500,11 +551,11 @@ fun owner_summary owner =
     String.concatWith " " [field "command", field "pid", field "cwd"]
   end
 
-fun remove_stale_project_lock lock owner =
-  (TextIO.output(TextIO.stdErr,
-                 "holbuild: warning: removing stale project lock: " ^ lock ^
-                 " (" ^ owner_summary owner ^ ")\n");
-   remove_file (project_lock_owner_path lock);
+fun remove_stale_legacy_project_lock lock owner =
+  (HolbuildStatus.message_stderr
+     ("holbuild: warning: removing stale project lock: " ^ lock ^
+      " (" ^ owner_summary owner ^ ")\n");
+   remove_file (legacy_project_lock_owner_path lock);
    FS.rmDir lock handle OS.SysErr _ => ())
 
 fun project_lock_error lock owner =
@@ -512,30 +563,77 @@ fun project_lock_error lock owner =
          "lock: " ^ lock ^ "\n" ^
          "owner: " ^ owner_summary owner)
 
-fun acquire_fresh_project_lock lock command =
-  (FS.mkDir lock;
-   write_text (project_lock_owner_path lock) (project_lock_owner command);
-   lock)
+datatype project_lock = ProjectLock of {fd : Posix.IO.file_desc, lock : string}
+
+fun project_lock_mode () =
+  Posix.FileSys.S.flags [Posix.FileSys.S.irusr, Posix.FileSys.S.iwusr,
+                         Posix.FileSys.S.irgrp, Posix.FileSys.S.iwgrp,
+                         Posix.FileSys.S.iroth, Posix.FileSys.S.iwoth]
+
+fun open_project_lock_file lock =
+  Posix.FileSys.createf(lock, Posix.FileSys.O_RDWR, Posix.FileSys.O.flags [], project_lock_mode ())
+
+fun close_fd fd = Posix.IO.close fd handle OS.SysErr _ => ()
+
+fun set_close_on_exec fd =
+  let val flags = Posix.IO.getfd fd
+  in Posix.IO.setfd(fd, Posix.IO.FD.flags [flags, Posix.IO.FD.cloexec]) end
+  handle OS.SysErr _ => ()
+
+fun whole_file_lock ltype =
+  Posix.IO.FLock.flock {ltype = ltype, whence = Posix.IO.SEEK_SET,
+                        start = 0, len = 0, pid = NONE}
+
+fun try_lock_fd fd =
+  (ignore (Posix.IO.setlk(fd, whole_file_lock Posix.IO.F_WRLCK)); true)
+  handle OS.SysErr _ => false
+
+fun blocking_lock_owner fd =
+  let val lock = Posix.IO.getlk(fd, whole_file_lock Posix.IO.F_WRLCK)
+  in
+    case Posix.IO.FLock.pid lock of
+        SOME pid => SOME (pid_text pid)
+      | NONE => NONE
+  end
+  handle OS.SysErr _ => NONE
+
+fun unavailable_owner fd =
+  String.concatWith "\n"
+    ["holbuild-project-lock-v2",
+     "command=unknown",
+     "pid=" ^ Option.getOpt(blocking_lock_owner fd, "unknown"),
+     "cwd=unknown"] ^ "\n"
+
+fun path_is_dir path = FS.isDir path handle OS.SysErr _ => false
+
+fun reject_or_remove_legacy_project_lock lock =
+  if path_is_dir lock then
+    case current_legacy_lock_owner lock of
+        SOME owner =>
+          if stale_legacy_project_lock owner then remove_stale_legacy_project_lock lock owner
+          else raise project_lock_error lock owner
+      | NONE => raise project_lock_error lock "owner unavailable\n"
+  else ()
 
 fun acquire_project_lock project command =
   let
     val lock = project_lock_path project
-    fun retry_after_existing () =
-      case current_lock_owner lock of
-          SOME owner =>
-            if stale_project_lock owner then
-              (remove_stale_project_lock lock owner;
-               acquire_fresh_project_lock lock command)
-            else raise project_lock_error lock owner
-        | NONE => raise project_lock_error lock "owner unavailable\n"
+    val _ = ensure_parent lock
+    val _ = reject_or_remove_legacy_project_lock lock
+    val fd = open_project_lock_file lock
+    val _ = set_close_on_exec fd
   in
-    ensure_parent lock;
-    acquire_fresh_project_lock lock command
-    handle OS.SysErr _ => retry_after_existing ()
+    if try_lock_fd fd then
+      ((write_text (project_lock_owner_path lock) (project_lock_owner command);
+        ProjectLock {fd = fd, lock = lock})
+       handle e => (close_fd fd; raise e))
+    else
+      let val owner = Option.getOpt(current_lock_owner lock, unavailable_owner fd)
+      in close_fd fd; raise project_lock_error lock owner end
   end
 
-fun release_project_lock lock =
-  (remove_file (project_lock_owner_path lock); FS.rmDir lock handle OS.SysErr _ => ())
+fun release_project_lock (ProjectLock {fd, lock}) =
+  (remove_file (project_lock_owner_path lock); close_fd fd)
 
 fun with_project_lock project command f =
   let val lock = acquire_project_lock project command

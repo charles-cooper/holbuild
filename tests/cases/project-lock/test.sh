@@ -36,14 +36,17 @@ first_log=$tmpdir/first.log
 first_pid=$!
 
 lock="$project/.holbuild/locks/project.lock"
+owner="$lock.owner"
 for _ in $(seq 1 100); do
-  [[ -d "$lock" ]] && break
+  [[ -f "$lock" && -f "$owner" ]] && break
   sleep 0.05
 done
-[[ -d "$lock" ]] || { echo "project lock was not acquired" >&2; wait "$first_pid" || true; exit 1; }
-require_file "$lock/owner"
-require_grep "command=build" "$lock/owner"
-require_grep "pid=" "$lock/owner"
+[[ -f "$lock" ]] || { echo "project lock file was not created" >&2; wait "$first_pid" || true; exit 1; }
+require_file "$owner"
+require_grep "command=build" "$owner"
+require_grep "pid=" "$owner"
+require_grep "pid_ns=" "$owner"
+require_grep "starttime=" "$owner"
 
 second_log=$tmpdir/second.log
 if (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$second_log" 2>&1; then
@@ -89,13 +92,15 @@ if grep -q "member does not exist" "$locked_bad_log"; then
 fi
 
 wait "$first_pid"
-[[ ! -e "$lock" ]] || { echo "project lock survived successful build" >&2; exit 1; }
+[[ -f "$lock" ]] || { echo "project lock file was removed" >&2; exit 1; }
+[[ ! -e "$owner" ]] || { echo "project lock owner survived successful build" >&2; exit 1; }
 require_file "$project/.holbuild/obj/src/ATheory.dat"
 
 third_log=$tmpdir/third.log
 (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$third_log" 2>&1
 require_grep "ATheory is up to date" "$third_log"
 
+rm -f "$lock"
 mkdir -p "$lock"
 cat > "$lock/owner" <<TOML
 holbuild-project-lock-v1
@@ -109,4 +114,31 @@ stale_log=$tmpdir/stale.log
 (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$stale_log" 2>&1
 require_grep "removing stale project lock" "$stale_log"
 require_grep "ATheory is up to date" "$stale_log"
-[[ ! -e "$lock" ]] || { echo "stale project lock survived recovery build" >&2; exit 1; }
+[[ -f "$lock" ]] || { echo "stale legacy project lock was not replaced by lock file" >&2; exit 1; }
+[[ ! -e "$owner" ]] || { echo "project lock owner survived stale recovery build" >&2; exit 1; }
+
+rm -f "$owner"
+missing_owner_log=$tmpdir/missing-owner.log
+(cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$missing_owner_log" 2>&1
+require_grep "ATheory is up to date" "$missing_owner_log"
+[[ ! -e "$owner" ]] || { echo "project lock owner survived missing-owner recovery build" >&2; exit 1; }
+
+sleep 30 &
+unrelated_pid=$!
+rm -f "$lock"
+mkdir -p "$lock"
+cat > "$lock/owner" <<TOML
+holbuild-project-lock-v1
+command=build
+pid=$unrelated_pid
+cwd=$project
+host=$(hostname)
+started=namespace-stale-test
+TOML
+namespace_stale_log=$tmpdir/namespace-stale.log
+(cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$namespace_stale_log" 2>&1
+kill "$unrelated_pid" 2>/dev/null || true
+wait "$unrelated_pid" 2>/dev/null || true
+require_grep "removing stale project lock" "$namespace_stale_log"
+require_grep "ATheory is up to date" "$namespace_stale_log"
+[[ -f "$lock" ]] || { echo "namespace-stale legacy project lock was not replaced by lock file" >&2; exit 1; }
