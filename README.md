@@ -96,7 +96,8 @@ bin/holbuild -j4 build MyTheory
 bin/holbuild --maxheap 4096 build MyTheory
 bin/holbuild build --skip-checkpoints MyTheory
 bin/holbuild build --tactic-timeout 5 MyTheory
-bin/holbuild build --goalfrag-trace my_theorem --no-cache MyTheory
+bin/holbuild build --force --goalfrag-plan my_theorem MyTheory
+bin/holbuild build --force --goalfrag-trace my_theorem MyTheory
 bin/holbuild --json build MyTheory
 ```
 
@@ -121,8 +122,10 @@ bin/holbuild heap main
 commands. `-jN`, `-j N`, or `--jobs N` controls build parallelism for `build`
 and for the build phase of `heap` targets; the default comes from local
 `.holconfig.toml` `[build].jobs` when set, otherwise from CPU detection as
-`max(1, nproc / 2)`. `--no-cache` disables global cache restore/publish for a
-build while preserving local `.holbuild` up-to-date checks. `--maxheap MB` and
+`max(1, nproc / 2)`. `--force` ignores local up-to-date state and global cache
+restore so the requested plan executes from source; cache publication still
+happens unless `--no-cache` is also set. `--no-cache` disables global cache
+restore/publish while preserving local `.holbuild` up-to-date checks. `--maxheap MB` and
 `--max-heap MB` pass Poly/ML's maximum heap size to child HOL processes before
 `run`/`repl`, matching HOL's requirement that runtime options precede the
 subcommand.
@@ -132,12 +135,13 @@ a build but are removed after successful artifact/metadata writes.
 `--skip-goalfrag` opts out of modern theorem instrumentation.
 `--tactic-timeout SECONDS` sets the root-project per-tactic goalfrag timeout;
 the default is 2.5 seconds, and `0` disables the timeout. Dependency packages
-build with no tactic timeout. `--goalfrag-trace THEOREM` prints the generated
-goalfrag plan for one theorem plus before/after execution trace lines with goal
-counts and per-fragment elapsed milliseconds; use it with `--no-cache` when you
-need to force execution for proof-performance/debug inspection. Combining
-`--skip-goalfrag` with `--tactic-timeout` or `--goalfrag-trace` is an error
-because both are implemented by the goalfrag runtime. Goalfrag/checkpoint/timeout
+build with no tactic timeout. `--goalfrag-plan THEOREM` prints the generated
+goalfrag plan for one theorem. `--goalfrag-trace THEOREM` prints that plan plus
+before/after execution trace lines with goal counts and per-fragment elapsed
+milliseconds. Use these with `--force` when you need to force execution for
+proof-performance/debug inspection. Combining `--skip-goalfrag` with
+`--tactic-timeout`, `--goalfrag-plan`, or `--goalfrag-trace` is an error because
+all three are implemented by the goalfrag runtime. Goalfrag/checkpoint/timeout
 policy affects execution and diagnostics, not final theory artifact action keys. `--json` emits newline-delimited
 JSON status/message/error events for build output. `gc` removes stale project-local
 `.holbuild` stage/log/checkpoint residue and runs global cache GC using `$HOLBUILD_CACHE`,

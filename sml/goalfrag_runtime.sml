@@ -6,12 +6,15 @@ struct
 type config = {checkpoint_enabled : bool,
                tactic_timeout : real option,
                timeout_marker : string option,
+               plan_theorem : string option,
                trace_theorem : string option}
 
 val checkpoint_enabled_ref = ref false
 val tactic_timeout_ref = ref (NONE : real option)
 val tactic_timeout_marker_ref = ref (NONE : string option)
+val plan_theorem_ref = ref (NONE : string option)
 val trace_theorem_ref = ref (NONE : string option)
+val plan_active_ref = ref false
 val trace_active_ref = ref false
 val trace_current_theorem_ref = ref ""
 val theorem_info_ref = ref NONE : (string * string * string * string * string * string * string * string * bool * int) option ref
@@ -567,8 +570,16 @@ fun step (StepOpen {label, ...}) = apply_ftac label (open_ftac label)
   | step (StepSelect {label, ...}) = raise Fail ("unmerged select fragment: " ^ label)
   | step (StepSelects {label, ...}) = raise Fail ("unmerged select fragments: " ^ label)
 
+fun inspection_matches wanted name =
+  case wanted of
+      NONE => false
+    | SOME selected => selected = name
+
 fun trace_enabled () =
   !trace_active_ref orelse Option.getOpt(env_bool "HOLBUILD_GOALFRAG_TRACE", false)
+
+fun plan_enabled () =
+  !plan_active_ref orelse trace_enabled ()
 
 fun current_goal_count () = length (proofManagerLib.top_goals()) handle _ => ~1
 
@@ -576,7 +587,7 @@ fun trace_line parts =
   if trace_enabled () then TextIO.output(TextIO.stdErr, String.concat parts) else ()
 
 fun trace_goalfrag_plan theorem_name plan =
-  if trace_enabled () then
+  if plan_enabled () then
     (TextIO.output(TextIO.stdErr,
        String.concat ["holbuild goalfrag plan theorem=", theorem_name,
                       " steps=", Int.toString (length plan), "\n"]);
@@ -644,21 +655,19 @@ fun atomic_prove label g tac =
   with_tactic_timeout label (fn () => Tactical.TAC_PROOF(g, tac)) ()
   handle e => (proofManagerLib.set_goal g; report_step_failure label e)
 
-fun trace_matches name =
-  case !trace_theorem_ref of
-      NONE => false
-    | SOME wanted => wanted = name
-
 datatype 'a traced_result = TraceOk of 'a | TraceError of exn
 
 fun with_theorem_trace name f =
   let
     val old_active = !trace_active_ref
+    val old_plan_active = !plan_active_ref
     val old_name = !trace_current_theorem_ref
-    val _ = trace_active_ref := trace_matches name
+    val _ = plan_active_ref := (inspection_matches (!plan_theorem_ref) name orelse inspection_matches (!trace_theorem_ref) name)
+    val _ = trace_active_ref := inspection_matches (!trace_theorem_ref) name
     val _ = trace_current_theorem_ref := name
     val result = TraceOk (f ()) handle e => TraceError e
     val _ = trace_active_ref := old_active
+    val _ = plan_active_ref := old_plan_active
     val _ = trace_current_theorem_ref := old_name
   in
     case result of TraceOk value => value | TraceError e => raise e
@@ -745,11 +754,14 @@ fun goalfrag_prover (g, tac) =
              drop_all();
              raise e)
 
-fun install ({checkpoint_enabled, tactic_timeout, timeout_marker, trace_theorem} : config) =
+fun install ({checkpoint_enabled, tactic_timeout, timeout_marker, plan_theorem, trace_theorem} : config) =
   (checkpoint_enabled_ref := checkpoint_enabled;
    tactic_timeout_ref := tactic_timeout;
    tactic_timeout_marker_ref := timeout_marker;
+   plan_theorem_ref := plan_theorem;
    trace_theorem_ref := trace_theorem;
+   plan_active_ref := false;
+   trace_active_ref := false;
    theorem_info_ref := NONE;
    context_info_ref := NONE;
    proving_with_goalfrag_ref := false;

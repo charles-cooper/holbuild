@@ -609,12 +609,17 @@ cases. The CLI default is 2.5 seconds per tactic step for the root package;
 `--tactic-timeout SECONDS` changes that root-package timeout, and
 `--tactic-timeout 0` disables it. Dependency package builds use no tactic timeout,
 so a consumer's proof-debug timeout does not make dependency builds fail.
-`--goalfrag-trace THEOREM` is a debugging/inspection path: it prints the generated
-GoalFrag step plan for one theorem and before/after execution trace lines with
-per-fragment elapsed time and open-goal counts; it is not an action-key input.
-Because timeouts and tracing only exist in the goalfrag runtime,
-`--skip-goalfrag --tactic-timeout ...` and `--skip-goalfrag --goalfrag-trace ...`
-are rejected instead of silently ignoring the request. Goalfrag, checkpoint creation, tactic timeout, and tracing are execution/debug policy,
+`--goalfrag-plan THEOREM` and `--goalfrag-trace THEOREM` are debugging/inspection paths:
+the former prints the generated GoalFrag step plan for one theorem, while the
+latter prints that plan plus before/after execution trace lines with
+per-fragment elapsed time and open-goal counts. They are not action-key inputs.
+Use `--force` with these options when the artifact is already up to date and you
+need source execution for inspection; `--force` bypasses local up-to-date checks
+and global cache restore without disabling cache publication. Because timeouts,
+planning, and tracing only exist in the goalfrag runtime,
+`--skip-goalfrag --tactic-timeout ...`, `--skip-goalfrag --goalfrag-plan ...`, and
+`--skip-goalfrag --goalfrag-trace ...` are rejected instead of silently ignoring
+the request. Goalfrag, checkpoint creation, tactic timeout, planning, and tracing are execution/debug policy,
 not final artifact semantics. They must not be included in the final theory
 action key or local metadata comparison for `.uo/.ui/.dat`: switching
 `--skip-goalfrag`, `--skip-checkpoints`, or root tactic timeout should not rebuild

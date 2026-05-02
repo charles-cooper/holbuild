@@ -169,14 +169,28 @@ trace_project=$tmpdir/trace-project
 mkdir -p "$trace_project/src"
 cp "$project/holproject.toml" "$trace_project/holproject.toml"
 cp "$project/src/AScript.sml" "$trace_project/src/AScript.sml"
+plan_log=$tmpdir/goalfrag-plan.log
+(cd "$trace_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --force --goalfrag-plan b_thm ATheory) > "$plan_log" 2>&1
+require_grep "holbuild goalfrag plan theorem=b_thm steps=" "$plan_log"
+require_grep "holbuild goalfrag plan step=.*kind=open.*label=open_then1" "$plan_log"
+if grep -q "holbuild goalfrag before theorem=b_thm" "$plan_log" || grep -q "elapsed_ms=" "$plan_log"; then
+  echo "--goalfrag-plan emitted execution trace" >&2
+  exit 1
+fi
 trace_log=$tmpdir/goalfrag-trace.log
-(cd "$trace_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --no-cache --goalfrag-trace b_thm ATheory) > "$trace_log" 2>&1
+(cd "$trace_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --force --goalfrag-trace b_thm ATheory) > "$trace_log" 2>&1
 require_grep "holbuild goalfrag plan theorem=b_thm steps=" "$trace_log"
-require_grep "holbuild goalfrag plan step=.*kind=open.*label=open_then1" "$trace_log"
 require_grep "holbuild goalfrag before theorem=b_thm step=0" "$trace_log"
 require_grep "holbuild goalfrag after theorem=b_thm step=0.*elapsed_ms=" "$trace_log"
 if grep -q "holbuild goalfrag plan theorem=a_thm" "$trace_log"; then
   echo "--goalfrag-trace traced an unrequested theorem" >&2
+  exit 1
+fi
+force_log=$tmpdir/force.log
+(cd "$trace_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --force ATheory) > "$force_log" 2>&1
+require_grep "ATheory built" "$force_log"
+if grep -q "ATheory is up to date\|ATheory restored from cache" "$force_log"; then
+  echo "--force skipped source rebuild" >&2
   exit 1
 fi
 

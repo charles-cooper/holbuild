@@ -1469,17 +1469,18 @@ fun first_failed_prefix_checkpoint checkpoints =
       [] => NONE
     | first :: _ => SOME first
 
-type build_options = {use_cache : bool, skip_checkpoints : bool, goalfrag : bool, tactic_timeout : real option, goalfrag_trace : string option}
+type build_options = {use_cache : bool, force : bool, skip_checkpoints : bool, goalfrag : bool, tactic_timeout : real option, goalfrag_plan : string option, goalfrag_trace : string option}
 
 datatype checkpoint_policy =
-  CheckpointPolicy of {checkpoint : bool, goalfrag : bool, tactic_timeout : real option, goalfrag_trace : string option}
+  CheckpointPolicy of {checkpoint : bool, goalfrag : bool, tactic_timeout : real option, goalfrag_plan : string option, goalfrag_trace : string option}
 
 val no_checkpoint_policy =
-  CheckpointPolicy {checkpoint = false, goalfrag = false, tactic_timeout = NONE, goalfrag_trace = NONE}
+  CheckpointPolicy {checkpoint = false, goalfrag = false, tactic_timeout = NONE, goalfrag_plan = NONE, goalfrag_trace = NONE}
 
 fun checkpoint_enabled (CheckpointPolicy {checkpoint, ...}) = checkpoint
 fun goalfrag_enabled (CheckpointPolicy {goalfrag, ...}) = goalfrag
 fun tactic_timeout (CheckpointPolicy {tactic_timeout, ...}) = tactic_timeout
+fun goalfrag_plan (CheckpointPolicy {goalfrag_plan, ...}) = goalfrag_plan
 fun goalfrag_trace (CheckpointPolicy {goalfrag_trace, ...}) = goalfrag_trace
 
 fun timeout_text NONE = "none"
@@ -1509,6 +1510,7 @@ fun instrumented_source policy timeout_marker source_text start_offset checkpoin
        save_checkpoints = checkpoint_enabled policy,
        tactic_timeout = tactic_timeout policy,
        timeout_marker = timeout_marker,
+       plan_theorem = goalfrag_plan policy,
        trace_theorem = goalfrag_trace policy}
   else plain_source_from_checkpoint source_text start_offset
 
@@ -1527,6 +1529,7 @@ fun failed_prefix_resume_source policy timeout_marker source checkpoint step_cou
         {checkpoint_enabled = checkpoint_enabled policy,
          tactic_timeout = tactic_timeout policy,
          timeout_marker = SOME timeout_marker,
+         plan_theorem = goalfrag_plan policy,
          trace_theorem = goalfrag_trace policy}
         [checkpoint]
     val theorem_binding = #safe_name checkpoint
@@ -1667,7 +1670,7 @@ fun build_theory cache_allowed policy tc project base_context plan keys toolchai
         else if null theorem_checkpoints then raise Error msg
         else raise checkpoint_failure_error msg
     val _ =
-      if Option.isSome (goalfrag_trace policy) then
+      if Option.isSome (goalfrag_plan policy) orelse Option.isSome (goalfrag_trace policy) then
         HolbuildStatus.message_stdout (read_text (Path.concat(stage, "holbuild-build.log")) handle _ => "")
       else ()
     val _ = copy_binary staged_dat data_path
@@ -1830,10 +1833,11 @@ fun root_package_node project node =
 fun effective_tactic_timeout goalfrag root_package tactic_timeout =
   if goalfrag andalso root_package then tactic_timeout else NONE
 
-fun checkpoint_policy_for_node ({skip_checkpoints, goalfrag, tactic_timeout, goalfrag_trace, ...} : build_options) project node =
+fun checkpoint_policy_for_node ({skip_checkpoints, goalfrag, tactic_timeout, goalfrag_plan, goalfrag_trace, ...} : build_options) project node =
   CheckpointPolicy {checkpoint = not skip_checkpoints,
                     goalfrag = goalfrag,
                     tactic_timeout = effective_tactic_timeout goalfrag (root_package_node project node) tactic_timeout,
+                    goalfrag_plan = if goalfrag then goalfrag_plan else NONE,
                     goalfrag_trace = if goalfrag then goalfrag_trace else NONE}
 
 fun build_config_lines_for_node options project node =
@@ -1857,13 +1861,15 @@ fun build_theory_node (options : build_options) tc project base_context plan key
     val policy = checkpoint_policy_for_node options project node
     val metadata_checkpoints = []
     val stage = stage_dir project input_key
+    val force = #force options
     val cache_allowed = #use_cache options andalso cache_enabled node
+    val cache_restore_allowed = cache_allowed andalso not force
   in
-    if not (always_reexecute node) andalso
+    if not force andalso not (always_reexecute node) andalso
        up_to_date policy project plan keys input_key toolchain_key node metadata_checkpoints then
       (remove_tree_if_exists stage;
        HolbuildStatus.UpToDate)
-    else if cache_allowed andalso
+    else if cache_restore_allowed andalso
             materialize_theory_cache tc project plan input_key node then
       (remove_tree stage;
        write_metadata policy project plan keys input_key toolchain_key node metadata_checkpoints;
@@ -1889,14 +1895,14 @@ fun build_node options tc project base_context plan keys toolchain_key node =
         HolbuildSourceIndex.TheoryScript =>
           build_theory_node options tc project base_context plan keys toolchain_key node input_key
       | HolbuildSourceIndex.Sml =>
-          if not (always_reexecute node) andalso
+          if not (#force options) andalso not (always_reexecute node) andalso
              up_to_date no_checkpoint_policy project plan keys input_key toolchain_key node [] then
             HolbuildStatus.UpToDate
           else (build_sml_like plan node ".uo";
                 write_metadata no_checkpoint_policy project plan keys input_key toolchain_key node [];
                 HolbuildStatus.Built)
       | HolbuildSourceIndex.Sig =>
-          if not (always_reexecute node) andalso
+          if not (#force options) andalso not (always_reexecute node) andalso
              up_to_date no_checkpoint_policy project plan keys input_key toolchain_key node [] then
             HolbuildStatus.UpToDate
           else (build_sml_like plan node ".ui";
@@ -1911,7 +1917,7 @@ fun node_policy options project node =
     | HolbuildSourceIndex.Sig => no_checkpoint_policy
 
 fun node_is_up_to_date options project plan keys toolchain_key node =
-  not (always_reexecute node) andalso
+  not (#force options) andalso not (always_reexecute node) andalso
   up_to_date (node_policy options project node)
              project plan keys (HolbuildBuildPlan.input_key_for keys node)
              toolchain_key node []
