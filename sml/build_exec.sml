@@ -1595,6 +1595,7 @@ fun build_theory cache_allowed policy tc project base_context plan keys toolchai
     val staged_sig = staged_theory_file stage node ".sig"
     val staged_sml = staged_theory_file stage node ".sml"
     val staged_dat = staged_theory_file stage node ".dat"
+    val _ = remove_tree stage
     val _ = ensure_dir stage
     val _ = if checkpoint_enabled policy then ensure_parent deps_loaded else ()
     val _ = if checkpoint_enabled policy then ensure_parent final_context else ()

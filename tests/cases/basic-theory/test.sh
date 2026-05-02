@@ -210,6 +210,24 @@ if find "$skip_project/.holbuild/checkpoints" \( -name '*.save' -o -name '*.save
   exit 1
 fi
 
+stage_residue_project=$tmpdir/stage-residue-project
+mkdir -p "$stage_residue_project/src"
+cp "$project/holproject.toml" "$stage_residue_project/holproject.toml"
+cp "$project/src/AScript.sml" "$stage_residue_project/src/AScript.sml"
+stage_residue_key=$(cd "$stage_residue_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --dry-run ATheory | awk '/input_key:/ {print $2; exit}')
+stage_residue_dir="$stage_residue_project/.holbuild/stage/$stage_residue_key"
+mkdir -p "$stage_residue_dir"
+printf 'poisoned stale stage file\n' > "$stage_residue_dir/ATheory.dat"
+printf 'poisoned stale generated source\n' > "$stage_residue_dir/ATheory.sml"
+printf 'poisoned stale generated signature\n' > "$stage_residue_dir/ATheory.sig"
+(cd "$stage_residue_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --skip-goalfrag --no-cache ATheory) > "$tmpdir/stage-residue.log"
+require_grep "ATheory built" "$tmpdir/stage-residue.log"
+require_file "$stage_residue_project/.holbuild/obj/src/ATheory.dat"
+if strings -a "$stage_residue_project/.holbuild/obj/src/ATheory.dat" | grep -q "poisoned stale"; then
+  echo "stale stage residue was reused by build" >&2
+  exit 1
+fi
+
 bad_flags_log=$tmpdir/bad-flags.log
 if (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --skip-goalfrag --tactic-timeout 0 ATheory) > "$bad_flags_log" 2>&1; then
   echo "--skip-goalfrag --tactic-timeout should fail" >&2
