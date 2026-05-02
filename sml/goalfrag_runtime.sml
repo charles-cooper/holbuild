@@ -669,37 +669,16 @@ fun steps body =
                | #"}" => scan (i + 1) (Int.max(0, depth - 1)) comments in_string in_quote
                | _ => scan (i + 1) depth comments in_string in_quote)
       in scan 0 0 0 false false end
-    fun strip_branch_body rhs_start rhs =
-      let
-        val text = trim_space rhs
-        val leading = size rhs - size (String.extract(rhs, #1 (trim_left_at rhs 0), NONE))
-        val n = size text
-      in
-        if n >= 2 andalso String.sub(text, 0) = #"(" andalso String.sub(text, n - 1) = #")" then
-          (rhs_start + leading + 1, String.substring(text, 1, n - 2))
-        else (rhs_start, text)
-      end
-    fun reverse_branch_steps start_pos label =
-      case top_level_then1 label of
-          NONE => NONE
-        | SOME split =>
-            let
-              val lhs = trim_space (String.substring(label, 0, split))
-              val (rhs_start, rhs) = trim_left_at label (split + 2)
-              val (body_start, body) = strip_branch_body rhs_start rhs
-              val lhs_steps = map (shift_step start_pos) (steps lhs)
-              val body_steps = map (shift_step (start_pos + body_start)) (steps body)
-              val open_step = StepOpen {end_pos = start_pos + rhs_start, label = "open_then1"}
-              val close_step = StepClose {end_pos = start_pos + size label, label = "close_paren"}
-            in SOME (lhs_steps @ [open_step] @ body_steps @ [close_step]) end
-    and split_step_text start_pos label =
+    fun split_step_text start_pos label =
       case reverse_branch_prefix_split label of
           SOME split =>
             let
               val prefix = String.substring(label, 0, split)
               val (suffix_start, suffix) = trim_left_at label (split + 2)
             in
-              if trim_left prefix = "" then Option.getOpt(reverse_branch_steps start_pos label, [StepExpand {end_pos = start_pos + size label, label = label}])
+              if trim_left prefix = "" then [StepExpand {end_pos = start_pos + size label, label = label}]
+              else if starts_reverse suffix andalso Option.isSome (top_level_then1 suffix) then
+                map (shift_step start_pos) (steps prefix) @ split_step_text (start_pos + suffix_start) suffix
               else map (shift_step start_pos) (steps prefix) @ map (shift_step (start_pos + suffix_start)) (steps suffix)
             end
         | NONE =>
@@ -708,9 +687,15 @@ fun steps body =
                    let
                      val branch = trim_space (String.substring(label, 0, split))
                      val (suffix_start, suffix) = trim_left_at label (split + 2)
-                     val branch_steps = Option.getOpt(reverse_branch_steps start_pos branch, [StepExpand {end_pos = start_pos + split, label = branch}])
-                   in branch_steps @ map (shift_step (start_pos + suffix_start)) (steps suffix) end
-               | NONE => Option.getOpt(reverse_branch_steps start_pos label, [StepExpand {end_pos = start_pos + size label, label = label}]))
+                   in
+                     if starts_reverse suffix andalso Option.isSome (top_level_then1 suffix) then
+                       StepExpand {end_pos = start_pos + split, label = branch} ::
+                       split_step_text (start_pos + suffix_start) suffix
+                     else
+                       StepExpand {end_pos = start_pos + split, label = branch} ::
+                       map (shift_step (start_pos + suffix_start)) (steps suffix)
+                   end
+               | NONE => [StepExpand {end_pos = start_pos + size label, label = label}])
     fun split_reverse_branch_step (StepExpand {end_pos, label}) = split_step_text (end_pos - size label) label
       | split_reverse_branch_step step = [step]
     fun split_reverse_branch_steps steps' = List.concat (map split_reverse_branch_step steps')

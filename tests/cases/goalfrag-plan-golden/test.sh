@@ -166,27 +166,24 @@ holbuild goalfrag plan ATheory:grouped_prefix source=src/AScript.sml (5 steps)
 EXPECTED
 
 check_plan reverse_branch <<'EXPECTED'
-holbuild goalfrag plan ATheory:reverse_branch source=src/AScript.sml (9 steps)
+holbuild goalfrag plan ATheory:reverse_branch source=src/AScript.sml (5 steps)
   00 simp[step_create_def]
   01 >> strip_tac
   02 >> rewrite_tac[Ntimes CONJ_ASSOC 3]
-  03 >> Tactical.REVERSE (conj_tac)
-  04   >- qpat_x_assum `proceed_create _ _ _ _ _ se = _` mp_tac
-  05   >> rewrite_tac[proceed_create_def]
-  06   >> strip_tac
-  07   >> gvs[]
-  08 >> strip_tac
+  03 >> reverse conj_tac >- (
+         qpat_x_assum `proceed_create _ _ _ _ _ se = _` mp_tac >>
+         rewrite_tac[proceed_create_def] >>
+         strip_tac >> gvs[] )
+  04 >> strip_tac
 EXPECTED
 
 check_plan reverse_branch_suffix <<'EXPECTED'
-holbuild goalfrag plan ATheory:reverse_branch_suffix source=src/AScript.sml (7 steps)
+holbuild goalfrag plan ATheory:reverse_branch_suffix source=src/AScript.sml (5 steps)
   00 CONJ_TAC
-  01 >> Tactical.REVERSE (CONJ_TAC)
-  02   >- ACCEPT_TAC TRUTH
-  03 >> simp[GSYM CONJ_ASSOC]
-  04 >> Tactical.REVERSE (CONJ_TAC)
-  05   >- ACCEPT_TAC TRUTH
-  06 >> ACCEPT_TAC TRUTH
+  01 >> reverse CONJ_TAC >- (ACCEPT_TAC TRUTH)
+  02 >> simp[GSYM CONJ_ASSOC]
+  03 >> reverse CONJ_TAC >- (ACCEPT_TAC TRUTH)
+  04 >> ACCEPT_TAC TRUTH
 EXPECTED
 
 check_plan_file step_create_push_structure "$SCRIPT_DIR/step_create_push_structure.expected"
@@ -247,18 +244,16 @@ holbuild goalfrag plan ATheory:branch_and_by source=src/AScript.sml (7 steps)
 EXPECTED
 
 check_plan nested_combinators <<'EXPECTED'
-holbuild goalfrag plan ATheory:nested_combinators source=src/AScript.sml (11 steps)
+holbuild goalfrag plan ATheory:nested_combinators source=src/AScript.sml (8 steps)
   00 rpt
   01   strip_tac
   02 >> CONJ_TAC
   03   >- FIRST
   04     CONJ_TAC
   05   >> ACCEPT_TAC TRUTH
-  06 >> Tactical.REVERSE (CONJ_TAC)
-  07   >- sg `T`
-  08     >- ACCEPT_TAC TRUTH
-  09   >> ACCEPT_TAC TRUTH
-  10 >> ACCEPT_TAC TRUTH
+  06 >> reverse CONJ_TAC
+       >- (sg `T` >- ACCEPT_TAC TRUTH >> ACCEPT_TAC TRUTH)
+  07 >> ACCEPT_TAC TRUTH
 EXPECTED
 
 check_plan select_goals <<'EXPECTED'
