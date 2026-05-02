@@ -1017,46 +1017,8 @@ fun theorem_failed_prefix_path project node deps_key safe_name =
   Path.concat(failed_prefix_checkpoint_dir project node deps_key,
               safe_name ^ "_failed_prefix.save")
 
-fun bool_digit true = "1"
-  | bool_digit false = "0"
-
-fun theorem_report_line name theorem_start theorem_stop tactic_start tactic_end has_attrs =
-  String.concatWith "\t"
-    ["theorem", name, Int.toString theorem_start, Int.toString theorem_stop,
-     Int.toString tactic_start, Int.toString tactic_end, bool_digit has_attrs]
-
-fun theorem_report_lines result =
-  let
-    fun loop acc =
-      case #parseDec result () of
-          NONE => rev acc
-        | SOME (HOLSourceAST.HOLTheoremDecl {theorem_, id = (_, name), proof_, tac, stop, ...}) =>
-            let
-              val (tactic_start, tactic_end) = HOLSourceAST.expSpan tac
-              val has_attrs = case proof_ of SOME {attrs = SOME _, ...} => true | _ => false
-              val line = theorem_report_line name theorem_ stop tactic_start tactic_end has_attrs
-            in
-              loop (line :: acc)
-            end
-        | SOME _ => loop acc
-  in
-    loop []
-  end
-
-fun parser_reader source_text =
-  let val fed = ref false
-  in fn _ => if !fed then "" else (fed := true; source_text) end
-
-fun discover_theorem_boundaries source_path source_text =
-  let
-    val result = HOLSourceParser.parseSML source_path (parser_reader source_text)
-                   (HolbuildTheoryDiagnostics.parse_error source_path source_text)
-                   HOLSourceParser.initialScope
-    val report = String.concatWith "\n" (theorem_report_lines result) ^ "\n"
-  in
-    HolbuildTheoryCheckpoints.discover_from_report {source = source_text, report = report}
-  end
-  handle Fail msg => raise Error msg
+fun discover_theorem_boundaries _ source_text =
+  HolbuildTheoryBoundaryScan.scan source_text
 
 fun theorem_checkpoint_key {name, safe_name, boundary, deps_key, prefix_hash} =
   HolbuildToolchain.hash_text

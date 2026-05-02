@@ -101,6 +101,12 @@ Proof
   \\ ACCEPT_TAC TRUTH
 QED
 
+Theorem quoted_keyword_tokens:
+  T
+Proof
+  (ignore ``QED``; ignore ‘Proof’; ACCEPT_TAC TRUTH)
+QED
+
 Theorem reverse_multi_goal_validation:
   (T /\ T) /\ T
 Proof
