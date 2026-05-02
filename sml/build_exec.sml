@@ -631,7 +631,10 @@ fun with_project_lock project command f =
   let val lock = acquire_project_lock project command
   in
     (f () before release_project_lock lock)
-    handle e => (release_project_lock lock; raise e)
+    handle e =>
+      (HolbuildToolchain.cleanup_active_children ();
+       release_project_lock lock;
+       raise e)
   end
 
 fun project_state_dir (project : HolbuildProject.t) name =
@@ -957,6 +960,20 @@ fun select_then1_source_probes label =
 
 fun source_location_probes label = label :: select_then1_source_probes label
 
+fun checkpoint_source_summary source_path source_text checkpoint label offset =
+  let
+    val theorem_line = line_number_at source_text (#theorem_start checkpoint)
+    val proof_line = line_number_at source_text (#tactic_start checkpoint)
+    val fragment_line = line_number_at source_text offset
+  in
+    String.concat
+      ["theorem: ", #name checkpoint, " (line ", Int.toString theorem_line, ")\n",
+       "proof: line ", Int.toString proof_line, "\n",
+       "fragment: ", label, "\n",
+       "source: ", source_path, ":", Int.toString fragment_line, "\n",
+       source_context_text source_text fragment_line]
+  end
+
 fun failed_fragment_source_summary source_path source_text checkpoints label =
   let
     fun locate_with_probe checkpoint probe =
@@ -965,22 +982,34 @@ fun failed_fragment_source_summary source_path source_text checkpoints label =
         (find_substring probe (#tactic_text checkpoint))
     fun locate checkpoint = first_some (locate_with_probe checkpoint) (source_location_probes label)
   in
-    case first_some locate checkpoints of
-        NONE => NONE
-      | SOME {checkpoint, offset} =>
-        let
-          val theorem_line = line_number_at source_text (#theorem_start checkpoint)
-          val proof_line = line_number_at source_text (#tactic_start checkpoint)
-          val fragment_line = line_number_at source_text offset
-        in
-          SOME (String.concat
-            ["theorem: ", #name checkpoint, " (line ", Int.toString theorem_line, ")\n",
-             "proof: line ", Int.toString proof_line, "\n",
-             "fragment: ", label, "\n",
-             "source: ", source_path, ":", Int.toString fragment_line, "\n",
-             source_context_text source_text fragment_line])
-        end
+    Option.map
+      (fn {checkpoint, offset} => checkpoint_source_summary source_path source_text checkpoint label offset)
+      (first_some locate checkpoints)
   end
+
+fun quoted_after marker line =
+  case find_substring marker line of
+      NONE => NONE
+    | SOME start =>
+        let
+          val quote_start = start + size marker
+          fun scan i =
+            if i >= size line then NONE
+            else if String.sub(line, i) = #"\"" then
+              SOME (String.substring(line, quote_start, i - quote_start))
+            else scan (i + 1)
+        in
+          scan quote_start
+        end
+
+fun find_failed_theorem_name lines =
+  first_some (quoted_after "Failed to prove theorem \"") lines
+
+fun failed_theorem_source_summary source_path source_text checkpoints label theorem_name =
+  case List.find (fn checkpoint => #name checkpoint = theorem_name) checkpoints of
+      NONE => NONE
+    | SOME checkpoint =>
+        SOME (checkpoint_source_summary source_path source_text checkpoint label (#tactic_end checkpoint))
 
 fun truncate_goal_state text =
   if size text <= goal_state_limit then (false, text)
@@ -1038,11 +1067,17 @@ fun child_failure_summary path =
   handle _ => NONE
 
 fun summarize_failed_fragment_source source_path source_text checkpoints path =
-  let val lines = String.fields (fn c => c = #"\n") (read_text path)
+  let
+    val lines = String.fields (fn c => c = #"\n") (read_text path)
+    val label = find_failed_fragment_label lines
   in
-    Option.mapPartial
-      (failed_fragment_source_summary source_path source_text checkpoints)
-      (find_failed_fragment_label lines)
+    case Option.mapPartial (failed_fragment_source_summary source_path source_text checkpoints) label of
+        SOME summary => SOME summary
+      | NONE =>
+          (case (label, find_failed_theorem_name lines) of
+               (SOME label', SOME theorem_name) =>
+                 failed_theorem_source_summary source_path source_text checkpoints label' theorem_name
+             | _ => NONE)
   end
   handle _ => NONE
 
@@ -1308,7 +1343,10 @@ fun path_dependent_cache_key project input_key =
         "input_key=" ^ input_key,
         "root=" ^ canonical_path (#root project)] ^ "\n")
 
-fun publish_cache_manifest root cache_key cache_replacements staged_sig staged_sml staged_dat cache_mldeps template =
+fun cache_warning_subject node =
+  String.concat [logical_name node, " (", source_file node, ")"]
+
+fun publish_cache_manifest root cache_key subject cache_replacements staged_sig staged_sml staged_dat cache_mldeps template =
   let
     val manifest_path = HolbuildCache.action_manifest root cache_key
     val _ = write_text template (rewrite_all cache_replacements (read_text staged_sml))
@@ -1324,13 +1362,13 @@ fun publish_cache_manifest root cache_key cache_replacements staged_sig staged_s
         SOME old =>
           if old = manifest then HolbuildCache.touch manifest_path
           else if cache_entry_usable root cache_key old then
-            warn ("cache entry already exists with different outputs: " ^ cache_key)
+            warn ("cache entry already exists with different outputs for " ^ subject ^ ": " ^ cache_key)
           else
             write_text manifest_path manifest
       | NONE => write_text manifest_path manifest
   end
 
-fun publish_theory_cache project input_key dat_replacements staged_sig staged_sml staged_dat mldeps =
+fun publish_theory_cache project node input_key dat_replacements staged_sig staged_sml staged_dat mldeps =
   let
     val root = cache_root ()
     val _ = HolbuildCache.ensure_layout root
@@ -1340,7 +1378,8 @@ fun publish_theory_cache project input_key dat_replacements staged_sig staged_sm
     val cache_key = if path_dependent then path_dependent_cache_key project input_key else input_key
     fun cleanup () = FS.remove template handle OS.SysErr _ => ()
     fun drop_stable_path_dependent () = remove_file (HolbuildCache.action_manifest root input_key)
-    fun publish () = publish_cache_manifest root cache_key dat_replacements staged_sig staged_sml staged_dat cache_mldeps template
+    val subject = cache_warning_subject node
+    fun publish () = publish_cache_manifest root cache_key subject dat_replacements staged_sig staged_sml staged_dat cache_mldeps template
     fun skip_locked_publish () = ()
   in
     ((if path_dependent then
@@ -1535,13 +1574,36 @@ fun theorem_report_lines result =
 
 fun parse_error _ _ msg = raise Error ("HOL source parse error: " ^ msg)
 
+fun column_number_at text offset =
+  let
+    val limit = Int.min(offset, size text)
+    fun loop i col =
+      if i >= limit then col
+      else if String.sub(text, i) = #"\n" then loop (i + 1) 1
+      else loop (i + 1) (col + 1)
+  in
+    loop 0 1
+  end
+
+fun static_parse_error source_path source_text _ (start, _) msg =
+  let
+    val line = line_number_at source_text start
+    val col = column_number_at source_text start
+  in
+    raise Error
+      (String.concat
+         ["HOL source parse error: ", msg, "\n",
+          "source: ", source_path, ":", Int.toString line, ":", Int.toString col, "\n",
+          source_context_text source_text line])
+  end
+
 fun parser_reader source_text =
   let val fed = ref false
   in fn _ => if !fed then "" else (fed := true; source_text) end
 
 fun discover_theorem_boundaries source_path source_text =
   let
-    val result = HOLSourceParser.parseSML source_path (parser_reader source_text) parse_error
+    val result = HOLSourceParser.parseSML source_path (parser_reader source_text) (static_parse_error source_path source_text)
                    HOLSourceParser.initialScope
     val report = String.concatWith "\n" (theorem_report_lines result) ^ "\n"
   in
@@ -1632,15 +1694,25 @@ fun metadata_value key lines =
                lines
   end
 
+fun remove_incomplete_checkpoint_residue path =
+  if file_exists (checkpoint_ok_path path) andalso not (file_exists path) then
+    (warn ("checkpoint metadata exists without checkpoint file; discarding metadata: " ^ path);
+     remove_file (checkpoint_ok_path path);
+     remove_file (path ^ ".meta");
+     remove_file (path ^ ".prefix"))
+  else ()
+
 fun checkpoint_ok_matches path fields =
-  case current_metadata (checkpoint_ok_path path) of
-      SOME text =>
-        let val lines = metadata_lines text
-        in
-          List.exists (fn line => line = "holbuild-checkpoint-ok-v2") lines andalso
-          List.all (fn (key, value) => metadata_value key lines = SOME value) fields
-        end
-    | NONE => false
+  (remove_incomplete_checkpoint_residue path;
+   file_exists path andalso
+   case current_metadata (checkpoint_ok_path path) of
+       SOME text =>
+         let val lines = metadata_lines text
+         in
+           List.exists (fn line => line = "holbuild-checkpoint-ok-v2") lines andalso
+           List.all (fn (key, value) => metadata_value key lines = SOME value) fields
+         end
+     | NONE => false)
 
 fun deps_checkpoint_ok_text deps_key =
   checkpoint_ok_text "deps_loaded" [("deps_key", deps_key)]
@@ -1953,7 +2025,7 @@ fun build_theory cache_allowed policy tc project base_context plan keys toolchai
                                   generated_holdep_mldeps plan tc staged_sml)
     val _ =
       if cache_allowed then
-        publish_theory_cache project input_key cache_replacements staged_sig staged_sml staged_dat mldeps
+        publish_theory_cache project node input_key cache_replacements staged_sig staged_sml staged_dat mldeps
       else ()
   in
     write_local_theory_manifests plan node mldeps;
@@ -2164,6 +2236,10 @@ fun theory_checkpoints_for_node policy project plan keys toolchain_key node sour
     in
       theorem_checkpoint_specs project node deps_key source_text boundaries
     end
+    handle Error msg =>
+      (warn ("could not parse theorem boundaries for " ^ logical_name node ^
+             "; building without goalfrag/checkpoints for this theory\n" ^ msg);
+       [])
 
 fun build_theory_node (options : build_options) tc project base_context plan keys toolchain_key node input_key =
   let

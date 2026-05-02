@@ -200,22 +200,14 @@ rm -f "$missing_save_context" "$missing_save_failed_prefix" "$missing_save_faile
 write_good_source
 force_rebuild
 missing_save_log=$tmpdir/missing-save.log
-if (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$missing_save_log" 2>&1; then
-  echo "missing selected checkpoint should fail before spawning HOL" >&2
+(cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$missing_save_log" 2>&1
+require_grep "checkpoint metadata exists without checkpoint file; discarding metadata:" "$missing_save_log"
+require_grep "resuming ATheory from checkpoint deps_loaded" "$missing_save_log"
+if grep -q "resuming ATheory from checkpoint first\|selected HOL base-state checkpoint is missing\|Couldn't load HOL base-state\|instrumented log:" "$missing_save_log"; then
+  echo "orphan checkpoint .ok/.save mismatch was treated as replayable" >&2
   exit 1
 fi
-require_grep "selected HOL base-state checkpoint is missing" "$missing_save_log"
-require_grep "remove .holbuild/checkpoints and retry" "$missing_save_log"
-if grep -q "instrumented log:\|last log line\|child log tail\|Couldn't load HOL base-state" "$missing_save_log"; then
-  echo "missing selected checkpoint fell through to child-run diagnostics" >&2
-  exit 1
-fi
-rm -rf "$project/.holbuild/checkpoints"
-write_good_source
-force_rebuild
-(cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$tmpdir/missing-save-clean-rebuild.log" 2>&1
-require_file "$project/.holbuild/obj/src/ATheory.dat"
-assert_no_checkpoints "clean rebuild after missing selected checkpoint retained checkpoint files"
+assert_no_checkpoints "clean rebuild after orphan checkpoint metadata retained checkpoint files"
 
 run_expect_suffix_failure "$tmpdir/corrupt-seed.log"
 corrupt_context=$(first_context_path)
