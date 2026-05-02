@@ -61,6 +61,9 @@ fun metadata_value key lines =
                lines
   end
 
+(* Checkpoint saves publish .ok last. If an interrupt lands after the old
+   checkpoint was moved to .bak but before the new .ok was written, validation
+   must prefer the last complete checkpoint over a possibly partial .save. *)
 fun restore_checkpoint_backup warn path =
   let
     val ok = ok_path path

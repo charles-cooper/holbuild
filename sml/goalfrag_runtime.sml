@@ -64,6 +64,11 @@ fun write_checkpoint_ok path ok_text =
   let val out = TextIO.openOut (path ^ ".ok")
   in TextIO.output(out, ok_text); TextIO.closeOut out end
 
+(* Keep the new checkpoint filename stable. PolyML child states record parent
+   filenames, so saving to a temporary filename and then renaming can leave a
+   later child unable to find its parent. A future implementation may use PolyML
+   parent-name retargeting, but until that is explicit and tested we replace in
+   place with a .bak pair that checkpoint selection can restore after interrupt. *)
 fun backup_checkpoint path =
   (delete_file (path ^ ".bak");
    delete_file (path ^ ".ok.bak");

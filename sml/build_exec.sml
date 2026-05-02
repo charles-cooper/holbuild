@@ -184,6 +184,13 @@ fun checkpoint_ok_v1 () = HolbuildCheckpointStore.ok_v1 ()
 
 fun checkpoint_ok_text kind fields = HolbuildCheckpointStore.ok_text kind fields
 
+(* PolyML child heaps remember their parent-chain filenames. We therefore save
+   checkpoints directly to the final .save path rather than to a temp path that
+   is renamed afterwards. To make replacement crash-safe, move the previous
+   .save/.ok pair aside as .bak, save the new child to the final path, then
+   publish the new .ok. Checkpoint validation restores .bak if an interrupt
+   leaves a partial replacement. If we later use PolyML parent-name retargeting,
+   keep this invariant documented and covered by checkpoint-recovery tests. *)
 fun save_heap_line {label, share_common_data, output, ok_text} =
   let val default_share = if share_common_data then "true" else "false"
   in
@@ -208,6 +215,8 @@ fun save_heap_line {label, share_common_data, output, ok_text} =
        "  val holbuild_checkpoint_bak = holbuild_checkpoint_path ^ \".bak\"",
        "  val holbuild_checkpoint_ok_bak = holbuild_checkpoint_ok ^ \".bak\"",
        "  val holbuild_checkpoint_depth = length (PolyML.SaveState.showHierarchy())",
+       "  (* SaveChild records parent-state filenames, so do not save to a temp path and rename it. *)",
+       "  (* Preserve the old complete pair as .bak until the new .ok is published. *)",
        "  val holbuild_checkpoint_t0 = Time.now()",
        "  val _ = holbuild_checkpoint_remove holbuild_checkpoint_bak",
        "  val _ = holbuild_checkpoint_remove holbuild_checkpoint_ok_bak",
