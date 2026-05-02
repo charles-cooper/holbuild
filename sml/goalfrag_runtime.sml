@@ -435,9 +435,6 @@ fun select_prefix_step (StepSelect {label, ...}) = "Q.SELECT_GOAL_LT " ^ label
   | select_prefix_step (StepSelects {label, ...}) = "Q.SELECT_GOALS_LT " ^ label
   | select_prefix_step _ = raise Fail "expected select step"
 
-fun subgoal_term subgoalText =
-  if String.isPrefix "sg " subgoalText then SOME (String.extract(subgoalText, 3, NONE)) else NONE
-
 fun join_tactic [] = "ALL_TAC"
   | join_tactic [t] = t
   | join_tactic ts = String.concatWith " \\\\ " ts
@@ -449,31 +446,6 @@ fun collect_then1_steps steps =
       | go (StepExpand {end_pos, label} :: rest) acc _ = go rest (label :: acc) end_pos
       | go _ _ _ = NONE
   in go steps [] 0 end
-
-fun merge_subgoal_then1 connective term bodySteps acc =
-  case collect_then1_steps bodySteps of
-      SOME (tacText, tacEnd, rest) =>
-        SOME (merge_by_steps rest (StepExpand {end_pos = tacEnd, label = term ^ connective ^ "(" ^ tacText ^ ")"} :: acc))
-    | NONE => NONE
-and merge_by_steps [] acc = rev acc
-  | merge_by_steps ((subgoalStep as StepExpand {end_pos = subEnd, label = subgoalText}) ::
-                    (reverseStep as StepExpandList {label = "Tactical.REVERSE_LT", ...}) ::
-                    (openStep as StepOpen {label = "open_then1", ...}) :: rest) acc =
-      (case subgoal_term subgoalText of
-           SOME term =>
-             (case merge_subgoal_then1 " suffices_by " term rest acc of
-                  SOME steps => steps
-                | NONE => merge_by_steps (reverseStep :: openStep :: rest) (subgoalStep :: acc))
-         | NONE => merge_by_steps (reverseStep :: openStep :: rest) (subgoalStep :: acc))
-  | merge_by_steps ((subgoalStep as StepExpand {label = subgoalText, ...}) ::
-                    (openStep as StepOpen {label = "open_then1", ...}) :: rest) acc =
-      (case subgoal_term subgoalText of
-           SOME term =>
-             (case merge_subgoal_then1 " by " term rest acc of
-                  SOME steps => steps
-                | NONE => merge_by_steps (openStep :: rest) (subgoalStep :: acc))
-         | NONE => merge_by_steps (openStep :: rest) (subgoalStep :: acc))
-  | merge_by_steps (step :: rest) acc = merge_by_steps rest (step :: acc)
 
 fun merge_reverse_steps [] acc = rev acc
   | merge_reverse_steps (StepExpandList {label = "Tactical.REVERSE_LT", ...} :: rest)
@@ -567,7 +539,7 @@ fun steps body =
   in
     merge_select_then1_steps
       (merge_select_steps
-        (merge_reverse_steps (merge_by_steps (assign frags 0 []) []) []) []) []
+        (merge_reverse_steps (assign frags 0 []) []) []) []
   end
 
 fun report_step_failure label e = (save_failed_prefix_checkpoint (); print_goal_state label; raise e)

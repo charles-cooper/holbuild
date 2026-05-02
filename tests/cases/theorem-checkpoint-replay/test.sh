@@ -139,6 +139,12 @@ Proof
   Induct_on `xs` >> simp[]
 QED
 
+Theorem repeat_split:
+  ∀p q. p ∧ q ⇒ p
+Proof
+  rpt gen_tac >> strip_tac >> first_assum ACCEPT_TAC
+QED
+
 val _ = export_theory();
 SML
 
@@ -179,7 +185,7 @@ plan_log=$tmpdir/goalfrag-plan.log
 (cd "$trace_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" goalfrag-plan ATheory:b_thm) > "$plan_log" 2>&1
 require_grep "holbuild goalfrag plan ATheory:b_thm source=src/AScript.sml (" "$plan_log"
 require_grep "^[[:space:]]*00 .*CONJ_TAC" "$plan_log"
-require_grep "^[[:space:]]*[0-9][0-9] >-" "$plan_log"
+require_grep "^[[:space:]]*[0-9][0-9][[:space:]]*>-" "$plan_log"
 require_grep "^[[:space:]]*[0-9][0-9] .*ACCEPT_TAC TRUTH" "$plan_log"
 if grep -q "open_\|close_\|next_" "$plan_log"; then
   echo "goalfrag plan leaked structural IR names" >&2
@@ -189,6 +195,30 @@ reverse_plan_log=$tmpdir/reverse-goalfrag-plan.log
 (cd "$trace_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" goalfrag-plan ATheory:reverse_cases) > "$reverse_plan_log" 2>&1
 require_grep "^[[:space:]]*00 gen_tac" "$reverse_plan_log"
 require_grep "^[[:space:]]*01 .*Tactical.REVERSE" "$reverse_plan_log"
+repeat_plan_log=$tmpdir/repeat-goalfrag-plan.log
+(cd "$trace_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" goalfrag-plan ATheory:repeat_split) > "$repeat_plan_log" 2>&1
+require_grep "^[[:space:]]*[0-9][0-9] .*rpt" "$repeat_plan_log"
+require_grep "^[[:space:]]*[0-9][0-9] .*gen_tac" "$repeat_plan_log"
+if grep -q "rpt (\|^[[:space:]]*[0-9][0-9].*)$" "$repeat_plan_log"; then
+  echo "goalfrag plan rendered repeat as fake numbered parens" >&2
+  exit 1
+fi
+by_plan_log=$tmpdir/by-goalfrag-plan.log
+(cd "$trace_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" goalfrag-plan ATheory:by_after_split) > "$by_plan_log" 2>&1
+require_grep '^[[:space:]]*[0-9][0-9] .*sg `T`' "$by_plan_log"
+require_grep "^[[:space:]]*[0-9][0-9][[:space:]]*>- .*ACCEPT_TAC TRUTH" "$by_plan_log"
+if grep -q " by (" "$by_plan_log"; then
+  echo "goalfrag plan kept by body opaque" >&2
+  exit 1
+fi
+suffices_plan_log=$tmpdir/suffices-goalfrag-plan.log
+(cd "$trace_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" goalfrag-plan ATheory:suffices_after_split) > "$suffices_plan_log" 2>&1
+require_grep '^[[:space:]]*[0-9][0-9] .*Tactical.REVERSE (sg `F`)' "$suffices_plan_log"
+require_grep "^[[:space:]]*[0-9][0-9][[:space:]]*>- .*simp\\[\\]" "$suffices_plan_log"
+if grep -q "suffices_by (" "$suffices_plan_log"; then
+  echo "goalfrag plan kept suffices_by body opaque" >&2
+  exit 1
+fi
 if grep -q "open_\|close_\|next_" "$reverse_plan_log"; then
   echo "goalfrag plan leaked structural IR names" >&2
   exit 1

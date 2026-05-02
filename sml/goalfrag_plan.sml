@@ -241,9 +241,6 @@ fun select_prefix_step (StepSelect {label, ...}) = "Q.SELECT_GOAL_LT " ^ label
   | select_prefix_step (StepSelects {label, ...}) = "Q.SELECT_GOALS_LT " ^ label
   | select_prefix_step _ = raise Fail "expected select step"
 
-fun subgoal_term subgoalText =
-  if String.isPrefix "sg " subgoalText then SOME (String.extract(subgoalText, 3, NONE)) else NONE
-
 fun join_tactic [] = "ALL_TAC"
   | join_tactic [t] = t
   | join_tactic ts = String.concatWith " \\\\ " ts
@@ -255,31 +252,6 @@ fun collect_then1_steps steps =
       | go (StepExpand {end_pos, label} :: rest) acc _ = go rest (label :: acc) end_pos
       | go _ _ _ = NONE
   in go steps [] 0 end
-
-fun merge_subgoal_then1 connective term bodySteps acc =
-  case collect_then1_steps bodySteps of
-      SOME (tacText, tacEnd, rest) =>
-        SOME (merge_by_steps rest (StepExpand {end_pos = tacEnd, label = term ^ connective ^ "(" ^ tacText ^ ")"} :: acc))
-    | NONE => NONE
-and merge_by_steps [] acc = rev acc
-  | merge_by_steps ((subgoalStep as StepExpand {end_pos = subEnd, label = subgoalText}) ::
-                    (reverseStep as StepExpandList {label = "Tactical.REVERSE_LT", ...}) ::
-                    (openStep as StepOpen {label = "open_then1", ...}) :: rest) acc =
-      (case subgoal_term subgoalText of
-           SOME term =>
-             (case merge_subgoal_then1 " suffices_by " term rest acc of
-                  SOME steps => steps
-                | NONE => merge_by_steps (reverseStep :: openStep :: rest) (subgoalStep :: acc))
-         | NONE => merge_by_steps (reverseStep :: openStep :: rest) (subgoalStep :: acc))
-  | merge_by_steps ((subgoalStep as StepExpand {label = subgoalText, ...}) ::
-                    (openStep as StepOpen {label = "open_then1", ...}) :: rest) acc =
-      (case subgoal_term subgoalText of
-           SOME term =>
-             (case merge_subgoal_then1 " by " term rest acc of
-                  SOME steps => steps
-                | NONE => merge_by_steps (openStep :: rest) (subgoalStep :: acc))
-         | NONE => merge_by_steps (openStep :: rest) (subgoalStep :: acc))
-  | merge_by_steps (step :: rest) acc = merge_by_steps rest (step :: acc)
 
 fun merge_reverse_steps [] acc = rev acc
   | merge_reverse_steps (StepExpandList {label = "Tactical.REVERSE_LT", ...} :: rest)
@@ -364,7 +336,7 @@ fun steps body =
   in
     merge_select_then1_steps
       (merge_select_steps
-        (merge_reverse_steps (merge_by_steps (assign frags 0 []) []) []) []) []
+        (merge_reverse_steps (assign frags 0 []) []) []) []
   end
 
 fun escape_inline label =
@@ -449,9 +421,6 @@ fun select_then1_parts label =
 fun depth_before (StepClose _) depth = Int.max(0, depth - 1)
   | depth_before _ depth = depth
 
-fun connective 0 = ""
-  | connective _ = ">> "
-
 fun format_expand index depth prefix label =
   block_line depth index prefix label
 
@@ -470,7 +439,7 @@ fun display_open_label label =
     case label of
         "open_then1" => ">-"
       | "open_first" => "FIRST"
-      | "open_repeat" => "rpt ("
+      | "open_repeat" => "rpt"
       | "open_tacs_to_lt" => "Tactical.TACS_TO_LT ["
       | "open_null_ok" => "NULL_OK_LT ("
       | "open_last_goal" => "LAST_GOAL ("
@@ -489,19 +458,45 @@ fun display_mid_label label =
 
 fun display_close_label label =
   case label of
-      "close_repeat" => ")"
+      "close_repeat" => ""
     | "close_first" => "]"
     | "close_first_lt" => "]"
     | _ => label
 
-fun structural_prefix index (StepOpen {label = "open_then1", ...}) = ""
-  | structural_prefix _ (StepMid _) = ""
-  | structural_prefix _ (StepClose _) = ""
-  | structural_prefix index _ = connective index
+fun current_seen seen_stack =
+  case seen_stack of
+      [] => false
+    | seen :: _ => seen
 
-fun format_step index depth step =
+fun mark_current_seen seen_stack =
+  case seen_stack of
+      [] => [true]
+    | _ :: rest => true :: rest
+
+fun reset_current_seen seen_stack =
+  case seen_stack of
+      [] => [false]
+    | _ :: rest => false :: rest
+
+fun sequence_prefix seen_stack = if current_seen seen_stack then ">> " else ""
+
+fun current_pending pending_stack =
+  case pending_stack of
+      [] => ""
+    | pending :: _ => pending
+
+fun clear_current_pending pending_stack =
+  case pending_stack of
+      [] => [""]
+    | _ :: rest => "" :: rest
+
+fun step_prefix seen_stack pending_stack =
+  case current_pending pending_stack of
+      "" => sequence_prefix seen_stack
+    | pending => pending
+
+fun format_step index depth prefix step =
   let val d = depth_before step depth
-      val prefix = structural_prefix index step
   in
     case step of
         StepExpand {label, ...} => format_expand index d prefix label
@@ -515,6 +510,7 @@ fun format_step index depth step =
 
 fun display_step (StepOpen {label = "open_paren", ...}) = false
   | display_step (StepClose {label = "close_paren", ...}) = false
+  | display_step (StepClose {label = "close_repeat", ...}) = false
   | display_step _ = true
 
 fun pop_visible stack =
@@ -522,30 +518,49 @@ fun pop_visible stack =
       [] => (true, [])
     | visible :: rest => (visible, rest)
 
-fun format_steps index depth stack steps =
+fun format_steps index depth visible_stack seen_stack pending_stack steps =
   case steps of
       [] => (index, "")
-    | (step as StepOpen _) :: rest =>
+    | (StepOpen {label = "open_then1", ...}) :: rest =>
+        let
+          val seen_stack' = mark_current_seen seen_stack
+          val pending_stack' = clear_current_pending pending_stack
+          val (count, rest_text) = format_steps index (depth + 1) (true :: visible_stack) (false :: seen_stack') (">- " :: pending_stack') rest
+        in (count, rest_text) end
+    | (step as StepOpen {label, ...}) :: rest =>
         if display_step step then
-          let val (count, rest_text) = format_steps (index + 1) (depth + 1) (true :: stack) rest
-          in (count, format_step index depth step ^ rest_text) end
-        else format_steps index depth (false :: stack) rest
+          let
+            val prefix = step_prefix seen_stack pending_stack
+            val seen_stack' = mark_current_seen seen_stack
+            val pending_stack' = clear_current_pending pending_stack
+            val (count, rest_text) = format_steps (index + 1) (depth + 1) (true :: visible_stack) (false :: seen_stack') ("" :: pending_stack') rest
+          in (count, format_step index depth prefix step ^ rest_text) end
+        else format_steps index depth (false :: visible_stack) seen_stack pending_stack rest
     | (step as StepClose _) :: rest =>
         let
-          val (visible_open, stack') = pop_visible stack
+          val (visible_open, visible_stack') = pop_visible visible_stack
+          val seen_stack' = if visible_open then (case seen_stack of [] => [] | _ :: rest => rest) else seen_stack
+          val pending_stack' = if visible_open then (case pending_stack of [] => [] | _ :: rest => rest) else pending_stack
           val depth' = if visible_open then Int.max(0, depth - 1) else depth
         in
           if display_step step then
-            let val (count, rest_text) = format_steps (index + 1) depth' stack' rest
-            in (count, format_step index depth step ^ rest_text) end
-          else format_steps index depth' stack' rest
+            let val (count, rest_text) = format_steps (index + 1) depth' visible_stack' (mark_current_seen seen_stack') (clear_current_pending pending_stack') rest
+            in (count, format_step index depth "" step ^ rest_text) end
+          else format_steps index depth' visible_stack' seen_stack' pending_stack' rest
         end
+    | (step as StepMid _) :: rest =>
+        let val (count, rest_text) = format_steps (index + 1) depth visible_stack (reset_current_seen seen_stack) (clear_current_pending pending_stack) rest
+        in (count, format_step index depth "" step ^ rest_text) end
     | step :: rest =>
-        let val (count, rest_text) = format_steps (index + 1) depth stack rest
-        in (count, format_step index depth step ^ rest_text) end
+        let
+          val prefix = step_prefix seen_stack pending_stack
+          val seen_stack' = mark_current_seen seen_stack
+          val pending_stack' = clear_current_pending pending_stack
+          val (count, rest_text) = format_steps (index + 1) depth visible_stack seen_stack' pending_stack' rest
+        in (count, format_step index depth prefix step ^ rest_text) end
 
 fun format {theory, theorem, source} plan =
-  let val (count, body) = format_steps 0 0 [] plan
+  let val (count, body) = format_steps 0 0 [] [false] [""] plan
   in
     String.concat
       ["holbuild goalfrag plan ", theory, ":", theorem,
