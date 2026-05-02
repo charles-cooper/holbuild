@@ -386,11 +386,13 @@ fun steps body =
         | StepExpandList {end_pos, label} => StepExpandList {end_pos = end_pos + delta, label = label}
         | StepSelect {end_pos, label} => StepSelect {end_pos = end_pos + delta, label = label}
         | StepSelects {end_pos, label} => StepSelects {end_pos = end_pos + delta, label = label}
-    fun trim_left text =
+    fun trim_left_at text start =
       let
         val n = size text
         fun loop i = if i >= n orelse not (Char.isSpace (String.sub(text, i))) then i else loop (i + 1)
-      in String.extract(text, loop 0, NONE) end
+        val first = loop start
+      in (first, String.extract(text, first, NONE)) end
+    fun trim_left text = #2 (trim_left_at text 0)
     fun find_from needle text start =
       let
         val n = size text
@@ -400,28 +402,73 @@ fun steps body =
           else if String.substring(text, i, m) = needle then SOME i
           else loop (i + 1)
       in if m = 0 then NONE else loop start end
-    fun reverse_branch_split label =
+    fun earliest (NONE, x) = x
+      | earliest (x, NONE) = x
+      | earliest (SOME a, SOME b) = SOME (Int.min(a, b))
+    fun reverse_branch_prefix_split label =
       let
         fun candidate needle =
           case find_from needle label 0 of
               NONE => NONE
             | SOME i => Option.map (fn _ => i) (find_from ">-" label i)
-        fun earliest (NONE, x) = x
-          | earliest (x, NONE) = x
-          | earliest (SOME a, SOME b) = SOME (Int.min(a, b))
       in earliest (candidate ">> reverse", candidate ">> Tactical.REVERSE") end
-    fun split_reverse_branch_step (StepExpand {end_pos, label}) =
-          (case reverse_branch_split label of
-               NONE => [StepExpand {end_pos = end_pos, label = label}]
-             | SOME split =>
-                 let
-                   val prefix = String.substring(label, 0, split)
-                   val suffix = trim_left (String.extract(label, split + 2, NONE))
-                   val start_pos = end_pos - size label
-                 in
-                   if trim_left prefix = "" then [StepExpand {end_pos = end_pos, label = label}]
-                   else map (shift_step start_pos) (steps prefix) @ [StepExpand {end_pos = end_pos, label = suffix}]
-                 end)
+    fun starts_reverse text =
+      let val t = trim_left text
+      in String.isPrefix "reverse" t orelse String.isPrefix "Tactical.REVERSE" t end
+    fun top_level_suffix_after_then1 label =
+      let
+        val n = size label
+        fun at i s = i + size s <= n andalso String.substring(label, i, size s) = s
+        fun scan i depth comments in_string in_quote saw_then1 =
+          if i >= n then NONE
+          else if comments > 0 then
+            if at i "(*" then scan (i + 2) depth (comments + 1) in_string in_quote saw_then1
+            else if at i "*)" then scan (i + 2) depth (comments - 1) in_string in_quote saw_then1
+            else scan (i + 1) depth comments in_string in_quote saw_then1
+          else if in_string then
+            if String.sub(label, i) = #"\\" then scan (Int.min(n, i + 2)) depth comments in_string in_quote saw_then1
+            else if String.sub(label, i) = #"\"" then scan (i + 1) depth comments false in_quote saw_then1
+            else scan (i + 1) depth comments in_string in_quote saw_then1
+          else if in_quote then
+            if String.sub(label, i) = #"`" then scan (i + 1) depth comments in_string false saw_then1
+            else scan (i + 1) depth comments in_string in_quote saw_then1
+          else if at i "(*" then scan (i + 2) depth 1 in_string in_quote saw_then1
+          else if String.sub(label, i) = #"\"" then scan (i + 1) depth comments true in_quote saw_then1
+          else if String.sub(label, i) = #"`" then scan (i + 1) depth comments in_string true saw_then1
+          else if depth = 0 andalso at i ">>" andalso saw_then1 then SOME i
+          else if depth = 0 andalso at i ">-" then scan (i + 2) depth comments in_string in_quote true
+          else
+            (case String.sub(label, i) of
+                 #"(" => scan (i + 1) (depth + 1) comments in_string in_quote saw_then1
+               | #"[" => scan (i + 1) (depth + 1) comments in_string in_quote saw_then1
+               | #"{" => scan (i + 1) (depth + 1) comments in_string in_quote saw_then1
+               | #")" => scan (i + 1) (Int.max(0, depth - 1)) comments in_string in_quote saw_then1
+               | #"]" => scan (i + 1) (Int.max(0, depth - 1)) comments in_string in_quote saw_then1
+               | #"}" => scan (i + 1) (Int.max(0, depth - 1)) comments in_string in_quote saw_then1
+               | _ => scan (i + 1) depth comments in_string in_quote saw_then1)
+      in if starts_reverse label then scan 0 0 0 false false false else NONE end
+    fun split_step_text start_pos label =
+      case reverse_branch_prefix_split label of
+          SOME split =>
+            let
+              val prefix = String.substring(label, 0, split)
+              val (suffix_start, suffix) = trim_left_at label (split + 2)
+            in
+              if trim_left prefix = "" then [StepExpand {end_pos = start_pos + size label, label = label}]
+              else map (shift_step start_pos) (steps prefix) @ split_step_text (start_pos + suffix_start) suffix
+            end
+        | NONE =>
+            (case top_level_suffix_after_then1 label of
+                 SOME split =>
+                   let
+                     val branch = trim_space (String.substring(label, 0, split))
+                     val (suffix_start, suffix) = trim_left_at label (split + 2)
+                   in
+                     StepExpand {end_pos = start_pos + split, label = branch} ::
+                     map (shift_step (start_pos + suffix_start)) (steps suffix)
+                   end
+               | NONE => [StepExpand {end_pos = start_pos + size label, label = label}])
+    fun split_reverse_branch_step (StepExpand {end_pos, label}) = split_step_text (end_pos - size label) label
       | split_reverse_branch_step step = [step]
     fun split_reverse_branch_steps steps' = List.concat (map split_reverse_branch_step steps')
   in
