@@ -1,4 +1,4 @@
-structure HolbuildTheoryBoundaryScan =
+structure HolbuildTheorySpans =
 struct
 
 fun bool_digit true = "1"
