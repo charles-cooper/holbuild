@@ -352,18 +352,27 @@ fun reexpand_group_atoms body frags =
              | NONE => go rest (f :: acc))
   in go frags [] end
 
-fun open_name TacticParse.FOpen = "open_paren"
-  | open_name TacticParse.FOpenThen1 = "open_then1"
-  | open_name TacticParse.FOpenFirst = "open_first"
-  | open_name TacticParse.FOpenRepeat = "open_repeat"
-  | open_name TacticParse.FOpenTacsToLT = "open_tacs_to_lt"
-  | open_name TacticParse.FOpenNullOk = "open_null_ok"
-  | open_name (TacticParse.FOpenNthGoal (i, _)) = "open_nth_goal " ^ Int.toString i
-  | open_name TacticParse.FOpenLastGoal = "open_last_goal"
-  | open_name TacticParse.FOpenHeadGoal = "open_head_goal"
-  | open_name (TacticParse.FOpenSplit (i, _)) = "open_split_lt " ^ Int.toString i
-  | open_name TacticParse.FOpenSelect = "open_select_lt"
-  | open_name TacticParse.FOpenFirstLT = "open_first_lt"
+fun trim_space text =
+  let
+    val n = size text
+    fun left i = if i >= n orelse not (Char.isSpace (String.sub(text, i))) then i else left (i + 1)
+    fun right i = if i < 0 orelse not (Char.isSpace (String.sub(text, i))) then i else right (i - 1)
+    val l = left 0
+    val r = right (n - 1)
+  in if r < l then "" else String.substring(text, l, r - l + 1) end
+
+fun open_name body TacticParse.FOpen = "open_paren"
+  | open_name body TacticParse.FOpenThen1 = "open_then1"
+  | open_name body TacticParse.FOpenFirst = "open_first"
+  | open_name body TacticParse.FOpenRepeat = "open_repeat"
+  | open_name body TacticParse.FOpenTacsToLT = "open_tacs_to_lt"
+  | open_name body TacticParse.FOpenNullOk = "open_null_ok"
+  | open_name body (TacticParse.FOpenNthGoal sp) = "open_nth_goal " ^ trim_space (span_text body sp)
+  | open_name body TacticParse.FOpenLastGoal = "open_last_goal"
+  | open_name body TacticParse.FOpenHeadGoal = "open_head_goal"
+  | open_name body (TacticParse.FOpenSplit sp) = "open_split_lt " ^ trim_space (span_text body sp)
+  | open_name body TacticParse.FOpenSelect = "open_select_lt"
+  | open_name body TacticParse.FOpenFirstLT = "open_first_lt"
 
 fun mid_name TacticParse.FNextFirst = "next_first"
   | mid_name TacticParse.FNextTacsToLT = "next_tacs_to_lt"
@@ -432,7 +441,7 @@ fun frag_text body (TacticParse.FAtom a) =
           | TacticParse.Subgoal _ => if is_term_quote raw then "sg " ^ raw else raw
           | _ => raw
       end
-  | frag_text _ (TacticParse.FFOpen opn) = open_name opn
+  | frag_text body (TacticParse.FFOpen opn) = open_name body opn
   | frag_text _ (TacticParse.FFMid mid) = mid_name mid
   | frag_text _ (TacticParse.FFClose cls) = close_name cls
   | frag_text _ _ = ""

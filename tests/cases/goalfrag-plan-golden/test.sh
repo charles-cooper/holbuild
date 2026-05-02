@@ -51,6 +51,26 @@ Proof
      [ACCEPT_TAC TRUTH, ACCEPT_TAC TRUTH, ACCEPT_TAC TRUTH]
 QED
 
+Theorem branch_list:
+  T /\ T
+Proof
+  CONJ_TAC >| [ACCEPT_TAC TRUTH, ACCEPT_TAC TRUTH]
+QED
+
+Theorem first_try_repeat:
+  T
+Proof
+  FIRST [NO_TAC, TRY NO_TAC, REPEAT NO_TAC, ACCEPT_TAC TRUTH]
+QED
+
+Theorem goal_selector_numbers:
+  T /\ T /\ T
+Proof
+  rpt CONJ_TAC
+  >>> NTH_GOAL (ACCEPT_TAC TRUTH) 2
+  >>> SPLIT_LT 1 (ALL_LT, FIRST_LT ACCEPT_TAC TRUTH)
+QED
+
 Theorem branch_and_by:
   T /\ T
 Proof
@@ -75,6 +95,14 @@ Theorem select_goals:
   T /\ T
 Proof
   CONJ_TAC >>~ [`T`]
+  \\ ACCEPT_TAC TRUTH
+  \\ ACCEPT_TAC TRUTH
+QED
+
+Theorem select_single:
+  T /\ T
+Proof
+  CONJ_TAC >~ `T`
   \\ ACCEPT_TAC TRUTH
   \\ ACCEPT_TAC TRUTH
 QED
@@ -126,6 +154,36 @@ holbuild goalfrag plan ATheory:reverse_thenl source=src/AScript.sml (1 steps)
           [ACCEPT_TAC TRUTH, ACCEPT_TAC TRUTH, ACCEPT_TAC TRUTH]
 EXPECTED
 
+check_plan branch_list <<'EXPECTED'
+holbuild goalfrag plan ATheory:branch_list source=src/AScript.sml (1 steps)
+  00 CONJ_TAC >| [ACCEPT_TAC TRUTH, ACCEPT_TAC TRUTH]
+EXPECTED
+
+check_plan first_try_repeat <<'EXPECTED'
+holbuild goalfrag plan ATheory:first_try_repeat source=src/AScript.sml (10 steps)
+  00 FIRST
+  01   NO_TAC
+  02   |
+  03   FIRST
+  04     NO_TAC
+  05   |
+  06   rpt
+  07     NO_TAC
+  08   |
+  09   ACCEPT_TAC TRUTH
+EXPECTED
+
+check_plan goal_selector_numbers <<'EXPECTED'
+holbuild goalfrag plan ATheory:goal_selector_numbers source=src/AScript.sml (7 steps)
+  00 rpt
+  01   CONJ_TAC
+  02 >> NTH_GOAL 2
+  03   ACCEPT_TAC TRUTH
+  04 >> split_lt 1
+  05   |
+  06   FIRST_LT ACCEPT_TAC TRUTH
+EXPECTED
+
 check_plan branch_and_by <<'EXPECTED'
 holbuild goalfrag plan ATheory:branch_and_by source=src/AScript.sml (7 steps)
   00 CONJ_TAC
@@ -154,6 +212,14 @@ check_plan select_goals <<'EXPECTED'
 holbuild goalfrag plan ATheory:select_goals source=src/AScript.sml (4 steps)
   00 CONJ_TAC
   01 >> list_tac Q.SELECT_GOALS_LT [`T`]
+  02 >> ACCEPT_TAC TRUTH
+  03 >> ACCEPT_TAC TRUTH
+EXPECTED
+
+check_plan select_single <<'EXPECTED'
+holbuild goalfrag plan ATheory:select_single source=src/AScript.sml (4 steps)
+  00 CONJ_TAC
+  01 >> list_tac Q.SELECT_GOAL_LT `T`
   02 >> ACCEPT_TAC TRUTH
   03 >> ACCEPT_TAC TRUTH
 EXPECTED
