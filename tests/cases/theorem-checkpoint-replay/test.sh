@@ -180,6 +180,14 @@ plan_log=$tmpdir/goalfrag-plan.log
 require_grep "holbuild goalfrag plan ATheory:b_thm source=src/AScript.sml (" "$plan_log"
 require_grep "^[[:space:]]*00 .*CONJ_TAC" "$plan_log"
 require_grep "^[[:space:]]*[0-9][0-9] .*ACCEPT_TAC TRUTH" "$plan_log"
+reverse_plan_log=$tmpdir/reverse-goalfrag-plan.log
+(cd "$trace_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" goalfrag-plan ATheory:reverse_cases) > "$reverse_plan_log" 2>&1
+require_grep "^[[:space:]]*00 gen_tac" "$reverse_plan_log"
+require_grep "^[[:space:]]*01 .*Tactical.REVERSE" "$reverse_plan_log"
+if grep -q "open_paren\|close_paren" "$reverse_plan_log"; then
+  echo "goalfrag plan leaked structural paren steps" >&2
+  exit 1
+fi
 if grep -q "holbuild goalfrag before theorem=b_thm\|elapsed_ms=\|ATheory built\|ATheory inspected\|resuming ATheory" "$plan_log"; then
   echo "--goalfrag-plan executed the build instead of statically printing the plan" >&2
   exit 1

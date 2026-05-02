@@ -342,7 +342,9 @@ fun step_of_frag end_pos label (TacticParse.FAtom (TacticParse.LSelectGoal _)) =
 fun steps body =
   let
     val tree = parse_tactic body
-    fun isAtom e = Option.isSome (TacticParse.topSpan e)
+    fun isAtom (TacticParse.Group _) = false
+      | isAtom (TacticParse.RepairGroup _) = false
+      | isAtom e = Option.isSome (TacticParse.topSpan e)
     val frags = reexpand_group_atoms body (flatten_frags (TacticParse.linearize isAtom tree))
     fun assign [] _ acc = rev acc
       | assign (f::rest) last acc =
@@ -444,10 +446,6 @@ fun select_then1_parts label =
                 SOME (rename_pattern pattern, body)
               end
 
-fun step_depth (StepOpen _) depth = depth + 1
-  | step_depth (StepClose _) depth = Int.max(0, depth - 1)
-  | step_depth _ depth = depth
-
 fun depth_before (StepClose _) depth = Int.max(0, depth - 1)
   | depth_before _ depth = depth
 
@@ -479,19 +477,46 @@ fun format_step index depth step =
       | StepSelects {label, ...} => line d index (prefix ^ "selects ") label
   end
 
-fun format_steps index depth steps =
+fun display_step (StepOpen {label = "open_paren", ...}) = false
+  | display_step (StepClose {label = "close_paren", ...}) = false
+  | display_step _ = true
+
+fun pop_visible stack =
+  case stack of
+      [] => (true, [])
+    | visible :: rest => (visible, rest)
+
+fun format_steps index depth stack steps =
   case steps of
-      [] => ""
+      [] => (index, "")
+    | (step as StepOpen _) :: rest =>
+        if display_step step then
+          let val (count, rest_text) = format_steps (index + 1) (depth + 1) (true :: stack) rest
+          in (count, format_step index depth step ^ rest_text) end
+        else format_steps index depth (false :: stack) rest
+    | (step as StepClose _) :: rest =>
+        let
+          val (visible_open, stack') = pop_visible stack
+          val depth' = if visible_open then Int.max(0, depth - 1) else depth
+        in
+          if display_step step then
+            let val (count, rest_text) = format_steps (index + 1) depth' stack' rest
+            in (count, format_step index depth step ^ rest_text) end
+          else format_steps index depth' stack' rest
+        end
     | step :: rest =>
-        format_step index depth step ^
-        format_steps (index + 1) (step_depth step depth) rest
+        let val (count, rest_text) = format_steps (index + 1) depth stack rest
+        in (count, format_step index depth step ^ rest_text) end
 
 fun format {theory, theorem, source} plan =
-  String.concat
-    ["holbuild goalfrag plan ", theory, ":", theorem,
-     " source=", source,
-     " (", Int.toString (length plan), " steps)\n",
-     format_steps 0 0 plan]
+  let val (count, body) = format_steps 0 0 [] plan
+  in
+    String.concat
+      ["holbuild goalfrag plan ", theory, ":", theorem,
+       " source=", source,
+       " (", Int.toString count, " steps)\n",
+       body]
+  end
 
 fun format_tactic selector tactic_text = format selector (steps tactic_text)
 
