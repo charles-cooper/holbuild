@@ -30,7 +30,22 @@ fun load_poly_hol_context () =
 load_poly_hol_context ();
 Meta.quiet_load := true;
 
-Meta.qload "TacticParse";
+fun quiet_holsource_use raw_file =
+  let
+    val file = holpathdb.subst_pathvars raw_file
+    val reader = HOLSource.fileToReader {quietOpen = false, print = fn _ => ()} file
+    fun line () = #line (#fileline reader ()) + 1
+  in
+    while not (#eof reader ()) do
+      PolyML.compiler
+        (#read reader,
+         [PolyML.Compiler.CPFileName file,
+          PolyML.Compiler.CPLineNo line,
+          PolyML.Compiler.CPOutStream (fn _ => ())])
+        ()
+  end;
+
+Meta.loadPlan quiet_holsource_use "TacticParse";
 
 use_hol("tools/Holmake/toml/TOMLvalue_dtype.sml");
 use_hol("tools/Holmake/toml/TOMLvalue.sig");

@@ -681,7 +681,21 @@ fun current_metadata path = SOME (read_text path) handle IO.Io _ => NONE
 
 datatype hol_context = HolState of string
 
+fun hol_context_path (HolState path) = path
+
 fun hol_context_args (HolState path) = ["--holstate", path]
+
+fun validate_hol_context context =
+  let val path = hol_context_path context
+  in
+    if file_exists path then ()
+    else
+      raise Error
+        (String.concat
+           ["holbuild internal error (panic): selected missing HOL base-state checkpoint\n",
+            "checkpoint: ", path, "\n",
+            "This usually means checkpoint metadata is stale or the checkpoint family was partially removed.\n"])
+  end
 
 fun tail_text path =
   let
@@ -1844,23 +1858,22 @@ fun build_theory cache_allowed policy tc project base_context plan keys toolchai
         val goal_state = Option.mapPartial summarize_goal_state failure_log
         val trace_context = if goalfrag_trace policy then Option.mapPartial summarize_goalfrag_trace failure_log else NONE
         val static_error = Option.mapPartial (fn path => static_error_summary (source_file node) source_text (String.fields (fn c => c = #"\n") (read_text path))) failure_log
-        val reason = if Option.isSome goal_state orelse Option.isSome static_error then NONE else Option.mapPartial summarize_log failure_log
         val source_context = Option.mapPartial (summarize_failed_fragment_source (source_file node) source_text theorem_checkpoints) failure_log
         val _ = if Option.isSome goal_state then () else discard_failure_checkpoints ()
         val detail =
           String.concat
             [logical_name node,
              " goalfrag/checkpoint run failed\n",
-             case failure_log of NONE => "" | SOME path => "instrumented log: " ^ path ^ "\n",
              case trace_context of NONE => "" | SOME text => text,
              case static_error of NONE => "" | SOME text => text,
              case source_context of NONE => "" | SOME text => text,
              case goal_state of NONE => "" | SOME text => text,
-             case reason of NONE => "" | SOME line => "last log line: " ^ line ^ "\n"]
+             case failure_log of NONE => "" | SOME path => "instrumented log: " ^ path ^ "\n"]
       in
         Error detail
       end
     val build_log = Path.concat(stage, "holbuild-build.log")
+    val _ = validate_hol_context (#context run_spec)
     val _ =
       run_hol_files_to_log tc stage (#context run_spec)
         (#files run_spec @ [final_loader])
