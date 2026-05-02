@@ -57,13 +57,42 @@ fun source_lines source_text = String.fields (fn c => c = #"\n") source_text
 
 fun nth_line lines n = List.nth(lines, n - 1) handle _ => ""
 
+fun repeat_text text n = String.concat (List.tabulate(Int.max(0, n), fn _ => text))
+fun spaces n = repeat_text " " n
+
 fun source_context_text source_text line =
   let
     val lines = source_lines source_text
     val start = Int.max(1, line - 2)
     val stop = Int.min(length lines, line + 2)
+    val width = size (Int.toString stop)
+    fun padded n = spaces (width - size (Int.toString n)) ^ Int.toString n
     fun row n =
-      String.concat [if n = line then "> " else "  ", Int.toString n, " | ", nth_line lines n, "\n"]
+      String.concat [if n = line then "> " else "  ", padded n, " | ", nth_line lines n, "\n"]
+    fun loop n acc = if n > stop then rev acc else loop (n + 1) (row n :: acc)
+  in
+    String.concat (loop start [])
+  end
+
+fun source_context_text_span source_text {start_offset, end_offset} =
+  let
+    val lines = source_lines source_text
+    val start_line = line_number_at source_text start_offset
+    val start_col = column_number_at source_text start_offset
+    val end_line = line_number_at source_text (Int.max(start_offset, end_offset - 1))
+    val start = Int.max(1, start_line - 2)
+    val stop = Int.min(length lines, end_line + 2)
+    val width = size (Int.toString stop)
+    fun padded n = spaces (width - size (Int.toString n)) ^ Int.toString n
+    fun underline n =
+      if start_line <> end_line orelse n <> start_line then ""
+      else
+        let val caret_count = Int.max(1, end_offset - start_offset)
+        in String.concat ["  ", spaces width, " | ", spaces (start_col - 1), repeat_text "^" caret_count, "\n"] end
+    fun row n =
+      String.concat [if n >= start_line andalso n <= end_line then "> " else "  ",
+                     padded n, " | ", nth_line lines n, "\n",
+                     underline n]
     fun loop n acc = if n > stop then rev acc else loop (n + 1) (row n :: acc)
   in
     String.concat (loop start [])
@@ -212,35 +241,65 @@ fun select_then1_source_probes label =
                 [pattern, body]
               end
 
-fun source_location_probes label = label :: select_then1_source_probes label
+fun wrapped_source_probe prefix label =
+  case drop_prefix prefix label of
+      NONE => NONE
+    | SOME rest => if size rest > 0 andalso String.sub(rest, size rest - 1) = #")" then
+                     SOME (String.substring(rest, 0, size rest - 1))
+                   else NONE
+
+fun source_location_probes label =
+  label ::
+  select_then1_source_probes label @
+  (case drop_prefix "sg " label of NONE => [] | SOME term => [term]) @
+  (case wrapped_source_probe "Tactical.REVERSE (" label of NONE => [] | SOME inner => [inner])
 
 fun proof_unit_label (checkpoint : HolbuildTheoryCheckpoints.checkpoint) =
   if #kind checkpoint = "resume" then "resume" else "theorem"
 
-fun checkpoint_source_summary source_path source_text (checkpoint : HolbuildTheoryCheckpoints.checkpoint) label offset =
+fun source_span_text source_path source_text start_offset end_offset =
+  let
+    val start_line = line_number_at source_text start_offset
+    val start_col = column_number_at source_text start_offset
+    val last_offset = Int.max(start_offset, end_offset - 1)
+    val end_line = line_number_at source_text last_offset
+    val end_col = column_number_at source_text last_offset + 1
+    val range =
+      if start_line = end_line then
+        String.concat [Int.toString start_line, ":", Int.toString start_col, "-", Int.toString end_col]
+      else
+        String.concat [Int.toString start_line, ":", Int.toString start_col, "-",
+                       Int.toString end_line, ":", Int.toString end_col]
+  in
+    String.concat ["source: ", source_path, ":", range, "\n",
+                   source_context_text_span source_text {start_offset = start_offset, end_offset = end_offset}]
+  end
+
+fun checkpoint_source_summary source_path source_text (checkpoint : HolbuildTheoryCheckpoints.checkpoint) label {offset, width} =
   let
     val theorem_line = line_number_at source_text (#theorem_start checkpoint)
     val proof_line = line_number_at source_text (#tactic_start checkpoint)
-    val fragment_line = line_number_at source_text offset
+    val end_offset = Int.min(size source_text, offset + Int.max(1, width))
   in
     String.concat
       [proof_unit_label checkpoint, ": ", #name checkpoint, " (line ", Int.toString theorem_line, ")\n",
        "proof: line ", Int.toString proof_line, "\n",
        "fragment: ", label, "\n",
-       "source: ", source_path, ":", Int.toString fragment_line, "\n",
-       source_context_text source_text fragment_line]
+       source_span_text source_path source_text offset end_offset]
   end
 
 fun failed_fragment_source_summary source_path source_text checkpoints label =
   let
     fun locate_with_probe (checkpoint : HolbuildTheoryCheckpoints.checkpoint) probe =
       Option.map
-        (fn relative => {checkpoint = checkpoint, offset = #tactic_start checkpoint + relative})
+        (fn relative => {checkpoint = checkpoint,
+                         span = {offset = #tactic_start checkpoint + relative,
+                                 width = size probe}})
         (find_substring probe (#tactic_text checkpoint))
     fun locate checkpoint = first_some (locate_with_probe checkpoint) (source_location_probes label)
   in
     Option.map
-      (fn {checkpoint, offset} => checkpoint_source_summary source_path source_text checkpoint label offset)
+      (fn {checkpoint, span} => checkpoint_source_summary source_path source_text checkpoint label span)
       (first_some locate checkpoints)
   end
 
@@ -275,7 +334,7 @@ fun failed_theorem_source_summary source_path source_text checkpoints label theo
   let
     fun locate_with_probe (checkpoint : HolbuildTheoryCheckpoints.checkpoint) probe =
       Option.map
-        (fn relative => #tactic_start checkpoint + relative)
+        (fn relative => {offset = #tactic_start checkpoint + relative, width = size probe})
         (find_substring probe (#tactic_text checkpoint))
     fun locate checkpoint = first_some (locate_with_probe checkpoint) (source_location_probes label)
   in
@@ -283,7 +342,7 @@ fun failed_theorem_source_summary source_path source_text checkpoints label theo
         NONE => NONE
       | SOME checkpoint =>
           SOME (checkpoint_source_summary source_path source_text checkpoint label
-                  (Option.getOpt(locate checkpoint, #tactic_start checkpoint)))
+                  (Option.getOpt(locate checkpoint, {offset = #tactic_start checkpoint, width = 1})))
   end
 
 val goal_state_limit = 4096

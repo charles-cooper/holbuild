@@ -435,6 +435,41 @@ if grep -q "fragment: CONJ_TAC >- FAIL_TAC" "$branch_failure_log"; then
   exit 1
 fi
 
+grouped_failure_project=$tmpdir/grouped-failure-project
+mkdir -p "$grouped_failure_project/src"
+cp "$project/holproject.toml" "$grouped_failure_project/holproject.toml"
+cat > "$grouped_failure_project/src/AScript.sml" <<'SML'
+open HolKernel Parse boolLib bossLib;
+val _ = new_theory "A";
+Theorem grouped_failure:
+  !p:bool. p
+Proof
+  rpt gen_tac >> strip_tac
+QED
+val _ = export_theory();
+SML
+grouped_failure_log=$tmpdir/grouped-failure.log
+if (cd "$grouped_failure_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$grouped_failure_log" 2>&1; then
+  echo "expected grouped proof to fail build" >&2
+  exit 1
+fi
+require_grep "fragment: strip_tac" "$grouped_failure_log"
+require_grep "source: .*AScript.sml:[0-9][0-9]*:18-27" "$grouped_failure_log"
+if grep -q "fragment: rpt gen_tac >> strip_tac" "$grouped_failure_log"; then
+  echo "grouped tactic was emitted as one atomic failed fragment" >&2
+  exit 1
+fi
+python3 - <<PY
+from pathlib import Path
+lines = Path("$grouped_failure_log").read_text().splitlines()
+for i, line in enumerate(lines):
+    if line.startswith("> ") and "rpt gen_tac >> strip_tac" in line:
+        assert i + 1 < len(lines) and "|                  ^^^^^^^^^" in lines[i + 1], lines[i + 1:i + 2]
+        break
+else:
+    raise SystemExit("missing underlined grouped failure source row")
+PY
+
 same_fragment_project=$tmpdir/same-fragment-project
 mkdir -p "$same_fragment_project/src"
 cp "$project/holproject.toml" "$same_fragment_project/holproject.toml"
