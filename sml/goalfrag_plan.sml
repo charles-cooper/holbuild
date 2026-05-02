@@ -314,9 +314,14 @@ fun step_of_frag end_pos label (TacticParse.FAtom (TacticParse.LSelectGoal _)) =
 fun steps body =
   let
     val tree = parse_tactic body
-    fun isAtom (TacticParse.Group _) = false
-      | isAtom (TacticParse.RepairGroup _) = false
-      | isAtom e = Option.isSome (TacticParse.topSpan e)
+    val contains_tacs_to_lt = expr_contains_tacs_to_lt tree
+    fun isAtom e =
+      if contains_tacs_to_lt then Option.isSome (TacticParse.topSpan e)
+      else
+        case e of
+            TacticParse.Group _ => false
+          | TacticParse.RepairGroup _ => false
+          | _ => Option.isSome (TacticParse.topSpan e)
     val frags = reexpand_group_atoms body (flatten_frags (TacticParse.linearize isAtom tree))
     fun assign [] _ acc = rev acc
       | assign (f::rest) last acc =
