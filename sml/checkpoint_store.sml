@@ -9,6 +9,8 @@ fun remove_file path = FS.remove path handle OS.SysErr _ => ()
 
 fun file_exists path = FS.access(path, [FS.A_READ]) handle OS.SysErr _ => false
 
+fun rename_file old new = FS.rename {old = old, new = new}
+
 fun read_text path =
   let
     val input = TextIO.openIn path
@@ -24,7 +26,11 @@ fun read_text path =
 fun current_metadata path = SOME (read_text path) handle IO.Io _ => NONE
 
 fun remove_checkpoint path =
-  (remove_file (ok_path path);
+  (remove_file (ok_path path ^ ".tmp");
+   remove_file (path ^ ".tmp");
+   remove_file (ok_path path ^ ".bak");
+   remove_file (path ^ ".bak");
+   remove_file (ok_path path);
    remove_file (path ^ ".meta");
    remove_file (path ^ ".prefix");
    remove_file path)
@@ -55,6 +61,27 @@ fun metadata_value key lines =
                lines
   end
 
+fun restore_checkpoint_backup warn path =
+  let
+    val ok = ok_path path
+    val save_bak = path ^ ".bak"
+    val ok_bak = ok ^ ".bak"
+    val has_save_bak = file_exists save_bak
+    val has_ok_bak = file_exists ok_bak
+    val missing_ok = not (file_exists ok)
+    val should_restore = has_ok_bak andalso (missing_ok orelse not (file_exists path))
+  in
+    if should_restore then
+      (warn ("checkpoint save was interrupted; restoring previous checkpoint: " ^ path);
+       if has_save_bak then (remove_file path; rename_file save_bak path) else ();
+       remove_file ok;
+       rename_file ok_bak ok)
+    else if file_exists path andalso file_exists ok then
+      (remove_file save_bak; remove_file ok_bak)
+    else ()
+  end
+  handle OS.SysErr _ => ()
+
 fun remove_incomplete_residue warn path =
   if file_exists (ok_path path) andalso not (file_exists path) then
     (warn ("checkpoint metadata exists without checkpoint file; discarding metadata: " ^ path);
@@ -64,7 +91,8 @@ fun remove_incomplete_residue warn path =
   else ()
 
 fun ok_matches warn path fields =
-  (remove_incomplete_residue warn path;
+  (restore_checkpoint_backup warn path;
+   remove_incomplete_residue warn path;
    file_exists path andalso
    case current_metadata (ok_path path) of
        SOME text =>

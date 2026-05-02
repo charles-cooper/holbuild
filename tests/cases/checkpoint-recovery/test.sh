@@ -209,6 +209,21 @@ if grep -q "resuming ATheory from checkpoint first\|selected HOL base-state chec
 fi
 assert_no_checkpoints "clean rebuild after orphan checkpoint metadata retained checkpoint files"
 
+run_expect_suffix_failure "$tmpdir/backup-seed.log"
+backup_context=$(first_context_path)
+backup_failed_prefix=$(second_failed_prefix_path)
+rm -f "$backup_failed_prefix" "$backup_failed_prefix.ok" "$backup_failed_prefix.meta" "$backup_failed_prefix.prefix"
+mv "$backup_context.ok" "$backup_context.ok.bak"
+mv "$backup_context" "$backup_context.bak"
+printf 'partial interrupted checkpoint\n' > "$backup_context"
+write_good_source
+force_rebuild
+backup_log=$tmpdir/backup-restore.log
+(cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$backup_log" 2>&1
+require_grep "checkpoint save was interrupted; restoring previous checkpoint:" "$backup_log"
+require_grep "resuming ATheory from checkpoint first" "$backup_log"
+assert_no_checkpoints "clean rebuild after restored checkpoint backup retained checkpoint files"
+
 run_expect_suffix_failure "$tmpdir/corrupt-seed.log"
 corrupt_context=$(first_context_path)
 corrupt_failed_prefix=$(second_failed_prefix_path)

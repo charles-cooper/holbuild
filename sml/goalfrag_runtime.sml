@@ -46,12 +46,32 @@ fun fmt_ms t = Real.fmt (StringCvt.FIX (SOME 3)) (1000.0 * t)
 
 fun delete_file path = OS.FileSys.remove path handle _ => ()
 
+fun file_exists path = OS.FileSys.access(path, [OS.FileSys.A_READ]) handle _ => false
+
+fun rename_file old new = OS.FileSys.rename {old = old, new = new}
+
+fun rename_if_exists old new = if file_exists old then rename_file old new else ()
+
 fun delete_checkpoint path =
-  (delete_file (path ^ ".ok"); delete_file (path ^ ".meta"); delete_file (path ^ ".prefix"); delete_file path)
+  (delete_file (path ^ ".ok.bak");
+   delete_file (path ^ ".bak");
+   delete_file (path ^ ".ok");
+   delete_file (path ^ ".meta");
+   delete_file (path ^ ".prefix");
+   delete_file path)
 
 fun write_checkpoint_ok path ok_text =
   let val out = TextIO.openOut (path ^ ".ok")
   in TextIO.output(out, ok_text); TextIO.closeOut out end
+
+fun backup_checkpoint path =
+  (delete_file (path ^ ".bak");
+   delete_file (path ^ ".ok.bak");
+   rename_if_exists (path ^ ".ok") (path ^ ".ok.bak");
+   rename_if_exists path (path ^ ".bak"))
+
+fun discard_checkpoint_backup path =
+  (delete_file (path ^ ".bak"); delete_file (path ^ ".ok.bak"))
 
 fun write_timeout_marker label seconds =
   case !tactic_timeout_marker_ref of
@@ -81,12 +101,13 @@ fun save_checkpoint label default_share path ok_text depth =
       val share = Option.getOpt(env_bool "HOLBUILD_SHARE_COMMON_DATA", default_share)
       val timing = Option.getOpt(env_bool "HOLBUILD_CHECKPOINT_TIMING", false)
       val t0 = Time.now()
-      val _ = delete_checkpoint path
+      val _ = backup_checkpoint path
       val _ = if share then PolyML.shareCommonData PolyML.rootFunction else ()
       val t1 = Time.now()
       val _ = PolyML.SaveState.saveChild(path, depth)
       val t2 = Time.now()
       val _ = write_checkpoint_ok path ok_text
+      val _ = discard_checkpoint_backup path
       val _ =
         if timing then
           TextIO.output
@@ -126,9 +147,6 @@ fun begin_theorem (name, tactic_text, context_path, context_ok,
                    end_path, end_ok, failed_prefix_path, failed_prefix_ok, has_attrs) =
   let val depth = length (PolyML.SaveState.showHierarchy())
   in
-    if !checkpoint_enabled_ref then
-      (delete_checkpoint context_path; delete_checkpoint end_path; delete_checkpoint failed_prefix_path)
-    else ();
     theorem_info_ref := SOME (name, tactic_text, context_path, context_ok,
                               end_path, end_ok, failed_prefix_path, failed_prefix_ok, has_attrs, depth);
     context_info_ref := SOME (context_path, context_ok, depth)

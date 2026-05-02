@@ -195,6 +195,9 @@ fun save_heap_line {label, share_common_data, output, ok_text} =
        "  val holbuild_checkpoint_ok_text = " ^ HolbuildToolchain.sml_string ok_text,
        "  fun holbuild_checkpoint_bool name = case OS.Process.getEnv name of SOME \"1\" => SOME true | SOME \"true\" => SOME true | SOME \"yes\" => SOME true | SOME \"0\" => SOME false | SOME \"false\" => SOME false | SOME \"no\" => SOME false | _ => NONE",
        "  fun holbuild_checkpoint_remove path = OS.FileSys.remove path handle _ => ()",
+       "  fun holbuild_checkpoint_rename old new = OS.FileSys.rename {old = old, new = new}",
+       "  fun holbuild_checkpoint_exists path = OS.FileSys.access(path, [OS.FileSys.A_READ]) handle _ => false",
+       "  fun holbuild_checkpoint_rename_if_exists old new = if holbuild_checkpoint_exists old then holbuild_checkpoint_rename old new else ()",
        "  fun holbuild_checkpoint_write_ok path = let val out = TextIO.openOut path in TextIO.output(out, holbuild_checkpoint_ok_text); TextIO.closeOut out end",
        "  fun holbuild_checkpoint_seconds (a, b) = Time.toReal (Time.-(b, a))",
        "  fun holbuild_checkpoint_fmt t = Real.fmt (StringCvt.FIX (SOME 3)) t",
@@ -202,15 +205,21 @@ fun save_heap_line {label, share_common_data, output, ok_text} =
        "  val holbuild_checkpoint_share = Option.getOpt(holbuild_checkpoint_bool \"HOLBUILD_SHARE_COMMON_DATA\", holbuild_checkpoint_default_share)",
        "  val holbuild_checkpoint_timing = Option.getOpt(holbuild_checkpoint_bool \"HOLBUILD_CHECKPOINT_TIMING\", false)",
        "  val holbuild_checkpoint_ok = holbuild_checkpoint_path ^ \".ok\"",
+       "  val holbuild_checkpoint_bak = holbuild_checkpoint_path ^ \".bak\"",
+       "  val holbuild_checkpoint_ok_bak = holbuild_checkpoint_ok ^ \".bak\"",
        "  val holbuild_checkpoint_depth = length (PolyML.SaveState.showHierarchy())",
        "  val holbuild_checkpoint_t0 = Time.now()",
-       "  val _ = holbuild_checkpoint_remove holbuild_checkpoint_ok",
-       "  val _ = holbuild_checkpoint_remove holbuild_checkpoint_path",
+       "  val _ = holbuild_checkpoint_remove holbuild_checkpoint_bak",
+       "  val _ = holbuild_checkpoint_remove holbuild_checkpoint_ok_bak",
+       "  val _ = holbuild_checkpoint_rename_if_exists holbuild_checkpoint_ok holbuild_checkpoint_ok_bak",
+       "  val _ = holbuild_checkpoint_rename_if_exists holbuild_checkpoint_path holbuild_checkpoint_bak",
        "  val _ = if holbuild_checkpoint_share then PolyML.shareCommonData PolyML.rootFunction else ()",
        "  val holbuild_checkpoint_t1 = Time.now()",
        "  val _ = PolyML.SaveState.saveChild(holbuild_checkpoint_path, holbuild_checkpoint_depth)",
        "  val holbuild_checkpoint_t2 = Time.now()",
        "  val _ = holbuild_checkpoint_write_ok holbuild_checkpoint_ok",
+       "  val _ = holbuild_checkpoint_remove holbuild_checkpoint_bak",
+       "  val _ = holbuild_checkpoint_remove holbuild_checkpoint_ok_bak",
        "  val _ = if holbuild_checkpoint_timing then TextIO.output(TextIO.stdErr, String.concat [\"holbuild checkpoint kind=\", holbuild_checkpoint_label, \" share=\", holbuild_checkpoint_bool_text holbuild_checkpoint_share, \" depth=\", Int.toString holbuild_checkpoint_depth, \" share_s=\", holbuild_checkpoint_fmt (holbuild_checkpoint_seconds (holbuild_checkpoint_t0, holbuild_checkpoint_t1)), \" save_s=\", holbuild_checkpoint_fmt (holbuild_checkpoint_seconds (holbuild_checkpoint_t1, holbuild_checkpoint_t2)), \" size=\", Position.toString (OS.FileSys.fileSize holbuild_checkpoint_path), \" path=\", holbuild_checkpoint_path, \"\\n\"]) else ()",
        "in () end;"]
   end
@@ -472,6 +481,8 @@ fun project_state_dir (project : HolbuildProject.t) name =
 
 fun checkpoint_clean_artifact path =
   has_suffix ".save" path orelse has_suffix ".save.ok" path orelse
+  has_suffix ".save.tmp" path orelse has_suffix ".save.ok.tmp" path orelse
+  has_suffix ".save.bak" path orelse has_suffix ".save.ok.bak" path orelse
   has_suffix ".meta" path orelse has_suffix ".prefix" path
 
 fun remove_empty_dir path = FS.rmDir path handle OS.SysErr _ => ()
