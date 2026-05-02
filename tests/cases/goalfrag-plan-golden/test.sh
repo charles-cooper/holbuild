@@ -132,6 +132,60 @@ Proof
   \\ ACCEPT_TAC TRUTH
 QED
 
+Theorem try_no_tac:
+  T
+Proof
+  TRY NO_TAC >> ACCEPT_TAC TRUTH
+QED
+
+Theorem direct_tacs_to_lt:
+  T
+Proof
+  ALL_TAC >>> TACS_TO_LT [ACCEPT_TAC TRUTH]
+QED
+
+Theorem select_then1_nested_body:
+  T /\ T
+Proof
+  CONJ_TAC >>~- ([`T`], sg `T` >- ACCEPT_TAC TRUTH >> ACCEPT_TAC TRUTH)
+QED
+
+Theorem first_empty_then:
+  T
+Proof
+  FIRST [] >> ACCEPT_TAC TRUTH
+QED
+
+Theorem map_first_empty_then:
+  T
+Proof
+  MAP_FIRST (fn th => ACCEPT_TAC th) [] >> ACCEPT_TAC TRUTH
+QED
+
+Theorem no_lt_orelse:
+  T
+Proof
+  ALL_TAC >>> (NO_LT ORELSE_LT TACS_TO_LT [ACCEPT_TAC TRUTH])
+QED
+
+Theorem nth_goal_expr:
+  T /\ T /\ T
+Proof
+  rpt CONJ_TAC >>> NTH_GOAL (ACCEPT_TAC TRUTH) (1 + 1) >>> TACS_TO_LT [ACCEPT_TAC TRUTH, ACCEPT_TAC TRUTH]
+QED
+
+Theorem split_expr:
+  T /\ T
+Proof
+  CONJ_TAC >>> SPLIT_LT (1 + 0) (TACS_TO_LT [ACCEPT_TAC TRUTH], TACS_TO_LT [ACCEPT_TAC TRUTH])
+QED
+
+Theorem try_then1_group:
+  (T /\ T) /\ T
+Proof
+  CONJ_TAC >> TRY (CONJ_TAC >- ACCEPT_TAC TRUTH) >> ACCEPT_TAC TRUTH
+QED
+
 SML
 cat "$SCRIPT_DIR/step_create_push_structure.sml" >> "$project/src/AScript.sml"
 cat >> "$project/src/AScript.sml" <<'SML'
@@ -166,24 +220,30 @@ holbuild goalfrag plan ATheory:grouped_prefix source=src/AScript.sml (5 steps)
 EXPECTED
 
 check_plan reverse_branch <<'EXPECTED'
-holbuild goalfrag plan ATheory:reverse_branch source=src/AScript.sml (5 steps)
+holbuild goalfrag plan ATheory:reverse_branch source=src/AScript.sml (10 steps)
   00 simp[step_create_def]
   01 >> strip_tac
   02 >> rewrite_tac[Ntimes CONJ_ASSOC 3]
-  03 >> reverse conj_tac >- (
-         qpat_x_assum `proceed_create _ _ _ _ _ se = _` mp_tac >>
-         rewrite_tac[proceed_create_def] >>
-         strip_tac >> gvs[] )
-  04 >> strip_tac
+  03 >> conj_tac
+  04 >> list_tac Tactical.REVERSE_LT
+  05   >- qpat_x_assum `proceed_create _ _ _ _ _ se = _` mp_tac
+  06   >> rewrite_tac[proceed_create_def]
+  07   >> strip_tac
+  08   >> gvs[]
+  09 >> strip_tac
 EXPECTED
 
 check_plan reverse_branch_suffix <<'EXPECTED'
-holbuild goalfrag plan ATheory:reverse_branch_suffix source=src/AScript.sml (5 steps)
+holbuild goalfrag plan ATheory:reverse_branch_suffix source=src/AScript.sml (9 steps)
   00 CONJ_TAC
-  01 >> reverse CONJ_TAC >- (ACCEPT_TAC TRUTH)
-  02 >> simp[GSYM CONJ_ASSOC]
-  03 >> reverse CONJ_TAC >- (ACCEPT_TAC TRUTH)
-  04 >> ACCEPT_TAC TRUTH
+  01 >> CONJ_TAC
+  02 >> list_tac Tactical.REVERSE_LT
+  03   >- ACCEPT_TAC TRUTH
+  04 >> simp[GSYM CONJ_ASSOC]
+  05 >> CONJ_TAC
+  06 >> list_tac Tactical.REVERSE_LT
+  07   >- ACCEPT_TAC TRUTH
+  08 >> ACCEPT_TAC TRUTH
 EXPECTED
 
 check_plan_file step_create_push_structure "$SCRIPT_DIR/step_create_push_structure.expected"
@@ -196,33 +256,30 @@ holbuild goalfrag plan ATheory:reverse_thenl source=src/AScript.sml (1 steps)
 EXPECTED
 
 check_plan branch_list <<'EXPECTED'
-holbuild goalfrag plan ATheory:branch_list source=src/AScript.sml (1 steps)
-  00 CONJ_TAC >| [ACCEPT_TAC TRUTH, ACCEPT_TAC TRUTH]
+holbuild goalfrag plan ATheory:branch_list source=src/AScript.sml (2 steps)
+  00 CONJ_TAC
+  01 >> list_tac Tactical.NULL_OK_LT (Tactical.TACS_TO_LT ([ACCEPT_TAC TRUTH, ACCEPT_TAC TRUTH]))
 EXPECTED
 
 check_plan first_try_repeat <<'EXPECTED'
-holbuild goalfrag plan ATheory:first_try_repeat source=src/AScript.sml (10 steps)
+holbuild goalfrag plan ATheory:first_try_repeat source=src/AScript.sml (9 steps)
   00 FIRST
   01   NO_TAC
   02   |
-  03   FIRST
-  04     NO_TAC
-  05   |
-  06   rpt
-  07     NO_TAC
-  08   |
-  09   ACCEPT_TAC TRUTH
+  03   TRY NO_TAC
+  04   |
+  05   rpt
+  06     NO_TAC
+  07   |
+  08   ACCEPT_TAC TRUTH
 EXPECTED
 
 check_plan goal_selector_numbers <<'EXPECTED'
-holbuild goalfrag plan ATheory:goal_selector_numbers source=src/AScript.sml (7 steps)
+holbuild goalfrag plan ATheory:goal_selector_numbers source=src/AScript.sml (4 steps)
   00 rpt
   01   CONJ_TAC
-  02 >> NTH_GOAL 2
-  03   ACCEPT_TAC TRUTH
-  04 >> split_lt 1
-  05   |
-  06   FIRST_LT ACCEPT_TAC TRUTH
+  02 >> list_tac NTH_GOAL (ACCEPT_TAC TRUTH) 2
+  03 >> list_tac SPLIT_LT 1 (ALL_LT, FIRST_LT ACCEPT_TAC TRUTH)
 EXPECTED
 
 check_plan map_aliases <<'EXPECTED'
@@ -233,27 +290,28 @@ holbuild goalfrag plan ATheory:map_aliases source=src/AScript.sml (3 steps)
 EXPECTED
 
 check_plan branch_and_by <<'EXPECTED'
-holbuild goalfrag plan ATheory:branch_and_by source=src/AScript.sml (7 steps)
+holbuild goalfrag plan ATheory:branch_and_by source=src/AScript.sml (6 steps)
   00 CONJ_TAC
   01   >- sg `T`
   02     >- ACCEPT_TAC TRUTH
   03   >> ACCEPT_TAC TRUTH
-  04 >> Tactical.REVERSE (sg `T`)
-  05   >- simp[]
-  06 >> ACCEPT_TAC TRUTH
+  04 >> `T` suffices_by simp[]
+  05 >> ACCEPT_TAC TRUTH
 EXPECTED
 
 check_plan nested_combinators <<'EXPECTED'
-holbuild goalfrag plan ATheory:nested_combinators source=src/AScript.sml (8 steps)
+holbuild goalfrag plan ATheory:nested_combinators source=src/AScript.sml (11 steps)
   00 rpt
   01   strip_tac
   02 >> CONJ_TAC
-  03   >- FIRST
-  04     CONJ_TAC
-  05   >> ACCEPT_TAC TRUTH
-  06 >> reverse CONJ_TAC
-       >- (sg `T` >- ACCEPT_TAC TRUTH >> ACCEPT_TAC TRUTH)
-  07 >> ACCEPT_TAC TRUTH
+  03   >- TRY CONJ_TAC
+  04   >> ACCEPT_TAC TRUTH
+  05 >> CONJ_TAC
+  06 >> list_tac Tactical.REVERSE_LT
+  07   >- sg `T`
+  08     >- ACCEPT_TAC TRUTH
+  09   >> ACCEPT_TAC TRUTH
+  10 >> ACCEPT_TAC TRUTH
 EXPECTED
 
 check_plan select_goals <<'EXPECTED'
@@ -278,5 +336,64 @@ holbuild goalfrag plan ATheory:select_then1 source=src/AScript.sml (3 steps)
   01 >> list_tac Q.SELECT_GOALS_LT_THEN1 [`T`] (
        ACCEPT_TAC TRUTH
      )
+  02 >> ACCEPT_TAC TRUTH
+EXPECTED
+
+check_plan try_no_tac <<'EXPECTED'
+holbuild goalfrag plan ATheory:try_no_tac source=src/AScript.sml (2 steps)
+  00 TRY NO_TAC
+  01 >> ACCEPT_TAC TRUTH
+EXPECTED
+
+check_plan direct_tacs_to_lt <<'EXPECTED'
+holbuild goalfrag plan ATheory:direct_tacs_to_lt source=src/AScript.sml (2 steps)
+  00 ALL_TAC
+  01 >> list_tac Tactical.TACS_TO_LT ([ACCEPT_TAC TRUTH])
+EXPECTED
+
+check_plan select_then1_nested_body <<'EXPECTED'
+holbuild goalfrag plan ATheory:select_then1_nested_body source=src/AScript.sml (2 steps)
+  00 CONJ_TAC
+  01 >> list_tac Q.SELECT_GOALS_LT_THEN1 [`T`] (
+       sg `T` >- ACCEPT_TAC TRUTH >> ACCEPT_TAC TRUTH
+     )
+EXPECTED
+
+check_plan first_empty_then <<'EXPECTED'
+holbuild goalfrag plan ATheory:first_empty_then source=src/AScript.sml (2 steps)
+  00 FIRST []
+  01 >> ACCEPT_TAC TRUTH
+EXPECTED
+
+check_plan map_first_empty_then <<'EXPECTED'
+holbuild goalfrag plan ATheory:map_first_empty_then source=src/AScript.sml (2 steps)
+  00 MAP_FIRST (fn th => ACCEPT_TAC th) []
+  01 >> ACCEPT_TAC TRUTH
+EXPECTED
+
+check_plan no_lt_orelse <<'EXPECTED'
+holbuild goalfrag plan ATheory:no_lt_orelse source=src/AScript.sml (2 steps)
+  00 ALL_TAC
+  01 >> list_tac NO_LT ORELSE_LT TACS_TO_LT [ACCEPT_TAC TRUTH]
+EXPECTED
+
+check_plan nth_goal_expr <<'EXPECTED'
+holbuild goalfrag plan ATheory:nth_goal_expr source=src/AScript.sml (4 steps)
+  00 rpt
+  01   CONJ_TAC
+  02 >> list_tac NTH_GOAL (ACCEPT_TAC TRUTH) (1 + 1)
+  03 >> list_tac Tactical.TACS_TO_LT ([ACCEPT_TAC TRUTH, ACCEPT_TAC TRUTH])
+EXPECTED
+
+check_plan split_expr <<'EXPECTED'
+holbuild goalfrag plan ATheory:split_expr source=src/AScript.sml (2 steps)
+  00 CONJ_TAC
+  01 >> list_tac SPLIT_LT (1 + 0) (TACS_TO_LT [ACCEPT_TAC TRUTH], TACS_TO_LT [ACCEPT_TAC TRUTH])
+EXPECTED
+
+check_plan try_then1_group <<'EXPECTED'
+holbuild goalfrag plan ATheory:try_then1_group source=src/AScript.sml (3 steps)
+  00 CONJ_TAC
+  01 >> TRY (CONJ_TAC >- ACCEPT_TAC TRUTH)
   02 >> ACCEPT_TAC TRUTH
 EXPECTED

@@ -312,6 +312,19 @@ and expr_contains_tacs_to_lt e =
     | TacticParse.LTacsToLT _ => true
     | _ => false
 
+fun expr_contains_try e =
+  case e of
+      TacticParse.Then es => List.exists expr_contains_try es
+    | TacticParse.ThenLT (e, es) => expr_contains_try e orelse List.exists expr_contains_try es
+    | TacticParse.First es => List.exists expr_contains_try es
+    | TacticParse.Try _ => true
+    | TacticParse.Group (_, _, e) => expr_contains_try e
+    | TacticParse.RepairGroup (_, _, e, _) => expr_contains_try e
+    | TacticParse.LThen (e, es) => expr_contains_try e orelse List.exists expr_contains_try es
+    | TacticParse.LThenLT es => List.exists expr_contains_try es
+    | TacticParse.LTry _ => true
+    | _ => false
+
 fun tacs_to_lt_branch_expr (TacticParse.ThenLT (_, [TacticParse.LNullOk (TacticParse.LTacsToLT _)])) = true
   | tacs_to_lt_branch_expr (TacticParse.Group (_, _, e)) = tacs_to_lt_branch_expr e
   | tacs_to_lt_branch_expr _ = false
@@ -329,7 +342,7 @@ fun reverse_branch_expr body (TacticParse.ThenLT (lhs, [rhs as TacticParse.LNull
   | reverse_branch_expr _ _ = false
 
 fun group_atom_expr body (TacticParse.FAtom (TacticParse.Group (_, _, e))) =
-      if expr_contains_tacs_to_lt e orelse reverse_branch_expr body e then NONE
+      if expr_contains_tacs_to_lt e orelse expr_contains_try e orelse reverse_branch_expr body e then NONE
       else if is_composable e then SOME e else NONE
   | group_atom_expr _ _ = NONE
 
@@ -447,7 +460,11 @@ fun frag_text body (TacticParse.FAtom a) =
       let val raw = raw_frag_text body a
       in
         case a of
-            TacticParse.LReverse => "Tactical.REVERSE_LT"
+            TacticParse.Then [] => "ALL_TAC"
+          | TacticParse.First [] => "NO_TAC"
+          | TacticParse.LThenLT [] => "ALL_LT"
+          | TacticParse.LFirst [] => "NO_LT"
+          | TacticParse.LReverse => "Tactical.REVERSE_LT"
           | TacticParse.LTacsToLT _ => if String.size raw = 0 then raw else "Tactical.TACS_TO_LT (" ^ raw ^ ")"
           | TacticParse.MapEvery (f, args) => "MAP_EVERY " ^ substring body f ^ " " ^ list_expr_text body args
           | TacticParse.MapFirst (f, args) => "MAP_FIRST " ^ substring body f ^ " " ^ list_expr_text body args
@@ -496,16 +513,16 @@ fun rename_pattern label =
     | NONE => label
 
 fun merge_select_then1_steps [] acc = rev acc
-  | merge_select_then1_steps (StepOpen {label = "open_select_lt", ...} ::
-                              StepExpand {label = pattern, ...} ::
-                              StepMid {label = "next_select_lt", ...} ::
-                              StepOpen {label = "open_paren", ...} :: rest) acc =
+  | merge_select_then1_steps ((select_open as StepOpen {label = "open_select_lt", ...}) ::
+                              (pattern_step as StepExpand {label = pattern, ...}) ::
+                              (next_step as StepMid {label = "next_select_lt", ...}) ::
+                              (body_open as StepOpen {label = "open_paren", ...}) :: rest) acc =
       (case collect_then1_steps rest of
            SOME (tacText, tacEnd, StepClose _ :: rest') =>
              merge_select_then1_steps rest'
                (StepExpandList {end_pos = tacEnd,
                                 label = "Q.SELECT_GOALS_LT_THEN1 " ^ rename_pattern pattern ^ " (" ^ tacText ^ ")"} :: acc)
-         | _ => merge_select_then1_steps rest acc)
+         | _ => merge_select_then1_steps (pattern_step :: next_step :: body_open :: rest) (select_open :: acc))
   | merge_select_then1_steps (step :: rest) acc = merge_select_then1_steps rest (step :: acc)
 
 fun merge_select_steps [] acc = rev acc
@@ -541,8 +558,9 @@ fun step_of_frag end_pos label (TacticParse.FAtom (TacticParse.LSelectGoal _)) =
       SOME (StepExpandList {end_pos = end_pos, label = label})
   | step_of_frag end_pos label (TacticParse.FAtom (TacticParse.LTacsToLT _)) =
       SOME (StepExpandList {end_pos = end_pos, label = label})
-  | step_of_frag end_pos label (TacticParse.FAtom _) =
-      SOME (StepExpand {end_pos = end_pos, label = label})
+  | step_of_frag end_pos label (TacticParse.FAtom a) =
+      if TacticParse.isTac a then SOME (StepExpand {end_pos = end_pos, label = label})
+      else SOME (StepExpandList {end_pos = end_pos, label = label})
   | step_of_frag end_pos label (TacticParse.FFOpen _) =
       SOME (StepOpen {end_pos = end_pos, label = label})
   | step_of_frag end_pos label (TacticParse.FFMid _) =
@@ -554,155 +572,122 @@ fun step_of_frag end_pos label (TacticParse.FAtom (TacticParse.LSelectGoal _)) =
 fun steps body =
   let
     val tree = parse_tactic body
-    fun atomic_group e = tacs_to_lt_branch_expr e orelse reverse_branch_expr body e
-    fun isAtom (TacticParse.Group (_, _, e)) = atomic_group e
-      | isAtom (TacticParse.RepairGroup (_, _, e, _)) = atomic_group e
-      | isAtom e = Option.isSome (TacticParse.topSpan e)
-    val frags = reexpand_group_atoms body (flatten_frags (TacticParse.linearize isAtom tree))
-    fun assign [] _ acc = rev acc
-      | assign (f::rest) last acc =
-          let
-            val txt = frag_text body f
-            val (endPos, last') =
-              case f of
-                  TacticParse.FAtom _ => let val e = frag_end f in (e, e) end
-                | _ => (last, last)
-          in
-            if String.size txt = 0 then assign rest last acc
-            else
-              case step_of_frag endPos txt f of
-                  SOME step => assign rest last' (step :: acc)
-                | NONE => assign rest last acc
-          end
-    fun shift_step delta step =
-      case step of
-          StepOpen {end_pos, label} => StepOpen {end_pos = end_pos + delta, label = label}
-        | StepMid {end_pos, label} => StepMid {end_pos = end_pos + delta, label = label}
-        | StepClose {end_pos, label} => StepClose {end_pos = end_pos + delta, label = label}
-        | StepExpand {end_pos, label} => StepExpand {end_pos = end_pos + delta, label = label}
-        | StepExpandList {end_pos, label} => StepExpandList {end_pos = end_pos + delta, label = label}
-        | StepSelect {end_pos, label} => StepSelect {end_pos = end_pos + delta, label = label}
-        | StepSelects {end_pos, label} => StepSelects {end_pos = end_pos + delta, label = label}
-    fun trim_left_at text start =
-      let
-        val n = size text
-        fun loop i = if i >= n orelse not (Char.isSpace (String.sub(text, i))) then i else loop (i + 1)
-        val first = loop start
-      in (first, String.extract(text, first, NONE)) end
-    fun trim_left text = #2 (trim_left_at text 0)
-    fun find_from needle text start =
-      let
-        val n = size text
-        val m = size needle
-        fun loop i =
-          if i + m > n then NONE
-          else if String.substring(text, i, m) = needle then SOME i
-          else loop (i + 1)
-      in if m = 0 then NONE else loop start end
-    fun starts_reverse text =
-      let val t = trim_left text
-      in String.isPrefix "reverse" t orelse String.isPrefix "Tactical.REVERSE" t end
-    fun scan_top_level label want_suffix =
-      let
-        val n = size label
-        fun at i s = i + size s <= n andalso String.substring(label, i, size s) = s
-        fun scan i depth comments in_string in_quote saw_then1 =
-          if i >= n then NONE
-          else if comments > 0 then
-            if at i "(*" then scan (i + 2) depth (comments + 1) in_string in_quote saw_then1
-            else if at i "*)" then scan (i + 2) depth (comments - 1) in_string in_quote saw_then1
-            else scan (i + 1) depth comments in_string in_quote saw_then1
-          else if in_string then
-            if String.sub(label, i) = #"\\" then scan (Int.min(n, i + 2)) depth comments in_string in_quote saw_then1
-            else if String.sub(label, i) = #"\"" then scan (i + 1) depth comments false in_quote saw_then1
-            else scan (i + 1) depth comments in_string in_quote saw_then1
-          else if in_quote then
-            if String.sub(label, i) = #"`" then scan (i + 1) depth comments in_string false saw_then1
-            else scan (i + 1) depth comments in_string in_quote saw_then1
-          else if at i "(*" then scan (i + 2) depth 1 in_string in_quote saw_then1
-          else if String.sub(label, i) = #"\"" then scan (i + 1) depth comments true in_quote saw_then1
-          else if String.sub(label, i) = #"`" then scan (i + 1) depth comments in_string true saw_then1
-          else if depth = 0 andalso at i ">>" andalso want_suffix andalso saw_then1 then SOME i
-          else if depth = 0 andalso at i ">-" then if want_suffix then scan (i + 2) depth comments in_string in_quote true else SOME i
-          else
-            (case String.sub(label, i) of
-                 #"(" => scan (i + 1) (depth + 1) comments in_string in_quote saw_then1
-               | #"[" => scan (i + 1) (depth + 1) comments in_string in_quote saw_then1
-               | #"{" => scan (i + 1) (depth + 1) comments in_string in_quote saw_then1
-               | #")" => scan (i + 1) (Int.max(0, depth - 1)) comments in_string in_quote saw_then1
-               | #"]" => scan (i + 1) (Int.max(0, depth - 1)) comments in_string in_quote saw_then1
-               | #"}" => scan (i + 1) (Int.max(0, depth - 1)) comments in_string in_quote saw_then1
-               | _ => scan (i + 1) depth comments in_string in_quote saw_then1)
-      in if starts_reverse label then scan 0 0 0 false false false else NONE end
-    fun top_level_then1 label = scan_top_level label false
-    fun top_level_suffix_after_then1 label = scan_top_level label true
-    fun reverse_branch_prefix_split label =
-      let
-        val n = size label
-        fun at i s = i + size s <= n andalso String.substring(label, i, size s) = s
-        fun scan i depth comments in_string in_quote =
-          if i >= n then NONE
-          else if comments > 0 then
-            if at i "(*" then scan (i + 2) depth (comments + 1) in_string in_quote
-            else if at i "*)" then scan (i + 2) depth (comments - 1) in_string in_quote
-            else scan (i + 1) depth comments in_string in_quote
-          else if in_string then
-            if String.sub(label, i) = #"\\" then scan (Int.min(n, i + 2)) depth comments in_string in_quote
-            else if String.sub(label, i) = #"\"" then scan (i + 1) depth comments false in_quote
-            else scan (i + 1) depth comments in_string in_quote
-          else if in_quote then
-            if String.sub(label, i) = #"`" then scan (i + 1) depth comments in_string false
-            else scan (i + 1) depth comments in_string in_quote
-          else if at i "(*" then scan (i + 2) depth 1 in_string in_quote
-          else if String.sub(label, i) = #"\"" then scan (i + 1) depth comments true in_quote
-          else if String.sub(label, i) = #"`" then scan (i + 1) depth comments in_string true
-          else if depth = 0 andalso at i ">>" then
-            let val (_, suffix) = trim_left_at label (i + 2)
-            in if starts_reverse suffix andalso Option.isSome (top_level_then1 suffix) then SOME i else scan (i + 2) depth comments in_string in_quote end
-          else
-            (case String.sub(label, i) of
-                 #"(" => scan (i + 1) (depth + 1) comments in_string in_quote
-               | #"[" => scan (i + 1) (depth + 1) comments in_string in_quote
-               | #"{" => scan (i + 1) (depth + 1) comments in_string in_quote
-               | #")" => scan (i + 1) (Int.max(0, depth - 1)) comments in_string in_quote
-               | #"]" => scan (i + 1) (Int.max(0, depth - 1)) comments in_string in_quote
-               | #"}" => scan (i + 1) (Int.max(0, depth - 1)) comments in_string in_quote
-               | _ => scan (i + 1) depth comments in_string in_quote)
-      in scan 0 0 0 false false end
-    fun split_step_text start_pos label =
-      case reverse_branch_prefix_split label of
-          SOME split =>
-            let
-              val prefix = String.substring(label, 0, split)
-              val (suffix_start, suffix) = trim_left_at label (split + 2)
-            in
-              if trim_left prefix = "" then [StepExpand {end_pos = start_pos + size label, label = label}]
-              else if starts_reverse suffix andalso Option.isSome (top_level_then1 suffix) then
-                map (shift_step start_pos) (steps prefix) @ split_step_text (start_pos + suffix_start) suffix
-              else map (shift_step start_pos) (steps prefix) @ map (shift_step (start_pos + suffix_start)) (steps suffix)
-            end
+    fun full_span () = (0, size body)
+    fun span_of default e =
+      case TacticParse.topSpan e of
+          SOME sp => sp
         | NONE =>
-            (case top_level_suffix_after_then1 label of
-                 SOME split =>
-                   let
-                     val branch = trim_space (String.substring(label, 0, split))
-                     val (suffix_start, suffix) = trim_left_at label (split + 2)
-                   in
-                     if starts_reverse suffix andalso Option.isSome (top_level_then1 suffix) then
-                       StepExpand {end_pos = start_pos + split, label = branch} ::
-                       split_step_text (start_pos + suffix_start) suffix
-                     else
-                       StepExpand {end_pos = start_pos + split, label = branch} ::
-                       map (shift_step (start_pos + suffix_start)) (steps suffix)
-                   end
-               | NONE => [StepExpand {end_pos = start_pos + size label, label = label}])
-    fun split_reverse_branch_step (StepExpand {end_pos, label}) = split_step_text (end_pos - size label) label
-      | split_reverse_branch_step step = [step]
-    fun split_reverse_branch_steps steps' = List.concat (map split_reverse_branch_step steps')
+            (case e of
+                 TacticParse.MapEvery (_, []) => default
+               | TacticParse.MapFirst (_, []) => default
+               | TacticParse.LNullOk x => span_of default x
+               | _ => Option.getOpt(alt_span e, default))
+    fun text_of sp = trim_space (span_text body sp)
+    fun text_or sp fallback =
+      let val raw = text_of sp
+      in if String.size raw = 0 then fallback else raw end
+    fun term_quote_text raw =
+      if is_term_quote raw then "sg " ^ raw else raw
+    fun tactic_label default fallback e =
+      case e of
+          TacticParse.MapEvery _ =>
+            let val raw = text_of default
+            in if String.size raw = 0 then frag_text body (TacticParse.FAtom e) else raw end
+        | TacticParse.MapFirst _ =>
+            let val raw = text_of default
+            in if String.size raw = 0 then frag_text body (TacticParse.FAtom e) else raw end
+        | _ => text_or (span_of default e) fallback
+    fun list_label default fallback e =
+      case e of
+          TacticParse.LReverse => "Tactical.REVERSE_LT"
+        | TacticParse.LSelectGoal p => "Q.SELECT_GOAL_LT " ^ text_or p "[]"
+        | TacticParse.LSelectGoals p => "Q.SELECT_GOALS_LT " ^ text_or p "[]"
+        | TacticParse.LSelectThen (TacticParse.Group (_, _, TacticParse.Rename p), rhs) =>
+            "Q.SELECT_GOALS_LT_THEN1 " ^ text_or p "[]" ^ " (" ^ tactic_label (span_of default rhs) "ALL_TAC" rhs ^ ")"
+        | TacticParse.LTacsToLT (TacticParse.List (p, _)) =>
+            "Tactical.TACS_TO_LT (" ^ text_or p "[]" ^ ")"
+        | TacticParse.LTacsToLT arg =>
+            "Tactical.TACS_TO_LT (" ^ tactic_label (span_of default arg) "[]" arg ^ ")"
+        | TacticParse.LNullOk lt =>
+            "Tactical.NULL_OK_LT (" ^ list_label (span_of default lt) "ALL_LT" lt ^ ")"
+        | TacticParse.LThenLT [] => text_or (span_of default e) "ALL_LT"
+        | TacticParse.LFirst [] => text_or (span_of default e) "NO_LT"
+        | _ => text_or (span_of default e) fallback
+    fun atomic_tac default fallback e =
+      [StepExpand {end_pos = #2 (span_of default e), label = tactic_label default fallback e}]
+    fun suffices_by_expr e =
+      case e of
+          TacticParse.ThenLT (TacticParse.Group (_, _, TacticParse.ThenLT (TacticParse.Subgoal _, [TacticParse.LReverse])), [TacticParse.LThen1 _]) => true
+        | TacticParse.ThenLT (TacticParse.ThenLT (TacticParse.Subgoal _, [TacticParse.LReverse]), [TacticParse.LThen1 _]) => true
+        | _ => false
+    fun thenl_lt (TacticParse.LNullOk (TacticParse.LTacsToLT _)) = true
+      | thenl_lt (TacticParse.Group (_, _, x)) = thenl_lt x
+      | thenl_lt _ = false
+    fun reverse_thenl_expr (TacticParse.ThenLT (lhs, lts)) = expr_contains_reverse body lhs andalso List.exists thenl_lt lts
+      | reverse_thenl_expr _ = false
+    fun atomic_list default fallback e =
+      [StepExpandList {end_pos = #2 (span_of default e), label = list_label default fallback e}]
+    fun close_at sp label = StepClose {end_pos = #2 sp, label = label}
+    fun interleave _ [] = []
+      | interleave _ [x] = x
+      | interleave mid (x :: xs) = x @ [mid] @ interleave mid xs
+    fun plan_tac default e =
+      case e of
+          TacticParse.Then [] => atomic_tac default "ALL_TAC" e
+        | TacticParse.Then es => List.concat (map (fn x => plan_tac (span_of default x) x) es)
+        | TacticParse.ThenLT (lhs, lts) =>
+            if reverse_thenl_expr e then atomic_tac default "ALL_TAC" e
+            else
+              plan_tac (span_of default lhs) lhs @
+              List.concat (map (fn x => plan_lt (span_of default x) x) lts)
+        | TacticParse.Subgoal _ =>
+            let val sp = span_of default e
+            in [StepExpand {end_pos = #2 sp, label = term_quote_text (text_or sp "``" )}] end
+        | TacticParse.First [] => atomic_tac default "NO_TAC" e
+        | TacticParse.First es =>
+            let
+              val sp = span_of default e
+              val arms = map (fn x => plan_tac (span_of sp x) x) es
+            in [StepOpen {end_pos = #1 sp, label = "open_first"}] @
+               interleave (StepMid {end_pos = #1 sp, label = "next_first"}) arms @
+               [close_at sp "close_first"]
+            end
+        | TacticParse.Try _ => atomic_tac default "ALL_TAC" e
+        | TacticParse.Repeat x =>
+            let val sp = span_of default e
+            in [StepOpen {end_pos = #1 sp, label = "open_repeat"}] @
+               plan_tac (span_of sp x) x @ [close_at sp "close_repeat"]
+            end
+        | TacticParse.MapEvery _ => atomic_tac default "ALL_TAC" e
+        | TacticParse.MapFirst _ => atomic_tac default "NO_TAC" e
+        | TacticParse.Rename _ => atomic_tac default "ALL_TAC" e
+        | TacticParse.Opaque _ => atomic_tac default "ALL_TAC" e
+        | TacticParse.Group (_, sp, x) => if suffices_by_expr x then atomic_tac sp "ALL_TAC" e else plan_tac sp x
+        | TacticParse.RepairEmpty (true, _, s) => [StepExpand {end_pos = #2 default, label = s}]
+        | TacticParse.RepairGroup (sp, _, x, _) => if suffices_by_expr x then atomic_tac sp "ALL_TAC" e else plan_tac sp x
+        | _ => atomic_tac default "ALL_TAC" e
+    and plan_lt default e =
+      case e of
+          TacticParse.LThenLT [] => atomic_list default "ALL_LT" e
+        | TacticParse.LThenLT es => List.concat (map (fn x => plan_lt (span_of default x) x) es)
+        | TacticParse.LThen (lt, tacs) =>
+            plan_lt (span_of default lt) lt @
+            List.concat (map (fn x => plan_tac (span_of default x) x) tacs)
+        | TacticParse.LThen1 x =>
+            let val sp = span_of default x
+            in [StepOpen {end_pos = #1 sp, label = "open_then1"}] @
+               plan_tac sp x @ [close_at sp "close_paren"]
+            end
+        | TacticParse.LAllGoals x => plan_tac (span_of default x) x
+        | TacticParse.LReverse => atomic_list default "Tactical.REVERSE_LT" e
+        | TacticParse.LSelectGoal _ => atomic_list default "Q.SELECT_GOAL_LT []" e
+        | TacticParse.LSelectGoals _ => atomic_list default "Q.SELECT_GOALS_LT []" e
+        | TacticParse.Group (_, sp, x) => plan_lt sp x
+        | TacticParse.RepairEmpty (false, _, s) => [StepExpandList {end_pos = #2 default, label = s}]
+        | TacticParse.RepairGroup (sp, _, x, _) => plan_lt sp x
+        | _ => atomic_list default "ALL_LT" e
   in
-    merge_select_then1_steps
-      (merge_select_steps
-        (merge_reverse_steps (split_reverse_branch_steps (assign frags 0 [])) []) []) []
+    plan_tac (full_span ()) tree
   end
 
 fun report_step_failure label e = (save_failed_prefix_checkpoint (); print_goal_state label; raise e)
@@ -716,13 +701,19 @@ fun eval_step label program fail_msg =
     (fn () => if smlExecute.quse_string program then () else raise Fail fail_msg) ()
   handle e => report_step_failure label e
 
+fun int_arg_open prefix apply label =
+  let val arg = String.extract(label, size prefix, NONE)
+  in
+    case Int.fromString arg of
+        SOME n => apply_ftac label (apply n)
+      | NONE =>
+          eval_step label
+            ("proofManagerLib.ef(" ^ prefix ^ "(" ^ arg ^ ")); ")
+            ("open fragment failed: " ^ label)
+  end
+
 fun open_ftac label =
-  if String.isPrefix "open_nth_goal " label then
-    goalFrag.open_nth_goal (Option.valOf (Int.fromString (String.extract(label, 14, NONE))))
-  else if String.isPrefix "open_split_lt " label then
-    goalFrag.open_split_lt (Option.valOf (Int.fromString (String.extract(label, 14, NONE))))
-  else
-    case label of
+  case label of
         "open_paren" => goalFrag.open_paren
       | "open_then1" => goalFrag.open_then1
       | "open_first" => goalFrag.open_first
@@ -751,7 +742,12 @@ fun close_ftac label =
     | "close_first_lt" => goalFrag.close_first_lt
     | _ => raise Fail ("unknown close frag: " ^ label)
 
-fun step (StepOpen {label, ...}) = apply_ftac label (open_ftac label)
+fun step (StepOpen {label, ...}) =
+      if String.isPrefix "open_nth_goal " label then
+        int_arg_open "open_nth_goal " goalFrag.open_nth_goal label
+      else if String.isPrefix "open_split_lt " label then
+        int_arg_open "open_split_lt " goalFrag.open_split_lt label
+      else apply_ftac label (open_ftac label)
   | step (StepMid {label, ...}) = apply_ftac label (mid_ftac label)
   | step (StepClose {label, ...}) = apply_ftac label (close_ftac label)
   | step (StepExpand {label, ...}) =

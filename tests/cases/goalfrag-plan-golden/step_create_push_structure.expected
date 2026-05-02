@@ -1,4 +1,4 @@
-holbuild goalfrag plan ATheory:step_create_push_structure source=src/AScript.sml (271 steps)
+holbuild goalfrag plan ATheory:step_create_push_structure source=src/AScript.sml (334 steps)
   00 simp[step_create_def]
   01 >> strip_tac
   02 >> qmatch_asmsub_abbrev_tac`pop_stack n`
@@ -211,111 +211,127 @@ holbuild goalfrag plan ATheory:step_create_push_structure source=src/AScript.sml
   209   >> Cases_on`se.contexts`
   210   >> gvs[]
   211 >> rewrite_tac[Ntimes CONJ_ASSOC 3]
-  212 >> reverse conj_tac >- (
-         (* a ≠ callee ⇒ storage equality at position 1.
-            set_last_accounts only modifies the LAST element's .accounts.
-            When LENGTH se.contexts > 1, HD of TL is NOT the last, so unchanged.
-            When LENGTH se.contexts = 1, HD of TL IS the last, modified by
-            set_last_accounts (update_account address empty_account_state)
-            which doesn't touch a ≠ address. *)
-         qpat_x_assum `proceed_create _ _ _ _ _ se = _` mp_tac >>
-         rewrite_tac[proceed_create_def] >>
-         simp[ignore_bind_def, bind_def, update_accounts_def, return_def,
-               get_rollback_def, get_original_def, set_original_def, fail_def] >>
-         strip_tac >> gvs[] >>
-         drule push_context_effect >> strip_tac >> gvs[] >>
-         simp[lookup_storage_def, lookup_account_def] >>
-         qmatch_goalsub_abbrev_tac`SND (EL _ (slc uc _))` >>
-         qmatch_goalsub_abbrev_tac`(SND (EL _ icc)).accounts _` >>
-         gvs[push_context_def,return_def,execution_state_component_equality] >>
-         gvs[account_already_created_def,lookup_account_def] >>
-         Cases_on`s.contexts` >- gvs[] >> simp[] >>
-         Cases_on`se.contexts` >- gvs[] >> simp[Abbr`slc`] >>
-         gvs[set_last_accounts_def] >>
-         simp[EL_SNOC] >>
-         simp[Abbr`icc`] >>
-         qmatch_goalsub_abbrev_tac`EL (LENGTH t) (SNOC sn fr)` >>
-         `LENGTH fr = LENGTH t` by simp[Abbr`fr`] >>
-         pop_assum(SUBST1_TAC o SYM) >> simp[EL_LENGTH_SNOC,Abbr`sn`] >>
-         gvs[Abbr`fr`] >>
-         `SND h = SND h'` by (
-           qpat_x_assum`same_frame_rel s se`mp_tac >>
-           simp[same_frame_rel_def] ) >>
-         simp[initial_msg_params_def] >>
-         reverse(qspec_then`t`FULL_STRUCT_CASES_TAC SNOC_CASES >> gvs[]) >- (
-           simp[LAST_CONS_SNOC, FRONT_CONS_SNOC] >>
-           conj_tac >- ( Cases >> simp[EL_SNOC] ) >>
-           simp[Abbr`uc`, update_account_def, APPLY_UPDATE_THM] >>
-           gen_tac >> simp[LAST_CONS_SNOC] ) >>
-         simp[Abbr`uc`, lookup_account_def, update_account_def, APPLY_UPDATE_THM] )
-  213 >> simp[GSYM CONJ_ASSOC]
-  214 >> reverse conj_tac >- (
-         (* SND (HD s'.contexts) accesses subset *)
-         reverse conj_tac
-         >- metis_tac[SUBSET_TRANS, same_frame_rel_def] >>
-         (* msgParams *)
-         qpat_x_assum`same_frame_rel s se`mp_tac >>
-         simp[same_frame_rel_def] >> strip_tac >>
-         Cases_on`s.contexts` >- gvs[] >> simp[] >>
-         Cases_on`s'.contexts` >- gvs[] >> simp[] >>
-         Cases_on`t'` >- gvs[] >> simp[] >>
-         Cases_on`se.contexts` >- gvs[] >>
-         fs[]  )
-       (* Per-position accesses preservation: set_original only touches .accounts *)
-  215 >> qpat_x_assum `proceed_create _ _ _ _ _ se = _` mp_tac
-  216 >> simp[proceed_create_def]
-  217 >> simp[ignore_bind_def, bind_def, update_accounts_def, return_def,
+  212 >> conj_tac
+  213 >> list_tac Tactical.REVERSE_LT
+  214   >- qpat_x_assum `proceed_create _ _ _ _ _ se = _` mp_tac
+  215   >> rewrite_tac[proceed_create_def]
+  216   >> simp[ignore_bind_def, bind_def, update_accounts_def, return_def,
+                 get_rollback_def, get_original_def, set_original_def, fail_def]
+  217   >> strip_tac
+  218   >> gvs[]
+  219   >> drule push_context_effect
+  220   >> strip_tac
+  221   >> gvs[]
+  222   >> simp[lookup_storage_def, lookup_account_def]
+  223   >> qmatch_goalsub_abbrev_tac`SND (EL _ (slc uc _))`
+  224   >> qmatch_goalsub_abbrev_tac`(SND (EL _ icc)).accounts _`
+  225   >> gvs[push_context_def,return_def,execution_state_component_equality]
+  226   >> gvs[account_already_created_def,lookup_account_def]
+  227   >> Cases_on`s.contexts`
+  228     >- gvs[]
+  229   >> simp[]
+  230   >> Cases_on`se.contexts`
+  231     >- gvs[]
+  232   >> simp[Abbr`slc`]
+  233   >> gvs[set_last_accounts_def]
+  234   >> simp[EL_SNOC]
+  235   >> simp[Abbr`icc`]
+  236   >> qmatch_goalsub_abbrev_tac`EL (LENGTH t) (SNOC sn fr)`
+  237   >> sg `LENGTH fr = LENGTH t`
+  238     >- simp[Abbr`fr`]
+  239   >> pop_assum(SUBST1_TAC o SYM)
+  240   >> simp[EL_LENGTH_SNOC,Abbr`sn`]
+  241   >> gvs[Abbr`fr`]
+  242   >> sg `SND h = SND h'`
+  243     >- qpat_x_assum`same_frame_rel s se`mp_tac
+  244     >> simp[same_frame_rel_def]
+  245   >> simp[initial_msg_params_def]
+  246   >> qspec_then`t`FULL_STRUCT_CASES_TAC SNOC_CASES
+  247   >> gvs[]
+  248   >> list_tac Tactical.REVERSE_LT
+  249     >- simp[LAST_CONS_SNOC, FRONT_CONS_SNOC]
+  250     >> conj_tac
+  251       >- Cases
+  252       >> simp[EL_SNOC]
+  253     >> simp[Abbr`uc`, update_account_def, APPLY_UPDATE_THM]
+  254     >> gen_tac
+  255     >> simp[LAST_CONS_SNOC]
+  256   >> simp[Abbr`uc`, lookup_account_def, update_account_def, APPLY_UPDATE_THM]
+  257 >> simp[GSYM CONJ_ASSOC]
+  258 >> conj_tac
+  259 >> list_tac Tactical.REVERSE_LT
+  260   >- conj_tac
+  261   >> list_tac Tactical.REVERSE_LT
+  262     >- metis_tac[SUBSET_TRANS, same_frame_rel_def]
+  263   >> qpat_x_assum`same_frame_rel s se`mp_tac
+  264   >> simp[same_frame_rel_def]
+  265   >> strip_tac
+  266   >> Cases_on`s.contexts`
+  267     >- gvs[]
+  268   >> simp[]
+  269   >> Cases_on`s'.contexts`
+  270     >- gvs[]
+  271   >> simp[]
+  272   >> Cases_on`t'`
+  273     >- gvs[]
+  274   >> simp[]
+  275   >> Cases_on`se.contexts`
+  276     >- gvs[]
+  277   >> fs[]
+  278 >> qpat_x_assum `proceed_create _ _ _ _ _ se = _` mp_tac
+  279 >> simp[proceed_create_def]
+  280 >> simp[ignore_bind_def, bind_def, update_accounts_def, return_def,
                get_rollback_def, get_original_def, set_original_def, fail_def]
-  218 >> strip_tac
-  219 >> gvs[]
-  220 >> drule push_context_effect
-  221 >> strip_tac
-  222 >> gvs[]
-  223 >> rpt
-  224   strip_tac
-  225 >> sg `i < LENGTH se.contexts`
-  226   >- gvs[same_frame_rel_def]
-  227 >> simp[set_last_accounts_def]
-  228 >> qmatch_goalsub_abbrev_tac`SNOC new`
-  229 >> qhdtm_x_assum`push_context` kall_tac
-  230 >> qpat_x_assum`_ = TL s.contexts`mp_tac
-  231 >> simp[LIST_EQ_REWRITE]
-  232 >> rewrite_tac[GSYM EL]
-  233 >> Cases_on`i=0`
-  234   >- Cases_on`FRONT se.contexts = []`
-  235     >- gvs[]
-  236     >> gvs[Abbr`new`]
-  237     >> Cases_on`se.contexts`
-  238     >> gvs[]
-  239     >> Cases_on`s.contexts`
-  240     >> gvs[]
-  241     >> qpat_x_assum`same_frame_rel s se`mp_tac
-  242     >> simp[same_frame_rel_def]
-  243   >> rewrite_tac[GSYM EL]
-  244   >> DEP_REWRITE_TAC[EL_SNOC]
-  245   >> simp[LENGTH_FRONT]
-  246   >> simp[PRE_SUB1]
-  247   >> Cases_on`se.contexts`
-  248   >> gvs[]
-  249   >> Cases_on`s.contexts`
-  250   >> gvs[]
-  251   >> Cases_on`t`
-  252   >> gvs[]
-  253   >> qpat_x_assum`same_frame_rel s se`mp_tac
-  254   >> simp[same_frame_rel_def]
-  255 >> Cases_on`i = LENGTH s.contexts - 1`
-  256   >- sg `i = LENGTH (FRONT se.contexts)`
-  257     >- simp[LENGTH_FRONT]
-  258   >> pop_assum SUBST1_TAC
-  259   >> simp[EL_LENGTH_SNOC]
-  260   >> simp[Abbr`new`, LENGTH_FRONT, GSYM LAST_EL]
-  261   >> simp[LAST_EL]
-  262   >> strip_tac
-  263   >> AP_TERM_TAC
-  264   >> AP_TERM_TAC
-  265   >> first_x_assum(qspec_then`PRE i`mp_tac)
-  266   >> simp[PRE_SUB1,ADD1]
-  267 >> strip_tac
-  268 >> simp[EL_SNOC, LENGTH_FRONT, EL_FRONT, NULL_EQ]
-  269 >> first_x_assum(qspec_then`PRE i`mp_tac)
-  270 >> simp[ADD1, PRE_SUB1]
+  281 >> strip_tac
+  282 >> gvs[]
+  283 >> drule push_context_effect
+  284 >> strip_tac
+  285 >> gvs[]
+  286 >> rpt
+  287   strip_tac
+  288 >> sg `i < LENGTH se.contexts`
+  289   >- gvs[same_frame_rel_def]
+  290 >> simp[set_last_accounts_def]
+  291 >> qmatch_goalsub_abbrev_tac`SNOC new`
+  292 >> qhdtm_x_assum`push_context` kall_tac
+  293 >> qpat_x_assum`_ = TL s.contexts`mp_tac
+  294 >> simp[LIST_EQ_REWRITE]
+  295 >> rewrite_tac[GSYM EL]
+  296 >> Cases_on`i=0`
+  297   >- Cases_on`FRONT se.contexts = []`
+  298     >- gvs[]
+  299     >> gvs[Abbr`new`]
+  300     >> Cases_on`se.contexts`
+  301     >> gvs[]
+  302     >> Cases_on`s.contexts`
+  303     >> gvs[]
+  304     >> qpat_x_assum`same_frame_rel s se`mp_tac
+  305     >> simp[same_frame_rel_def]
+  306   >> rewrite_tac[GSYM EL]
+  307   >> DEP_REWRITE_TAC[EL_SNOC]
+  308   >> simp[LENGTH_FRONT]
+  309   >> simp[PRE_SUB1]
+  310   >> Cases_on`se.contexts`
+  311   >> gvs[]
+  312   >> Cases_on`s.contexts`
+  313   >> gvs[]
+  314   >> Cases_on`t`
+  315   >> gvs[]
+  316   >> qpat_x_assum`same_frame_rel s se`mp_tac
+  317   >> simp[same_frame_rel_def]
+  318 >> Cases_on`i = LENGTH s.contexts - 1`
+  319   >- sg `i = LENGTH (FRONT se.contexts)`
+  320     >- simp[LENGTH_FRONT]
+  321   >> pop_assum SUBST1_TAC
+  322   >> simp[EL_LENGTH_SNOC]
+  323   >> simp[Abbr`new`, LENGTH_FRONT, GSYM LAST_EL]
+  324   >> simp[LAST_EL]
+  325   >> strip_tac
+  326   >> AP_TERM_TAC
+  327   >> AP_TERM_TAC
+  328   >> first_x_assum(qspec_then`PRE i`mp_tac)
+  329   >> simp[PRE_SUB1,ADD1]
+  330 >> strip_tac
+  331 >> simp[EL_SNOC, LENGTH_FRONT, EL_FRONT, NULL_EQ]
+  332 >> first_x_assum(qspec_then`PRE i`mp_tac)
+  333 >> simp[ADD1, PRE_SUB1]
