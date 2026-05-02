@@ -798,16 +798,18 @@ fun failed_fragment_source_summary source_path source_text checkpoints label =
   let
     fun locate checkpoint =
       Option.map
-        (fn relative => #tactic_start checkpoint + relative)
+        (fn relative => {checkpoint = checkpoint, offset = #tactic_start checkpoint + relative})
         (find_substring label (#tactic_text checkpoint))
   in
     case first_some locate checkpoints of
         NONE => NONE
-      | SOME offset =>
+      | SOME {checkpoint, offset} =>
         let val line = line_number_at source_text offset
         in
           SOME (String.concat
             ["holbuild failed fragment source context (best effort):\n",
+             "theorem: ", #name checkpoint, "\n",
+             "fragment: ", label, "\n",
              "source: ", source_path, "\n",
              "line: ", Int.toString line, "\n",
              "----- begin source context -----\n",
@@ -1645,8 +1647,8 @@ fun build_theory cache_allowed policy tc project base_context plan keys toolchai
     fun checkpoint_failure_error msg =
       let
         val failure_log = preserve_checkpoint_failure_log project node input_key stage
-        val reason = Option.mapPartial summarize_log failure_log
         val goal_state = Option.mapPartial summarize_goal_state failure_log
+        val reason = if Option.isSome goal_state then NONE else Option.mapPartial summarize_log failure_log
         val source_context = Option.mapPartial (summarize_failed_fragment_source (source_file node) source_text theorem_checkpoints) failure_log
         val _ = if Option.isSome goal_state then () else discard_failure_checkpoints ()
         val detail =

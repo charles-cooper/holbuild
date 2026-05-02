@@ -329,9 +329,9 @@ if (cd "$branch_failure_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATh
   echo "expected branch proof to fail build" >&2
   exit 1
 fi
-require_grep "tactic fragment failed: FAIL_TAC" "$branch_failure_log"
+require_grep "fragment: FAIL_TAC" "$branch_failure_log"
 require_grep "branch side failed" "$branch_failure_log"
-if grep -q "tactic fragment failed: CONJ_TAC >- FAIL_TAC" "$branch_failure_log"; then
+if grep -q "fragment: CONJ_TAC >- FAIL_TAC" "$branch_failure_log"; then
   echo "branch tactical was emitted as one atomic fragment" >&2
   exit 1
 fi
