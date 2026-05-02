@@ -179,13 +179,18 @@ plan_log=$tmpdir/goalfrag-plan.log
 (cd "$trace_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" goalfrag-plan ATheory:b_thm) > "$plan_log" 2>&1
 require_grep "holbuild goalfrag plan ATheory:b_thm source=src/AScript.sml (" "$plan_log"
 require_grep "^[[:space:]]*00 .*CONJ_TAC" "$plan_log"
+require_grep "^[[:space:]]*[0-9][0-9] >-" "$plan_log"
 require_grep "^[[:space:]]*[0-9][0-9] .*ACCEPT_TAC TRUTH" "$plan_log"
+if grep -q "open_\|close_\|next_" "$plan_log"; then
+  echo "goalfrag plan leaked structural IR names" >&2
+  exit 1
+fi
 reverse_plan_log=$tmpdir/reverse-goalfrag-plan.log
 (cd "$trace_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" goalfrag-plan ATheory:reverse_cases) > "$reverse_plan_log" 2>&1
 require_grep "^[[:space:]]*00 gen_tac" "$reverse_plan_log"
 require_grep "^[[:space:]]*01 .*Tactical.REVERSE" "$reverse_plan_log"
-if grep -q "open_paren\|close_paren" "$reverse_plan_log"; then
-  echo "goalfrag plan leaked structural paren steps" >&2
+if grep -q "open_\|close_\|next_" "$reverse_plan_log"; then
+  echo "goalfrag plan leaked structural IR names" >&2
   exit 1
 fi
 if grep -q "holbuild goalfrag before theorem=b_thm\|elapsed_ms=\|ATheory built\|ATheory inspected\|resuming ATheory" "$plan_log"; then

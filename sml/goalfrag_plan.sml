@@ -463,16 +463,52 @@ fun format_expand_list index depth prefix label =
         body_margin ^ "   " ^ indent depth ^ ")\n"
     | NONE => block_line depth index (prefix ^ "list_tac ") label
 
+fun display_open_label label =
+  if String.isPrefix "open_nth_goal " label then "NTH_GOAL " ^ String.extract(label, 14, NONE)
+  else if String.isPrefix "open_split_lt " label then "split_lt " ^ String.extract(label, 14, NONE)
+  else
+    case label of
+        "open_then1" => ">-"
+      | "open_first" => "FIRST"
+      | "open_repeat" => "rpt ("
+      | "open_tacs_to_lt" => "Tactical.TACS_TO_LT ["
+      | "open_null_ok" => "NULL_OK_LT ("
+      | "open_last_goal" => "LAST_GOAL ("
+      | "open_head_goal" => "HEAD_GOAL ("
+      | "open_select_lt" => "select_lt ["
+      | "open_first_lt" => "FIRST_LT ["
+      | _ => label
+
+fun display_mid_label label =
+  case label of
+      "next_first" => "|"
+    | "next_tacs_to_lt" => ","
+    | "next_split_lt" => "|"
+    | "next_select_lt" => "|"
+    | _ => label
+
+fun display_close_label label =
+  case label of
+      "close_repeat" => ")"
+    | "close_first" => "]"
+    | "close_first_lt" => "]"
+    | _ => label
+
+fun structural_prefix index (StepOpen {label = "open_then1", ...}) = ""
+  | structural_prefix _ (StepMid _) = ""
+  | structural_prefix _ (StepClose _) = ""
+  | structural_prefix index _ = connective index
+
 fun format_step index depth step =
   let val d = depth_before step depth
-      val prefix = connective index
+      val prefix = structural_prefix index step
   in
     case step of
         StepExpand {label, ...} => format_expand index d prefix label
       | StepExpandList {label, ...} => format_expand_list index d prefix label
-      | StepOpen {label, ...} => line d index prefix label
-      | StepMid {label, ...} => line d index prefix label
-      | StepClose {label, ...} => line d index prefix label
+      | StepOpen {label, ...} => line d index prefix (display_open_label label)
+      | StepMid {label, ...} => line d index prefix (display_mid_label label)
+      | StepClose {label, ...} => line d index prefix (display_close_label label)
       | StepSelect {label, ...} => line d index (prefix ^ "select ") label
       | StepSelects {label, ...} => line d index (prefix ^ "selects ") label
   end
