@@ -231,6 +231,7 @@ fun flatten_frags frags =
   in go frags [] end
 
 fun alt_span (TacticParse.Subgoal (s, e)) = SOME (s, e)
+  | alt_span (TacticParse.Rename p) = SOME p
   | alt_span (TacticParse.LSelectGoal p) = SOME p
   | alt_span (TacticParse.LSelectGoals p) = SOME p
   | alt_span (TacticParse.LTacsToLT (TacticParse.OOpaque (_, p))) = SOME p
@@ -280,7 +281,7 @@ and expr_contains_reverse body e =
     | TacticParse.LLastGoal e => expr_contains_reverse body e
     | TacticParse.LHeadGoal e => expr_contains_reverse body e
     | TacticParse.LSplit (sp, e1, e2) => text_contains_reverse body sp orelse expr_contains_reverse body e1 orelse expr_contains_reverse body e2
-    | TacticParse.LReverse => true
+    | TacticParse.LReverse => false
     | TacticParse.LTry e => expr_contains_reverse body e
     | TacticParse.LRepeat e => expr_contains_reverse body e
     | TacticParse.LFirstLT e => expr_contains_reverse body e
@@ -303,10 +304,19 @@ and expr_contains_tacs_to_lt e =
     | TacticParse.LTacsToLT _ => true
     | _ => false
 
+fun tacs_to_lt_branch_expr (TacticParse.ThenLT (_, [TacticParse.LNullOk (TacticParse.LTacsToLT _)])) = true
+  | tacs_to_lt_branch_expr (TacticParse.Group (_, _, e)) = tacs_to_lt_branch_expr e
+  | tacs_to_lt_branch_expr _ = false
+
+fun expr_source_contains_reverse body e =
+  case TacticParse.topSpan e of
+      SOME sp => text_contains_reverse body sp
+    | NONE => false
+
 fun reverse_branch_expr body (TacticParse.ThenLT (lhs, [rhs as TacticParse.LNullOk (TacticParse.LTacsToLT _)])) =
-      expr_contains_reverse body lhs orelse expr_contains_reverse body rhs
+      expr_source_contains_reverse body lhs orelse expr_contains_reverse body lhs orelse expr_contains_reverse body rhs
   | reverse_branch_expr body (TacticParse.ThenLT (lhs, [rhs as TacticParse.LThen1 _])) =
-      expr_contains_reverse body lhs orelse expr_contains_reverse body rhs
+      expr_source_contains_reverse body lhs orelse expr_contains_reverse body lhs orelse expr_contains_reverse body rhs
   | reverse_branch_expr body (TacticParse.Group (_, _, e)) = reverse_branch_expr body e
   | reverse_branch_expr _ _ = false
 
@@ -486,6 +496,7 @@ fun merge_select_steps [] acc = rev acc
             | prefix (first :: rest) =
                 String.concatWith " >>~ " (map select_prefix_step (first :: rest))
           val selectPrefix = prefix sels
+          val selectEnd = step_end (List.last sels)
           fun consume (StepOpen {label = "open_then1", ...} :: StepExpand {end_pos, label} :: StepClose _ :: rest') =
                 SOME (selectPrefix ^ " >- " ^ label, end_pos, rest')
             | consume (StepOpen {label = "open_first", ...} :: StepExpand {end_pos, label} :: StepClose _ :: rest') =
@@ -494,7 +505,7 @@ fun merge_select_steps [] acc = rev acc
         in
           case consume afterSels of
               SOME (text, tacEnd, rest') => merge_select_steps rest' (StepExpandList {end_pos = tacEnd, label = text} :: acc)
-            | NONE => merge_select_steps afterSels acc
+            | NONE => merge_select_steps afterSels (StepExpandList {end_pos = selectEnd, label = selectPrefix} :: acc)
         end
       else merge_select_steps rest (selectStep :: acc)
 
@@ -519,14 +530,10 @@ fun step_of_frag end_pos label (TacticParse.FAtom (TacticParse.LSelectGoal _)) =
 fun steps body =
   let
     val tree = parse_tactic body
-    val contains_tacs_to_lt = expr_contains_tacs_to_lt tree
-    fun isAtom e =
-      if contains_tacs_to_lt then Option.isSome (TacticParse.topSpan e)
-      else
-        case e of
-            TacticParse.Group _ => false
-          | TacticParse.RepairGroup _ => false
-          | _ => Option.isSome (TacticParse.topSpan e)
+    fun atomic_group e = tacs_to_lt_branch_expr e orelse reverse_branch_expr body e
+    fun isAtom (TacticParse.Group (_, _, e)) = atomic_group e
+      | isAtom (TacticParse.RepairGroup (_, _, e, _)) = atomic_group e
+      | isAtom e = Option.isSome (TacticParse.topSpan e)
     val frags = reexpand_group_atoms body (flatten_frags (TacticParse.linearize isAtom tree))
     fun assign [] _ acc = rev acc
       | assign (f::rest) last acc =
@@ -543,10 +550,57 @@ fun steps body =
                   SOME step => assign rest last' (step :: acc)
                 | NONE => assign rest last acc
           end
+    fun shift_step delta step =
+      case step of
+          StepOpen {end_pos, label} => StepOpen {end_pos = end_pos + delta, label = label}
+        | StepMid {end_pos, label} => StepMid {end_pos = end_pos + delta, label = label}
+        | StepClose {end_pos, label} => StepClose {end_pos = end_pos + delta, label = label}
+        | StepExpand {end_pos, label} => StepExpand {end_pos = end_pos + delta, label = label}
+        | StepExpandList {end_pos, label} => StepExpandList {end_pos = end_pos + delta, label = label}
+        | StepSelect {end_pos, label} => StepSelect {end_pos = end_pos + delta, label = label}
+        | StepSelects {end_pos, label} => StepSelects {end_pos = end_pos + delta, label = label}
+    fun trim_left text =
+      let
+        val n = size text
+        fun loop i = if i >= n orelse not (Char.isSpace (String.sub(text, i))) then i else loop (i + 1)
+      in String.extract(text, loop 0, NONE) end
+    fun find_from needle text start =
+      let
+        val n = size text
+        val m = size needle
+        fun loop i =
+          if i + m > n then NONE
+          else if String.substring(text, i, m) = needle then SOME i
+          else loop (i + 1)
+      in if m = 0 then NONE else loop start end
+    fun reverse_branch_split label =
+      let
+        fun candidate needle =
+          case find_from needle label 0 of
+              NONE => NONE
+            | SOME i => Option.map (fn _ => i) (find_from ">-" label i)
+        fun earliest (NONE, x) = x
+          | earliest (x, NONE) = x
+          | earliest (SOME a, SOME b) = SOME (Int.min(a, b))
+      in earliest (candidate ">> reverse", candidate ">> Tactical.REVERSE") end
+    fun split_reverse_branch_step (StepExpand {end_pos, label}) =
+          (case reverse_branch_split label of
+               NONE => [StepExpand {end_pos = end_pos, label = label}]
+             | SOME split =>
+                 let
+                   val prefix = String.substring(label, 0, split)
+                   val suffix = trim_left (String.extract(label, split + 2, NONE))
+                   val start_pos = end_pos - size label
+                 in
+                   if trim_left prefix = "" then [StepExpand {end_pos = end_pos, label = label}]
+                   else map (shift_step start_pos) (steps prefix) @ [StepExpand {end_pos = end_pos, label = suffix}]
+                 end)
+      | split_reverse_branch_step step = [step]
+    fun split_reverse_branch_steps steps' = List.concat (map split_reverse_branch_step steps')
   in
     merge_select_then1_steps
       (merge_select_steps
-        (merge_reverse_steps (assign frags 0 []) []) []) []
+        (merge_reverse_steps (split_reverse_branch_steps (assign frags 0 [])) []) []) []
   end
 
 fun report_step_failure label e = (save_failed_prefix_checkpoint (); print_goal_state label; raise e)

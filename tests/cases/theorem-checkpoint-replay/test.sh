@@ -194,7 +194,8 @@ fi
 reverse_plan_log=$tmpdir/reverse-goalfrag-plan.log
 (cd "$trace_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" goalfrag-plan ATheory:reverse_cases) > "$reverse_plan_log" 2>&1
 require_grep "^[[:space:]]*00 gen_tac" "$reverse_plan_log"
-require_grep "^[[:space:]]*01 .*Tactical.REVERSE" "$reverse_plan_log"
+require_grep "reverse (Cases_on" "$reverse_plan_log"
+require_grep "^[[:space:]]*01 .*DISJ1_TAC" "$reverse_plan_log"
 repeat_plan_log=$tmpdir/repeat-goalfrag-plan.log
 (cd "$trace_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" goalfrag-plan ATheory:repeat_split) > "$repeat_plan_log" 2>&1
 require_grep "^[[:space:]]*[0-9][0-9] .*rpt" "$repeat_plan_log"
