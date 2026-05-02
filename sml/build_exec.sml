@@ -1017,8 +1017,8 @@ fun theorem_failed_prefix_path project node deps_key safe_name =
   Path.concat(failed_prefix_checkpoint_dir project node deps_key,
               safe_name ^ "_failed_prefix.save")
 
-fun discover_theorem_boundaries _ source_text =
-  HolbuildTheoryBoundaryScan.scan source_text
+fun discover_theorem_boundaries source_path source_text =
+  HolbuildTheoryBoundaryScan.scan source_path source_text
 
 fun theorem_checkpoint_key {name, safe_name, boundary, deps_key, prefix_hash} =
   HolbuildToolchain.hash_text
