@@ -75,6 +75,28 @@ Proof
   CONJ_TAC >> TRY (CONJ_TAC >- ACCEPT_TAC TRUTH) >> ACCEPT_TAC TRUTH
 QED
 
+Theorem by_after_multiple_goals:
+  p /\ q ==> p /\ q
+Proof
+  strip_tac
+  \\ CONJ_TAC
+  \\ `T` by ACCEPT_TAC TRUTH
+  \\ FIRST_ASSUM ACCEPT_TAC
+QED
+
+Theorem repeat_case_atomic:
+  (case x:'a option of NONE => T | SOME y => T)
+Proof
+  rpt CASE_TAC \\ simp[]
+QED
+
+Theorem first_per_goal:
+  T /\ (F ==> F)
+Proof
+  CONJ_TAC
+  \\ FIRST [ACCEPT_TAC TRUTH, DISCH_TAC \\ FIRST_ASSUM ACCEPT_TAC]
+QED
+
 val _ = export_theory();
 SML
   (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --skip-checkpoints --tactic-timeout 60) > "$tmpdir/success.goalfrag.out" 2>&1

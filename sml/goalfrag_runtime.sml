@@ -628,6 +628,13 @@ fun steps body =
     fun atomic_list default fallback e =
       [StepExpandList {end_pos = #2 (span_of default e), label = list_label default fallback e}]
     fun close_at sp label = StepClose {end_pos = #2 sp, label = label}
+    (* Tactic-level combinators run once per input goal.  When the current
+       GoalFrag state has multiple goals, wrap decomposed list-tactic structure
+       in open_paren/close_paren so THEN1/FIRST choices cannot leak across
+       sibling input goals. *)
+    fun scoped_per_input_goal sp steps =
+      StepOpen {end_pos = #1 sp, label = "open_paren"} ::
+      steps @ [close_at sp "close_paren"]
     fun interleave _ [] = []
       | interleave _ [x] = x
       | interleave mid (x :: xs) = x @ [mid] @ interleave mid xs
@@ -638,8 +645,13 @@ fun steps body =
         | TacticParse.ThenLT (lhs, lts) =>
             if reverse_thenl_expr e then atomic_tac default "ALL_TAC" e
             else
-              plan_tac (span_of default lhs) lhs @
-              List.concat (map (fn x => plan_lt (span_of default x) x) lts)
+              let
+                val sp = span_of default e
+                val lhs_sp = span_of sp lhs
+                val body =
+                  plan_tac lhs_sp lhs @
+                  List.concat (map (fn x => plan_lt (span_of sp x) x) lts)
+              in scoped_per_input_goal sp body end
         | TacticParse.Subgoal _ =>
             let val sp = span_of default e
             in [StepExpand {end_pos = #2 sp, label = term_quote_text (text_or sp "``" )}] end
@@ -648,16 +660,16 @@ fun steps body =
             let
               val sp = span_of default e
               val arms = map (fn x => plan_tac (span_of sp x) x) es
-            in [StepOpen {end_pos = #1 sp, label = "open_first"}] @
-               interleave (StepMid {end_pos = #1 sp, label = "next_first"}) arms @
-               [close_at sp "close_first"]
-            end
+              val body =
+                [StepOpen {end_pos = #1 sp, label = "open_first"}] @
+                interleave (StepMid {end_pos = #1 sp, label = "next_first"}) arms @
+                [close_at sp "close_first"]
+            in scoped_per_input_goal sp body end
         | TacticParse.Try _ => atomic_tac default "ALL_TAC" e
-        | TacticParse.Repeat x =>
-            let val sp = span_of default e
-            in [StepOpen {end_pos = #1 sp, label = "open_repeat"}] @
-               plan_tac (span_of sp x) x @ [close_at sp "close_repeat"]
-            end
+        (* goalFrag.close_repeat is not a faithful REPEAT tactic boundary for
+           all real tactics (e.g. CASE_TAC validations), so keep REPEAT/rpt
+           atomic until a direct executable encoding is proven safe. *)
+        | TacticParse.Repeat _ => atomic_tac default "ALL_TAC" e
         | TacticParse.MapEvery _ => atomic_tac default "ALL_TAC" e
         | TacticParse.MapFirst _ => atomic_tac default "NO_TAC" e
         | TacticParse.Rename _ => atomic_tac default "ALL_TAC" e
