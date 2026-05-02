@@ -71,6 +71,14 @@ Proof
   >>> SPLIT_LT 1 (ALL_LT, FIRST_LT ACCEPT_TAC TRUTH)
 QED
 
+Theorem map_aliases:
+  T /\ T
+Proof
+  CONJ_TAC
+  >- MAP_EVERY (fn th => ACCEPT_TAC th) [TRUTH]
+  >> MAP_FIRST (fn th => ACCEPT_TAC th) [TRUTH]
+QED
+
 Theorem branch_and_by:
   T /\ T
 Proof
@@ -182,6 +190,13 @@ holbuild goalfrag plan ATheory:goal_selector_numbers source=src/AScript.sml (7 s
   04 >> split_lt 1
   05   |
   06   FIRST_LT ACCEPT_TAC TRUTH
+EXPECTED
+
+check_plan map_aliases <<'EXPECTED'
+holbuild goalfrag plan ATheory:map_aliases source=src/AScript.sml (3 steps)
+  00 CONJ_TAC
+  01   >- MAP_EVERY (fn th => ACCEPT_TAC th) [TRUTH]
+  02 >> MAP_FIRST (fn th => ACCEPT_TAC th) [TRUTH]
 EXPECTED
 
 check_plan branch_and_by <<'EXPECTED'

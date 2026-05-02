@@ -71,7 +71,15 @@ fun flatten_frags frags =
           in go rest (rev flat @ acc) end
   in go frags [] end
 
+fun span_to_last start [] = SOME start
+  | span_to_last (start, _) args =
+      (case TacticParse.topSpan (List.last args) of
+           SOME (_, stop) => SOME (start, stop)
+         | NONE => NONE)
+
 fun alt_span (TacticParse.Subgoal (s, e)) = SOME (s, e)
+  | alt_span (TacticParse.MapEvery (f, args)) = span_to_last f args
+  | alt_span (TacticParse.MapFirst (f, args)) = span_to_last f args
   | alt_span (TacticParse.Rename p) = SOME p
   | alt_span (TacticParse.LSelectGoal p) = SOME p
   | alt_span (TacticParse.LSelectGoals p) = SOME p
@@ -231,6 +239,11 @@ fun raw_frag_text body a =
     | (NONE, SOME sp) => substring body sp
     | _ => ""
 
+fun expr_text body e = raw_frag_text body e
+
+fun list_expr_text body args =
+  "[" ^ String.concatWith ", " (map (expr_text body) args) ^ "]"
+
 fun is_term_quote raw =
   String.isPrefix "`" raw orelse
   String.isPrefix "\226\128\152" raw orelse
@@ -242,6 +255,8 @@ fun frag_text body (TacticParse.FAtom a) =
         case a of
             TacticParse.LReverse => "Tactical.REVERSE_LT"
           | TacticParse.LTacsToLT _ => if String.size raw = 0 then raw else "Tactical.TACS_TO_LT (" ^ raw ^ ")"
+          | TacticParse.MapEvery (f, args) => "MAP_EVERY " ^ substring body f ^ " " ^ list_expr_text body args
+          | TacticParse.MapFirst (f, args) => "MAP_FIRST " ^ substring body f ^ " " ^ list_expr_text body args
           | TacticParse.Rename _ => "Q.RENAME_TAC " ^ raw
           | TacticParse.Group (_, _, TacticParse.Rename _) => "Q.RENAME_TAC " ^ raw
           | TacticParse.Subgoal _ => if is_term_quote raw then "sg " ^ raw else raw
