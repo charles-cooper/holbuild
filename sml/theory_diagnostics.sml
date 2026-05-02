@@ -350,15 +350,38 @@ val goal_state_start_marker = "holbuild top goal:"
 val goal_state_end_marker = "holbuild end top goal"
 val failed_fragment_prefix = "holbuild goal state at failed fragment: "
 
-fun take_until_goal_state_end [] acc = NONE
-  | take_until_goal_state_end (line :: rest) acc =
-      if line = goal_state_end_marker then SOME (String.concatWith "\n" (rev acc) ^ "\n")
-      else take_until_goal_state_end rest (line :: acc)
+fun read_prefix path limit =
+  let
+    val input = TextIO.openIn path
+    fun close () = TextIO.closeIn input handle _ => ()
+    fun loop remaining acc =
+      if remaining <= 0 then String.concat (rev acc)
+      else
+        let val chunk = TextIO.inputN(input, Int.min(4096, remaining))
+        in
+          if size chunk = 0 then String.concat (rev acc)
+          else loop (remaining - size chunk) (chunk :: acc)
+        end
+  in
+    (loop limit [] before close ()) handle e => (close (); raise e)
+  end
 
-fun find_top_goal_state [] = NONE
-  | find_top_goal_state (line :: rest) =
-      if line = goal_state_start_marker then take_until_goal_state_end rest []
-      else find_top_goal_state rest
+fun skip_line_break text offset =
+  if offset < size text andalso String.sub(text, offset) = #"\n" then offset + 1
+  else offset
+
+fun top_goal_state_from_text text =
+  case find_substring goal_state_start_marker text of
+      NONE => NONE
+    | SOME start =>
+        let val content_start = skip_line_break text (start + size goal_state_start_marker)
+        in
+          case find_substring goal_state_end_marker (String.extract(text, content_start, NONE)) of
+              NONE => NONE
+            | SOME rel_end => SOME (String.substring(text, content_start, rel_end))
+        end
+
+fun read_top_goal_state path = top_goal_state_from_text (read_prefix path 65536)
 
 fun find_failed_fragment_label lines =
   first_some
@@ -389,7 +412,7 @@ fun goal_state_summary text =
   end
 
 fun summarize_goal_state path =
-  Option.map goal_state_summary (find_top_goal_state (String.fields (fn c => c = #"\n") (read_text path)))
+  Option.map goal_state_summary (read_top_goal_state path)
   handle _ => NONE
 
 fun child_failure_line line =
