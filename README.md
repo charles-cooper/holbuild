@@ -136,7 +136,8 @@ a build but are removed after successful artifact/metadata writes.
 `--tactic-timeout SECONDS` sets the root-project per-tactic goalfrag timeout;
 the default is 2.5 seconds, and `0` disables the timeout. Dependency packages
 build with no tactic timeout. `--goalfrag-plan THEOREM` prints the generated
-goalfrag plan for one theorem. `--goalfrag-trace THEOREM` prints that plan plus
+goalfrag plan for one theorem and exits without continuing downstream builds.
+`--goalfrag-trace THEOREM` prints that plan plus
 before/after execution trace lines with goal counts and per-fragment elapsed
 milliseconds. Use these with `--force` when you need to force execution for
 proof-performance/debug inspection. Combining `--skip-goalfrag` with

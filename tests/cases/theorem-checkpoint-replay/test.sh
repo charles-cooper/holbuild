@@ -177,6 +177,35 @@ if grep -q "holbuild goalfrag before theorem=b_thm" "$plan_log" || grep -q "elap
   echo "--goalfrag-plan emitted execution trace" >&2
   exit 1
 fi
+plan_stop_project=$tmpdir/plan-stop-project
+mkdir -p "$plan_stop_project/src"
+cp "$project/holproject.toml" "$plan_stop_project/holproject.toml"
+cp "$project/src/AScript.sml" "$plan_stop_project/src/AScript.sml"
+cat > "$plan_stop_project/src/BScript.sml" <<'SML'
+open HolKernel Parse boolLib bossLib;
+open ATheory;
+
+val _ = new_theory "B";
+
+Theorem use_a:
+  T
+Proof
+  ACCEPT_TAC a_thm
+QED
+
+val _ = export_theory();
+SML
+plan_stop_log=$tmpdir/goalfrag-plan-stop.log
+(cd "$plan_stop_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --goalfrag-plan b_thm BTheory) > "$plan_stop_log" 2>&1
+require_grep "ATheory inspected" "$plan_stop_log"
+if grep -q "BTheory built\|goalfrag/checkpoint run failed\|hol run failed" "$plan_stop_log"; then
+  echo "--goalfrag-plan continued building after printing the selected plan" >&2
+  exit 1
+fi
+if [ -e "$plan_stop_project/.holbuild/obj/src/BTheory.dat" ]; then
+  echo "--goalfrag-plan produced downstream artifacts after inspection" >&2
+  exit 1
+fi
 trace_log=$tmpdir/goalfrag-trace.log
 (cd "$trace_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --force --goalfrag-trace b_thm ATheory) > "$trace_log" 2>&1
 require_grep "holbuild goalfrag plan theorem=b_thm steps=" "$trace_log"
@@ -293,6 +322,15 @@ require_grep "resuming ATheory from checkpoint b_thm failed_prefix" "$failure_ag
 require_grep "holbuild top goal at failed fragment" "$failure_again_log"
 require_file "$a_thm_context"
 require_file "$b_thm_failed_prefix"
+failed_prefix_plan_log=$tmpdir/failed-prefix-plan.log
+(cd "$failure_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --goalfrag-plan b_thm ATheory) > "$failed_prefix_plan_log" 2>&1
+require_grep "resuming ATheory from checkpoint b_thm failed_prefix" "$failed_prefix_plan_log"
+require_grep "holbuild goalfrag plan theorem=b_thm steps=" "$failed_prefix_plan_log"
+require_grep "ATheory inspected" "$failed_prefix_plan_log"
+if grep -q "holbuild top goal at failed fragment\|goalfrag/checkpoint run failed" "$failed_prefix_plan_log"; then
+  echo "--goalfrag-plan replayed a failing proof instead of stopping after the plan" >&2
+  exit 1
+fi
 python3 - <<PY
 from pathlib import Path
 path = Path("$failure_project/src/AScript.sml")
@@ -325,10 +363,12 @@ QED
 val _ = export_theory();
 SML
 branch_failure_log=$tmpdir/branch-failure.log
-if (cd "$branch_failure_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$branch_failure_log" 2>&1; then
+if (cd "$branch_failure_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --goalfrag-trace branch_failure ATheory) > "$branch_failure_log" 2>&1; then
   echo "expected branch proof to fail build" >&2
   exit 1
 fi
+require_grep "holbuild goalfrag trace:" "$branch_failure_log"
+require_grep "holbuild goalfrag after theorem=branch_failure.*status=failed.*elapsed_ms=" "$branch_failure_log"
 require_grep "fragment: FAIL_TAC" "$branch_failure_log"
 require_grep "branch side failed" "$branch_failure_log"
 if grep -q "fragment: CONJ_TAC >- FAIL_TAC" "$branch_failure_log"; then

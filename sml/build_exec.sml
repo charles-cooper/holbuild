@@ -5,6 +5,7 @@ structure Path = OS.Path
 structure FS = OS.FileSys
 
 exception Error of string
+exception GoalfragPlanPrinted
 
 fun has_suffix suffix s =
   let
@@ -853,6 +854,16 @@ fun summarize_failed_fragment_source source_path source_text checkpoints path =
   end
   handle _ => NONE
 
+fun summarize_goalfrag_trace path =
+  let
+    val lines = String.fields (fn c => c = #"\n") (read_text path)
+    val trace_lines = List.filter (String.isPrefix "holbuild goalfrag ") lines
+  in
+    if null trace_lines then NONE
+    else SOME ("holbuild goalfrag trace:\n" ^ String.concat (map (fn line => line ^ "\n") trace_lines))
+  end
+  handle _ => NONE
+
 fun summarize_log path =
   Option.map (truncate_text 240) (last_nonempty_line (read_text path))
   handle _ => NONE
@@ -1485,6 +1496,9 @@ fun tactic_timeout (CheckpointPolicy {tactic_timeout, ...}) = tactic_timeout
 fun goalfrag_plan (CheckpointPolicy {goalfrag_plan, ...}) = goalfrag_plan
 fun goalfrag_trace (CheckpointPolicy {goalfrag_trace, ...}) = goalfrag_trace
 
+fun goalfrag_plan_only (CheckpointPolicy {goalfrag_plan = SOME _, goalfrag_trace = NONE, ...}) = true
+  | goalfrag_plan_only _ = false
+
 fun timeout_text NONE = "none"
   | timeout_text (SOME seconds) = Real.toString seconds
 
@@ -1505,7 +1519,7 @@ fun plain_source_from_checkpoint source_text start_offset =
   if start_offset <= 0 then source_text
   else "val _ = Tactical.restore_prover();\n" ^ String.extract(source_text, start_offset, NONE)
 
-fun instrumented_source policy timeout_marker source_text start_offset checkpoints =
+fun instrumented_source policy timeout_marker plan_only_marker source_text start_offset checkpoints =
   if goalfrag_enabled policy then
     HolbuildTheoryCheckpoints.instrument
       {source = source_text, start_offset = start_offset, checkpoints = checkpoints,
@@ -1513,7 +1527,8 @@ fun instrumented_source policy timeout_marker source_text start_offset checkpoin
        tactic_timeout = tactic_timeout policy,
        timeout_marker = timeout_marker,
        plan_theorem = goalfrag_plan policy,
-       trace_theorem = goalfrag_trace policy}
+       trace_theorem = goalfrag_trace policy,
+       plan_only_marker = plan_only_marker}
   else plain_source_from_checkpoint source_text start_offset
 
 fun replay_candidate project node checkpoints =
@@ -1524,7 +1539,7 @@ fun checkpoint_resume_message node label =
   HolbuildStatus.message_stdout
     (String.concat ["resuming ", logical_name node, " from checkpoint ", label, "\n"])
 
-fun failed_prefix_resume_source policy timeout_marker source checkpoint step_count prefix_text =
+fun failed_prefix_resume_source policy timeout_marker plan_only_marker source checkpoint step_count prefix_text =
   let
     val prelude =
       HolbuildTheoryCheckpoints.runtime_prelude
@@ -1532,7 +1547,8 @@ fun failed_prefix_resume_source policy timeout_marker source checkpoint step_cou
          tactic_timeout = tactic_timeout policy,
          timeout_marker = SOME timeout_marker,
          plan_theorem = goalfrag_plan policy,
-         trace_theorem = goalfrag_trace policy}
+         trace_theorem = goalfrag_trace policy,
+         plan_only_marker = plan_only_marker}
         [checkpoint]
     val theorem_binding = #safe_name checkpoint
     val save_line =
@@ -1548,10 +1564,10 @@ fun failed_prefix_resume_source policy timeout_marker source checkpoint step_cou
     prelude ^ save_line ^ String.extract(source, #boundary checkpoint, NONE)
   end
 
-fun write_theory_script policy project base_context plan keys input_key toolchain_key node source_text checkpoints staged_script preload timeout_marker =
+fun write_theory_script policy project base_context plan keys input_key toolchain_key node source_text checkpoints staged_script preload timeout_marker plan_only_marker =
   if not (checkpoint_enabled policy) then
     (write_plain_preload plan node preload;
-     write_text staged_script (instrumented_source policy (SOME timeout_marker) source_text 0 checkpoints);
+     write_text staged_script (instrumented_source policy (SOME timeout_marker) plan_only_marker source_text 0 checkpoints);
      {context = base_context, files = [preload, staged_script], failure_checkpoints = []})
   else
     let
@@ -1559,19 +1575,19 @@ fun write_theory_script policy project base_context plan keys input_key toolchai
       val deps_loaded = deps_loaded_path project node deps_key
       val deps_ok = deps_checkpoint_ok_text deps_key
       fun run_from_deps_checkpoint () =
-        (write_text staged_script (instrumented_source policy (SOME timeout_marker) source_text 0 checkpoints);
+        (write_text staged_script (instrumented_source policy (SOME timeout_marker) plan_only_marker source_text 0 checkpoints);
          checkpoint_resume_message node "deps_loaded";
          {context = HolState deps_loaded, files = [staged_script], failure_checkpoints = [deps_loaded]})
       fun run_from_fresh_preload () =
         (write_preload plan node deps_loaded deps_ok preload;
-         write_text staged_script (instrumented_source policy (SOME timeout_marker) source_text 0 checkpoints);
+         write_text staged_script (instrumented_source policy (SOME timeout_marker) plan_only_marker source_text 0 checkpoints);
          {context = base_context, files = [preload, staged_script], failure_checkpoints = []})
     in
       case if goalfrag_enabled policy then first_failed_prefix_checkpoint checkpoints else NONE of
           SOME {checkpoint, step_count, prefix_text} =>
             let
               val path = #failed_prefix_path checkpoint
-              val _ = write_text staged_script (failed_prefix_resume_source policy timeout_marker source_text checkpoint step_count prefix_text)
+              val _ = write_text staged_script (failed_prefix_resume_source policy timeout_marker plan_only_marker source_text checkpoint step_count prefix_text)
               val _ = checkpoint_resume_message node (#safe_name checkpoint ^ " failed_prefix")
             in
               {context = HolState path, files = [staged_script], failure_checkpoints = [path, deps_loaded]}
@@ -1580,7 +1596,7 @@ fun write_theory_script policy project base_context plan keys input_key toolchai
             case replay_candidate project node checkpoints of
                 SOME {boundary, path, safe_name} =>
                   let
-                    val _ = write_text staged_script (instrumented_source policy (SOME timeout_marker) source_text boundary checkpoints)
+                    val _ = write_text staged_script (instrumented_source policy (SOME timeout_marker) plan_only_marker source_text boundary checkpoints)
                     val _ = checkpoint_resume_message node safe_name
                   in
                     {context = HolState path, files = [staged_script], failure_checkpoints = [path, deps_loaded]}
@@ -1599,6 +1615,7 @@ fun build_theory cache_allowed policy tc project base_context plan keys toolchai
     val final_loader = Path.concat(stage, "holbuild-save-final-context.sml")
     val mldeps_report = Path.concat(stage, "holbuild-theory-mldeps.txt")
     val timeout_marker = Path.concat(stage, "holbuild-tactic-timeout.txt")
+    val plan_only_marker = Path.concat(stage, "holbuild-goalfrag-plan.txt")
     val deps_key = dependency_context_key toolchain_key plan keys node
     val deps_loaded = deps_loaded_path project node deps_key
     val deps_ok = deps_checkpoint_ok_text deps_key
@@ -1628,8 +1645,10 @@ fun build_theory cache_allowed policy tc project base_context plan keys toolchai
           {sig_path = staged_sig, sml_path = staged_sml,
            path = final_loader, mldeps_report = SOME mldeps_report}
     val _ = remove_file timeout_marker
+    val _ = remove_file plan_only_marker
     val run_spec = write_theory_script policy project base_context plan keys input_key toolchain_key node
                                     source_text theorem_checkpoints staged_script preload timeout_marker
+                                    (if goalfrag_plan_only policy then SOME plan_only_marker else NONE)
     fun tactic_timeout_error () =
       let
         val words = String.tokens Char.isSpace (read_text timeout_marker)
@@ -1648,6 +1667,7 @@ fun build_theory cache_allowed policy tc project base_context plan keys toolchai
       let
         val failure_log = preserve_checkpoint_failure_log project node input_key stage
         val goal_state = Option.mapPartial summarize_goal_state failure_log
+        val trace_context = if Option.isSome (goalfrag_trace policy) then Option.mapPartial summarize_goalfrag_trace failure_log else NONE
         val reason = if Option.isSome goal_state then NONE else Option.mapPartial summarize_log failure_log
         val source_context = Option.mapPartial (summarize_failed_fragment_source (source_file node) source_text theorem_checkpoints) failure_log
         val _ = if Option.isSome goal_state then () else discard_failure_checkpoints ()
@@ -1656,12 +1676,14 @@ fun build_theory cache_allowed policy tc project base_context plan keys toolchai
             [logical_name node,
              " goalfrag/checkpoint run failed\n",
              case failure_log of NONE => "" | SOME path => "instrumented log: " ^ path ^ "\n",
+             case trace_context of NONE => "" | SOME text => text,
              case source_context of NONE => "" | SOME text => text,
              case goal_state of NONE => "" | SOME text => text,
              case reason of NONE => "" | SOME line => "last log line: " ^ line ^ "\n"]
       in
         Error detail
       end
+    val build_log = Path.concat(stage, "holbuild-build.log")
     val _ =
       run_hol_files_to_log tc stage (#context run_spec)
         (#files run_spec @ [final_loader])
@@ -1672,8 +1694,11 @@ fun build_theory cache_allowed policy tc project base_context plan keys toolchai
         else if null theorem_checkpoints then raise Error msg
         else raise checkpoint_failure_error msg
     val _ =
-      if Option.isSome (goalfrag_plan policy) orelse Option.isSome (goalfrag_trace policy) then
-        HolbuildStatus.message_stdout (read_text (Path.concat(stage, "holbuild-build.log")) handle _ => "")
+      if goalfrag_plan_only policy andalso file_exists plan_only_marker then
+        (HolbuildStatus.message_stdout (read_text build_log handle _ => "");
+         raise GoalfragPlanPrinted)
+      else if Option.isSome (goalfrag_plan policy) orelse Option.isSome (goalfrag_trace policy) then
+        HolbuildStatus.message_stdout (read_text build_log handle _ => "")
       else ()
     val _ = copy_binary staged_dat data_path
     val _ = copy_binary staged_dat (hfs_remapped_path data_path)
@@ -1883,10 +1908,11 @@ fun build_theory_node (options : build_options) tc project base_context plan key
         val theorem_checkpoints =
           theory_checkpoints_for_node policy project plan keys toolchain_key node source_text
       in
-        build_theory cache_allowed policy tc project base_context plan keys toolchain_key node source_text theorem_checkpoints;
-        write_metadata policy project plan keys input_key toolchain_key node metadata_checkpoints;
-        remove_checkpoint_family project node;
-        HolbuildStatus.Built
+        (build_theory cache_allowed policy tc project base_context plan keys toolchain_key node source_text theorem_checkpoints;
+         write_metadata policy project plan keys input_key toolchain_key node metadata_checkpoints;
+         remove_checkpoint_family project node;
+         HolbuildStatus.Built)
+        handle GoalfragPlanPrinted => HolbuildStatus.Inspected
       end
   end
 
@@ -1950,7 +1976,8 @@ fun build_one status options tc project base_context plan keys toolchain_key nod
     val _ = HolbuildStatus.start_node status key label
     val outcome = build_node options tc project base_context plan keys toolchain_key node
   in
-    HolbuildStatus.finish_node status key label outcome
+    HolbuildStatus.finish_node status key label outcome;
+    outcome
   end
 
 fun build_serial status options tc project base_context plan keys toolchain_key =
@@ -1968,8 +1995,13 @@ fun build_serial status options tc project base_context plan keys toolchain_key 
                                 (HolbuildBuildPlan.logical_name node) msg;
           raise e
         end
+    fun loop [] = ()
+      | loop (node :: rest) =
+          case one node of
+              HolbuildStatus.Inspected => ()
+            | _ => loop rest
   in
-    List.app one plan
+    loop plan
   end
 
 fun node_done done node = List.exists (fn k => k = HolbuildBuildPlan.key node) done
@@ -2012,6 +2044,7 @@ fun build_parallel status options tc project base_context plan keys toolchain_ke
     val running = ref 0
     val completed = ref 0
     val active = ref jobs
+    val stopped = ref false
     val failure = ref (NONE : string option)
 
     fun node_id node = HolbuildBuildPlan.indexed_key_id key_index (HolbuildBuildPlan.key node)
@@ -2049,11 +2082,13 @@ fun build_parallel status options tc project base_context plan keys toolchain_ke
       case !failure of
           SOME _ => NONE
         | NONE =>
-            case pop_ready () of
-                SOME id => (running := !running + 1; SOME id)
-              | NONE =>
-                  if !completed = node_count andalso !running = 0 then NONE
-                  else (Thread.ConditionVar.wait (cv, mutex); next_work_locked ())
+            if !stopped then NONE
+            else
+              case pop_ready () of
+                  SOME id => (running := !running + 1; SOME id)
+                | NONE =>
+                    if !completed = node_count andalso !running = 0 then NONE
+                    else (Thread.ConditionVar.wait (cv, mutex); next_work_locked ())
 
     fun with_lock f =
       (lock (); f () before unlock ())
@@ -2068,13 +2103,36 @@ fun build_parallel status options tc project base_context plan keys toolchain_ke
         if remaining = 0 then add_ready child_id else ()
       end
 
+    fun stop_requested () = with_lock (fn () => !stopped)
+
     fun finish_success id =
       with_lock
         (fn () =>
             (running := !running - 1;
              completed := !completed + 1;
-             List.app release_dependent (Array.sub (dependents, id));
+             if !stopped then () else List.app release_dependent (Array.sub (dependents, id));
              signal ()))
+
+    fun finish_inspected () =
+      let
+        val first_stop =
+          with_lock
+            (fn () =>
+                let
+                  val _ = running := !running - 1
+                  val _ = completed := !completed + 1
+                  val first = not (!stopped)
+                  val _ = stopped := true
+                in
+                  signal ();
+                  first
+                end)
+      in
+        if first_stop then HolbuildToolchain.cleanup_active_children () else ()
+      end
+
+    fun finish_cancelled_after_stop () =
+      with_lock (fn () => (running := !running - 1; signal ()))
 
     fun finish_failure msg =
       let
@@ -2084,9 +2142,11 @@ fun build_parallel status options tc project base_context plan keys toolchain_ke
                 let
                   val _ = running := !running - 1
                   val first =
-                    case !failure of
-                        SOME _ => false
-                      | NONE => (failure := SOME msg; true)
+                    if !stopped then false
+                    else
+                      case !failure of
+                          SOME _ => false
+                        | NONE => (failure := SOME msg; true)
                 in
                   signal ();
                   first
@@ -2106,18 +2166,22 @@ fun build_parallel status options tc project base_context plan keys toolchain_ke
             | SOME id =>
                 let val node = Vector.sub (nodes, id)
                 in
-                  ((build_one status options tc project base_context plan keys toolchain_key node;
-                    finish_success id;
+                  ((case build_one status options tc project base_context plan keys toolchain_key node of
+                        HolbuildStatus.Inspected => finish_inspected ()
+                      | _ => finish_success id;
                     loop ())
                    handle e =>
-                     let
-                       val msg = build_error_message e
-                     in
-                       HolbuildStatus.fail status (HolbuildBuildPlan.key node)
-                                             (HolbuildBuildPlan.logical_name node) msg;
-                       finish_failure msg;
-                       worker_exit ()
-                     end)
+                     if stop_requested () then
+                       (finish_cancelled_after_stop (); worker_exit ())
+                     else
+                       let
+                         val msg = build_error_message e
+                       in
+                         HolbuildStatus.fail status (HolbuildBuildPlan.key node)
+                                               (HolbuildBuildPlan.logical_name node) msg;
+                         finish_failure msg;
+                         worker_exit ()
+                       end)
                 end
       in
         loop ()

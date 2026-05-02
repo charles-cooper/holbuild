@@ -610,9 +610,10 @@ cases. The CLI default is 2.5 seconds per tactic step for the root package;
 `--tactic-timeout 0` disables it. Dependency package builds use no tactic timeout,
 so a consumer's proof-debug timeout does not make dependency builds fail.
 `--goalfrag-plan THEOREM` and `--goalfrag-trace THEOREM` are debugging/inspection paths:
-the former prints the generated GoalFrag step plan for one theorem, while the
-latter prints that plan plus before/after execution trace lines with
-per-fragment elapsed time and open-goal counts. They are not action-key inputs.
+the former prints the generated GoalFrag step plan for one theorem and stops the
+build without continuing downstream targets, while the latter prints that plan
+plus before/after execution trace lines with per-fragment elapsed time and
+open-goal counts. They are not action-key inputs.
 Use `--force` with these options when the artifact is already up to date and you
 need source execution for inspection; `--force` bypasses local up-to-date checks
 and global cache restore without disabling cache publication. Because timeouts,

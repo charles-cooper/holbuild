@@ -7,13 +7,15 @@ type config = {checkpoint_enabled : bool,
                tactic_timeout : real option,
                timeout_marker : string option,
                plan_theorem : string option,
-               trace_theorem : string option}
+               trace_theorem : string option,
+               plan_only_marker : string option}
 
 val checkpoint_enabled_ref = ref false
 val tactic_timeout_ref = ref (NONE : real option)
 val tactic_timeout_marker_ref = ref (NONE : string option)
 val plan_theorem_ref = ref (NONE : string option)
 val trace_theorem_ref = ref (NONE : string option)
+val plan_only_marker_ref = ref (NONE : string option)
 val plan_active_ref = ref false
 val trace_active_ref = ref false
 val trace_current_theorem_ref = ref ""
@@ -586,6 +588,13 @@ fun current_goal_count () = length (proofManagerLib.top_goals()) handle _ => ~1
 fun trace_line parts =
   if trace_enabled () then TextIO.output(TextIO.stdErr, String.concat parts) else ()
 
+fun display_label label =
+  String.translate
+    (fn #"\n" => "\\n"
+      | #"\t" => "\\t"
+      | c => String.str c)
+    label
+
 fun trace_goalfrag_plan theorem_name plan =
   if plan_enabled () then
     (TextIO.output(TextIO.stdErr,
@@ -597,8 +606,16 @@ fun trace_goalfrag_plan theorem_name plan =
             String.concat ["holbuild goalfrag plan step=", Int.toString index,
                            " kind=", step_kind step',
                            " end=", Int.toString (step_end step'),
-                           " label=", step_label step', "\n"]))
+                           " label=", display_label (step_label step'), "\n"]))
        (ListPair.zip (List.tabulate(length plan, fn i => i), plan)))
+  else ()
+
+fun stop_after_plan_if_requested () =
+  if !plan_active_ref andalso not (!trace_active_ref) then
+    case !plan_only_marker_ref of
+        NONE => ()
+      | SOME path => (write_text_file path "holbuild-goalfrag-plan-ok\n";
+                      OS.Process.exit OS.Process.success)
   else ()
 
 fun trace_goalfrag_before index step' =
@@ -606,7 +623,7 @@ fun trace_goalfrag_before index step' =
               " step=", Int.toString index,
               " kind=", step_kind step',
               " goals=", Int.toString (current_goal_count()),
-              " label=", step_label step', "\n"]
+              " label=", display_label (step_label step'), "\n"]
 
 fun trace_goalfrag_after status elapsed index step' =
   trace_line ["holbuild goalfrag after theorem=", !trace_current_theorem_ref,
@@ -615,24 +632,26 @@ fun trace_goalfrag_after status elapsed index step' =
               " status=", status,
               " elapsed_ms=", fmt_ms elapsed,
               " goals=", Int.toString (current_goal_count()),
-              " label=", step_label step', "\n"]
+              " label=", display_label (step_label step'), "\n"]
 
-fun run_traced_step index step' =
-  let
-    val _ = trace_goalfrag_before index step'
-    val t0 = Time.now()
-    val result = (step step'; NONE) handle e => SOME e
-    val elapsed = seconds (t0, Time.now())
-  in
-    case result of
-        NONE => trace_goalfrag_after "ok" elapsed index step'
-      | SOME e => (trace_goalfrag_after "failed" elapsed index step'; raise e)
-  end
+fun run_maybe_traced_step index step' =
+  if trace_enabled () then
+    let
+      val _ = trace_goalfrag_before index step'
+      val t0 = Time.now()
+      val result = (step step'; NONE) handle e => SOME e
+      val elapsed = seconds (t0, Time.now())
+    in
+      case result of
+          NONE => trace_goalfrag_after "ok" elapsed index step'
+        | SOME e => (trace_goalfrag_after "failed" elapsed index step'; raise e)
+    end
+  else step step'
 
 fun run_steps_from _ [] = ()
   | run_steps_from index (step' :: rest) =
       (successful_step_count_ref := index;
-       run_traced_step index step';
+       run_maybe_traced_step index step';
        successful_step_count_ref := index + 1;
        successful_prefix_end_ref := step_end step';
        run_steps_from (index + 1) rest)
@@ -679,6 +698,7 @@ fun goalfrag_prove name end_path end_ok checkpoint_depth g tac tactic_text =
     val _ = proofManagerLib.set_goalfrag g
     val plan = steps tactic_text
     val _ = trace_goalfrag_plan name plan
+    val _ = stop_after_plan_if_requested ()
     val _ = run_steps plan
     val th = proofManagerLib.top_thm()
              handle e => (print_goal_state (name ^ " finish"); raise e)
@@ -709,20 +729,23 @@ fun step_count_at_prefix common_bytes plan =
   end
 
 fun finish_failed_prefix name old_prefix_text old_step_count tactic_text =
-  let
-    val _ = active_tactic_text_ref := tactic_text
-    val plan = steps tactic_text
-    val common_bytes = common_prefix_size old_prefix_text tactic_text
-    val skip_count = step_count_at_prefix common_bytes plan
-    val backup_count = Int.max(0, old_step_count - skip_count)
-    val _ = backup_n backup_count
-    val _ = successful_step_count_ref := skip_count
-    val _ = successful_prefix_end_ref := common_bytes
-    val _ = run_steps_from skip_count (drop_steps skip_count plan)
-    val th = proofManagerLib.top_thm()
-             handle e => (print_goal_state (name ^ " finish"); raise e)
-    val _ = proofManagerLib.drop_all()
-  in th end
+  with_theorem_trace name (fn () =>
+    let
+      val _ = active_tactic_text_ref := tactic_text
+      val plan = steps tactic_text
+      val _ = trace_goalfrag_plan name plan
+      val _ = stop_after_plan_if_requested ()
+      val common_bytes = common_prefix_size old_prefix_text tactic_text
+      val skip_count = step_count_at_prefix common_bytes plan
+      val backup_count = Int.max(0, old_step_count - skip_count)
+      val _ = backup_n backup_count
+      val _ = successful_step_count_ref := skip_count
+      val _ = successful_prefix_end_ref := common_bytes
+      val _ = run_steps_from skip_count (drop_steps skip_count plan)
+      val th = proofManagerLib.top_thm()
+               handle e => (print_goal_state (name ^ " finish"); raise e)
+      val _ = proofManagerLib.drop_all()
+    in th end)
 
 fun prove_outer_theorem (g, tac) (name, tactic_text, _, _, end_path, end_ok, _, _, has_attrs, checkpoint_depth) =
   let
@@ -754,12 +777,13 @@ fun goalfrag_prover (g, tac) =
              drop_all();
              raise e)
 
-fun install ({checkpoint_enabled, tactic_timeout, timeout_marker, plan_theorem, trace_theorem} : config) =
+fun install ({checkpoint_enabled, tactic_timeout, timeout_marker, plan_theorem, trace_theorem, plan_only_marker} : config) =
   (checkpoint_enabled_ref := checkpoint_enabled;
    tactic_timeout_ref := tactic_timeout;
    tactic_timeout_marker_ref := timeout_marker;
    plan_theorem_ref := plan_theorem;
    trace_theorem_ref := trace_theorem;
+   plan_only_marker_ref := plan_only_marker;
    plan_active_ref := false;
    trace_active_ref := false;
    theorem_info_ref := NONE;

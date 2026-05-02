@@ -1,7 +1,7 @@
 structure HolbuildStatus =
 struct
 
-datatype outcome = Built | UpToDate | Restored
+datatype outcome = Built | UpToDate | Restored | Inspected
 
 type active_node = {key : string, label : string}
 
@@ -141,12 +141,14 @@ fun terminal_width () =
 fun outcome_text Built = "built"
   | outcome_text UpToDate = "is up to date"
   | outcome_text Restored = "restored from cache"
+  | outcome_text Inspected = "inspected"
 
 fun count_outcome ({built, up_to_date, restored, ...} : t) outcome =
   case outcome of
       Built => built := !built + 1
     | UpToDate => up_to_date := !up_to_date + 1
     | Restored => restored := !restored + 1
+    | Inspected => ()
 
 fun elapsed ({started_at, ...} : t) = Time.-(Time.now (), started_at)
 
