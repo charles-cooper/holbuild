@@ -74,6 +74,7 @@ use "sml/toolchain.sml";
 use "sml/status.sml";
 use "sml/theory_checkpoints.sml";
 use "sml/checkpoint_store.sml";
+use "sml/theory_diagnostics.sml";
 use "sml/cache.sml";
 use "sml/build_exec.sml";
 use "sml/goalfrag_plan.sml";
