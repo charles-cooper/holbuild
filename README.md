@@ -30,9 +30,9 @@ This prototype is intentionally small:
 - records local action metadata and skips unchanged actions
 - publishes/restores simple theory semantic artifacts through the global cache
 - includes the configured toolchain/base context in prototype action keys
-- creates transient local theory checkpoints while building: dependencies-loaded, AST-derived theorem end-of-proof/context checkpoints, failed-prefix proof-navigation checkpoints for modern theorem declarations, and successor-ready final context; successful builds remove them after writing logical artifacts and metadata
+- creates transient local theory checkpoints while building: dependencies-loaded and final-context checkpoints when checkpointing is enabled, plus theorem end-of-proof/context and failed-prefix proof-navigation checkpoints when goalfrag theorem instrumentation is enabled; successful builds remove them after writing logical artifacts and metadata
 - runs modern theorem proofs through a shared SML goalfrag runtime helper, with tactic parsing/step planning, proof-manager execution, checkpoint saves, timeout handling, and diagnostics kept out of generated per-theory source
-- keeps goalfrag proof execution separate from checkpoint creation; `--skip-checkpoints` avoids theory `.save` files entirely, `--skip-goalfrag` opts out of theorem instrumentation, and `--tactic-timeout SECONDS` controls the root-project per-tactic goalfrag timeout (default 2.5s; `0` disables it)
+- keeps goalfrag proof execution separate from checkpoint creation; `--skip-checkpoints` avoids theory `.save` files entirely, `--skip-goalfrag` opts out of theorem instrumentation but can still use non-theorem dependency/final-context checkpoints, and `--tactic-timeout SECONDS` controls the root-project per-tactic goalfrag timeout (default 2.5s; `0` disables it)
 - exports explicit project heap targets from `[[heap]]` entries using local SaveState
 - exposes `holbuild gc` for project-local residue cleanup plus global-cache GC with a 7-day default retention policy
 - does not delegate build semantics to Holmake
@@ -96,6 +96,7 @@ bin/holbuild -j4 build MyTheory
 bin/holbuild --maxheap 4096 build MyTheory
 bin/holbuild build --skip-checkpoints MyTheory
 bin/holbuild build --tactic-timeout 5 MyTheory
+bin/holbuild build --goalfrag-trace my_theorem --no-cache MyTheory
 bin/holbuild --json build MyTheory
 ```
 
@@ -131,10 +132,13 @@ a build but are removed after successful artifact/metadata writes.
 `--skip-goalfrag` opts out of modern theorem instrumentation.
 `--tactic-timeout SECONDS` sets the root-project per-tactic goalfrag timeout;
 the default is 2.5 seconds, and `0` disables the timeout. Dependency packages
-build with no tactic timeout. Combining `--skip-goalfrag` with
-`--tactic-timeout` is an error because the timeout is implemented by the
-goalfrag runtime. Goalfrag/checkpoint/timeout policy affects execution and
-diagnostics, not final theory artifact action keys. `--json` emits newline-delimited
+build with no tactic timeout. `--goalfrag-trace THEOREM` prints the generated
+goalfrag plan for one theorem plus before/after execution trace lines with goal
+counts and per-fragment elapsed milliseconds; use it with `--no-cache` when you
+need to force execution for proof-performance/debug inspection. Combining
+`--skip-goalfrag` with `--tactic-timeout` or `--goalfrag-trace` is an error
+because both are implemented by the goalfrag runtime. Goalfrag/checkpoint/timeout
+policy affects execution and diagnostics, not final theory artifact action keys. `--json` emits newline-delimited
 JSON status/message/error events for build output. `gc` removes stale project-local
 `.holbuild` stage/log/checkpoint residue and runs global cache GC using `$HOLBUILD_CACHE`,
 `$XDG_CACHE_HOME/holbuild`, or `$HOME/.cache/holbuild`; `gc --clean-only` skips the
@@ -264,14 +268,17 @@ Incremental correctness is action-key based. `holbuild` does not use
 `hol buildheap` as its default build primitive; it builds contexts directly by
 loading resolved ancestors and, unless `--skip-checkpoints` is set, saving
 transient PolyML checkpoints at syntactic boundaries: dependencies loaded,
-AST-derived theorem end-of-proof/context boundaries for modern
-`Theorem ... Proof ... QED` declarations, and successor-ready final context.
-Successful builds remove those checkpoint files after writing artifacts and
-metadata; failed/interrupted builds may leave them as debug breadcrumbs. If a
-modern theorem fails after some goalfrag steps, the retained failed-prefix
-checkpoint can be reused on the next rebuild by comparing raw proof-body bytes,
-backing up to the longest matching current fragment boundary, and replaying the
-edited suffix. Simple
+AST-derived theorem end-of-proof/context boundaries and failed-prefix
+proof-navigation state for modern `Theorem ... Proof ... QED` declarations when
+goalfrag instrumentation is enabled, and a final post-export context. Successful
+builds remove those checkpoint files after writing artifacts and metadata;
+failed/interrupted builds may leave them as debug breadcrumbs. `--skip-goalfrag`
+removes the theorem proof-navigation checkpoints and tactic timeout path, not the
+non-theorem dependency/final-context checkpoint machinery. If a modern theorem
+fails after some goalfrag steps, the retained failed-prefix checkpoint can be
+reused on the next rebuild by comparing raw proof-body bytes, backing up to the
+longest matching current fragment boundary, and replaying the edited suffix.
+Simple
 theorem-producing forms such as `Theorem name = thm` still build normally but are
 not theorem checkpoint boundaries in v1. Explicit `holbuild heap NAME` targets
 build their declared logical objects, load the generated theory modules, and save

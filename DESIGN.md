@@ -589,22 +589,32 @@ nearest valid theorem-context checkpoint and replay only the suffix to
 successor-ready contexts, and are not used for dependency replay.
 
 Goal-fragment execution is separable from PolyML checkpoint creation and
-retention. By default, holbuild creates checkpoints during source execution for
-crash/debug breadcrumbs, then removes them after a successful theory build.
-`--skip-checkpoints` runs modern theorem proofs through the goalfrag/proof-manager
-path without saving `.save` files at all. Power users can opt out of goalfrag
-instrumentation with `--skip-goalfrag`, which also means no theorem-boundary
-checkpoints or tactic timeout enforcement for that build.
+retention. By default, holbuild may create several local checkpoint classes while
+executing a theory action, then removes them after successful artifact/metadata
+writes: `deps_loaded` after loading resolved dependencies, theorem proof states
+for modern AST `Theorem ... Proof ... QED` declarations, failed-prefix
+proof-navigation state after goalfrag failures, and a final post-export context.
+`--skip-checkpoints` disables all `.save`/`.ok` creation while still running
+modern theorem proofs through the goalfrag/proof-manager path. `--skip-goalfrag`
+opts out only of theorem goalfrag instrumentation: with checkpoints still enabled,
+the build can still save and consult `deps_loaded` and save the final context, but
+there are no theorem-context/end-of-proof/failed-prefix proof-navigation
+checkpoints and no tactic timeout enforcement for that build. The final context is
+currently a transient debug/successor breadcrumb, not a downstream canonical load
+context.
 
 When goalfrag is enabled, holbuild applies a tactic timeout to each goalfrag
 step, and to the conservative whole-tactic path used for attributed/opaque proof
 cases. The CLI default is 2.5 seconds per tactic step for the root package;
 `--tactic-timeout SECONDS` changes that root-package timeout, and
 `--tactic-timeout 0` disables it. Dependency package builds use no tactic timeout,
-so a consumer's proof-debug timeout does not make dependency builds fail. Because
-timeouts only exist in the goalfrag runtime,
-`--skip-goalfrag --tactic-timeout ...` is rejected instead of silently ignoring
-the timeout. Goalfrag, checkpoint creation, and tactic timeout are execution/debug policy,
+so a consumer's proof-debug timeout does not make dependency builds fail.
+`--goalfrag-trace THEOREM` is a debugging/inspection path: it prints the generated
+GoalFrag step plan for one theorem and before/after execution trace lines with
+per-fragment elapsed time and open-goal counts; it is not an action-key input.
+Because timeouts and tracing only exist in the goalfrag runtime,
+`--skip-goalfrag --tactic-timeout ...` and `--skip-goalfrag --goalfrag-trace ...`
+are rejected instead of silently ignoring the request. Goalfrag, checkpoint creation, tactic timeout, and tracing are execution/debug policy,
 not final artifact semantics. They must not be included in the final theory
 action key or local metadata comparison for `.uo/.ui/.dat`: switching
 `--skip-goalfrag`, `--skip-checkpoints`, or root tactic timeout should not rebuild

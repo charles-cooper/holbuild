@@ -136,12 +136,13 @@ fun runtime_helper_path () =
       SOME path => path
     | NONE => OS.Path.concat(HolbuildRuntimePaths.source_root, "sml/goalfrag_runtime.sml")
 
-fun runtime_install_lines {checkpoint_enabled, tactic_timeout, timeout_marker} =
+fun runtime_install_lines {checkpoint_enabled, tactic_timeout, timeout_marker, trace_theorem} =
   ["use " ^ HolbuildToolchain.sml_string (runtime_helper_path ()) ^ ";",
    "val _ = HolbuildGoalfragRuntime.install {checkpoint_enabled = " ^
      (if checkpoint_enabled then "true" else "false") ^
      ", tactic_timeout = " ^ option_real_sml tactic_timeout ^
-     ", timeout_marker = " ^ option_string_sml timeout_marker ^ "};",
+     ", timeout_marker = " ^ option_string_sml timeout_marker ^
+     ", trace_theorem = " ^ option_string_sml trace_theorem ^ "};",
    "val holbuild_begin_theorem = HolbuildGoalfragRuntime.begin_theorem;",
    "val holbuild_save_theorem_context = HolbuildGoalfragRuntime.save_theorem_context;"]
 
@@ -149,10 +150,10 @@ fun runtime_install_lines {checkpoint_enabled, tactic_timeout, timeout_marker} =
 fun runtime_prelude _ [] = ""
   | runtime_prelude config _ = runtime_lines (runtime_load_lines @ runtime_install_lines config)
 
-fun instrument ({source, start_offset, checkpoints, save_checkpoints, tactic_timeout, timeout_marker} :
+fun instrument ({source, start_offset, checkpoints, save_checkpoints, tactic_timeout, timeout_marker, trace_theorem} :
                 {source : string, start_offset : int, checkpoints : checkpoint list,
                  save_checkpoints : bool, tactic_timeout : real option,
-                 timeout_marker : string option}) =
+                 timeout_marker : string option, trace_theorem : string option}) =
   let
     val n = size source
     fun source_slice i j = String.substring(source, i, j - i)
@@ -174,7 +175,8 @@ fun instrument ({source, start_offset, checkpoints, save_checkpoints, tactic_tim
   in
     runtime_prelude {checkpoint_enabled = save_checkpoints,
                      tactic_timeout = tactic_timeout,
-                     timeout_marker = timeout_marker}
+                     timeout_marker = timeout_marker,
+                     trace_theorem = trace_theorem}
                     active_checkpoints ^
     loop start_offset checkpoints []
   end

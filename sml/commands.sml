@@ -14,7 +14,7 @@ fun usage () = print
   "holbuild: experimental project-aware build frontend for HOL4\n\n\
   \Usage:\n\
   \  holbuild [--json] [--holdir PATH] [--maxheap MB] [-jN] context\n\
-  \  holbuild [--json] [--holdir PATH] [--maxheap MB] [-jN] build [--dry-run] [--no-cache] [--skip-checkpoints] [--skip-goalfrag] [--tactic-timeout SECONDS] [TARGET ...]\n\
+  \  holbuild [--json] [--holdir PATH] [--maxheap MB] [-jN] build [--dry-run] [--no-cache] [--skip-checkpoints] [--skip-goalfrag] [--tactic-timeout SECONDS] [--goalfrag-trace THEOREM] [TARGET ...]\n\
   \  holbuild [--json] [--holdir PATH] [--maxheap MB] [-jN] heap NAME\n\
   \  holbuild [--json] [--holdir PATH] [--maxheap MB] run [ARG ...]\n\
   \  holbuild [--json] [--holdir PATH] [--maxheap MB] repl [ARG ...]\n\
@@ -38,33 +38,40 @@ fun tactic_timeout_value text =
 
 fun split_flags args =
   let
-    fun loop dry use_cache skip_checkpoints goalfrag tactic_timeout tactic_timeout_set rest =
+    fun loop dry use_cache skip_checkpoints goalfrag tactic_timeout tactic_timeout_set goalfrag_trace rest =
       case rest of
           [] => ({dry_run = dry, use_cache = use_cache,
                   skip_checkpoints = skip_checkpoints,
                   goalfrag = goalfrag, tactic_timeout = tactic_timeout,
-                  tactic_timeout_set = tactic_timeout_set}, [])
+                  tactic_timeout_set = tactic_timeout_set,
+                  goalfrag_trace = goalfrag_trace}, [])
         | "--dry-run" :: xs =>
-            loop true use_cache skip_checkpoints goalfrag tactic_timeout tactic_timeout_set xs
+            loop true use_cache skip_checkpoints goalfrag tactic_timeout tactic_timeout_set goalfrag_trace xs
         | "--no-cache" :: xs =>
-            loop dry false skip_checkpoints goalfrag tactic_timeout tactic_timeout_set xs
+            loop dry false skip_checkpoints goalfrag tactic_timeout tactic_timeout_set goalfrag_trace xs
         | "--skip-checkpoints" :: xs =>
-            loop dry use_cache true goalfrag tactic_timeout tactic_timeout_set xs
+            loop dry use_cache true goalfrag tactic_timeout tactic_timeout_set goalfrag_trace xs
         | "--skip-goalfrag" :: xs =>
-            loop dry use_cache skip_checkpoints false tactic_timeout tactic_timeout_set xs
+            loop dry use_cache skip_checkpoints false tactic_timeout tactic_timeout_set goalfrag_trace xs
+        | "--goalfrag-trace" :: theorem :: xs =>
+            loop dry use_cache skip_checkpoints goalfrag tactic_timeout tactic_timeout_set (SOME theorem) xs
+        | "--goalfrag-trace" :: [] => raise Error "--goalfrag-trace requires THEOREM"
         | "--tactic-timeout" :: seconds :: xs =>
-            loop dry use_cache skip_checkpoints goalfrag (tactic_timeout_value seconds) true xs
+            loop dry use_cache skip_checkpoints goalfrag (tactic_timeout_value seconds) true goalfrag_trace xs
         | "--tactic-timeout" :: [] => raise Error "--tactic-timeout requires SECONDS"
         | x :: xs =>
             if String.isPrefix "--tactic-timeout=" x then
               loop dry use_cache skip_checkpoints goalfrag
                    (tactic_timeout_value (String.extract (x, size "--tactic-timeout=", NONE)))
-                   true xs
+                   true goalfrag_trace xs
+            else if String.isPrefix "--goalfrag-trace=" x then
+              loop dry use_cache skip_checkpoints goalfrag tactic_timeout tactic_timeout_set
+                   (SOME (String.extract (x, size "--goalfrag-trace=", NONE))) xs
             else
-              let val (flags, ys) = loop dry use_cache skip_checkpoints goalfrag tactic_timeout tactic_timeout_set xs
+              let val (flags, ys) = loop dry use_cache skip_checkpoints goalfrag tactic_timeout tactic_timeout_set goalfrag_trace xs
               in (flags, x :: ys) end
   in
-    loop false true false true NONE false args
+    loop false true false true NONE false NONE args
   end
 
 fun has_suffix suffix s =
@@ -207,22 +214,24 @@ fun build tc cli_jobs args =
   let
     val project = timed_phase "project.discover" load_project
     val jobs = effective_jobs project cli_jobs
-    val ({dry_run, use_cache, skip_checkpoints, goalfrag, tactic_timeout, tactic_timeout_set}, targets) = split_flags args
+    val ({dry_run, use_cache, skip_checkpoints, goalfrag, tactic_timeout, tactic_timeout_set, goalfrag_trace}, targets) = split_flags args
     val _ =
       if HolbuildStatus.json_mode () andalso dry_run then
         raise Error "--json does not support build --dry-run yet"
       else if not goalfrag andalso tactic_timeout_set then
         raise Error "--tactic-timeout requires goalfrag; remove --skip-goalfrag"
+      else if not goalfrag andalso Option.isSome goalfrag_trace then
+        raise Error "--goalfrag-trace requires goalfrag; remove --skip-goalfrag"
       else ()
     val build_options = {use_cache = use_cache,
                          skip_checkpoints = skip_checkpoints,
                          goalfrag = goalfrag,
                          tactic_timeout =
-                           case tactic_timeout of
-                               SOME _ => tactic_timeout
-                             | NONE => (case #build_tactic_timeout project of
-                                          NONE => SOME 2.5
-                                        | some => some)}
+                           if tactic_timeout_set then tactic_timeout
+                           else (case #build_tactic_timeout project of
+                                   NONE => SOME 2.5
+                                 | some => some),
+                         goalfrag_trace = goalfrag_trace}
     fun prepare_plan () =
       let
         val index = timed_phase "source.discover" (fn () => HolbuildSourceIndex.discover project)
@@ -276,7 +285,7 @@ fun build_heap tc cli_jobs target =
         val toolchain_key = timed_phase "toolchain.key" (fn () => HolbuildToolchain.toolchain_key tc)
         val output_path = HolbuildProject.abs_under (#root project) output
       in
-        HolbuildBuildExec.build {use_cache = true, skip_checkpoints = false, goalfrag = true, tactic_timeout = SOME 2.5}
+        HolbuildBuildExec.build {use_cache = true, skip_checkpoints = false, goalfrag = true, tactic_timeout = SOME 2.5, goalfrag_trace = NONE}
                                tc project plan toolchain_key jobs;
         HolbuildBuildExec.export_heap tc project plan output_path
       end

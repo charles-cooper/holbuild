@@ -165,6 +165,21 @@ same_artifact_skip_goalfrag_log=$tmpdir/same-artifact-skip-goalfrag.log
 (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --skip-goalfrag ATheory) > "$same_artifact_skip_goalfrag_log"
 require_grep "ATheory is up to date" "$same_artifact_skip_goalfrag_log"
 
+trace_project=$tmpdir/trace-project
+mkdir -p "$trace_project/src"
+cp "$project/holproject.toml" "$trace_project/holproject.toml"
+cp "$project/src/AScript.sml" "$trace_project/src/AScript.sml"
+trace_log=$tmpdir/goalfrag-trace.log
+(cd "$trace_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --no-cache --goalfrag-trace b_thm ATheory) > "$trace_log" 2>&1
+require_grep "holbuild goalfrag plan theorem=b_thm steps=" "$trace_log"
+require_grep "holbuild goalfrag plan step=.*kind=open.*label=open_then1" "$trace_log"
+require_grep "holbuild goalfrag before theorem=b_thm step=0" "$trace_log"
+require_grep "holbuild goalfrag after theorem=b_thm step=0.*elapsed_ms=" "$trace_log"
+if grep -q "holbuild goalfrag plan theorem=a_thm" "$trace_log"; then
+  echo "--goalfrag-trace traced an unrequested theorem" >&2
+  exit 1
+fi
+
 skip_goalfrag_project=$tmpdir/skip-goalfrag-project
 mkdir -p "$skip_goalfrag_project/src"
 cp "$project/holproject.toml" "$skip_goalfrag_project/holproject.toml"
@@ -181,6 +196,40 @@ if find "$skip_goalfrag_project/.holbuild/checkpoints" \( -name '*.save' -o -nam
   echo "--skip-goalfrag successful build retained checkpoints" >&2
   exit 1
 fi
+
+plain_replay_project=$tmpdir/plain-replay-project
+mkdir -p "$plain_replay_project/src"
+cp "$project/holproject.toml" "$plain_replay_project/holproject.toml"
+cat > "$plain_replay_project/src/AScript.sml" <<'SML'
+open HolKernel Parse boolLib bossLib;
+val _ = new_theory "A";
+Theorem a_thm:
+  T
+Proof
+  ACCEPT_TAC TRUTH
+QED
+Theorem b_thm:
+  T
+Proof
+  FAIL_TAC "expected replay seed failure"
+QED
+val _ = export_theory();
+SML
+plain_replay_failure_log=$tmpdir/plain-replay-failure.log
+if (cd "$plain_replay_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$plain_replay_failure_log" 2>&1; then
+  echo "expected replay seed proof to fail" >&2
+  exit 1
+fi
+require_file "$(find "$plain_replay_project/.holbuild/checkpoints" -name '*a_thm_context.save' -print -quit)"
+python3 - <<PY
+from pathlib import Path
+path = Path("$plain_replay_project/src/AScript.sml")
+path.write_text(path.read_text().replace('FAIL_TAC "expected replay seed failure"', 'ACCEPT_TAC TRUTH'))
+PY
+plain_replay_log=$tmpdir/plain-replay.log
+(cd "$plain_replay_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --skip-goalfrag --no-cache ATheory) > "$plain_replay_log" 2>&1
+require_grep "resuming ATheory from checkpoint a_thm" "$plain_replay_log"
+require_grep "ATheory built" "$plain_replay_log"
 
 failure_project=$tmpdir/failure-project
 mkdir -p "$failure_project/src"

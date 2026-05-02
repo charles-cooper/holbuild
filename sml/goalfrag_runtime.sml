@@ -5,11 +5,15 @@ struct
 
 type config = {checkpoint_enabled : bool,
                tactic_timeout : real option,
-               timeout_marker : string option}
+               timeout_marker : string option,
+               trace_theorem : string option}
 
 val checkpoint_enabled_ref = ref false
 val tactic_timeout_ref = ref (NONE : real option)
 val tactic_timeout_marker_ref = ref (NONE : string option)
+val trace_theorem_ref = ref (NONE : string option)
+val trace_active_ref = ref false
+val trace_current_theorem_ref = ref ""
 val theorem_info_ref = ref NONE : (string * string * string * string * string * string * string * string * bool * int) option ref
 val context_info_ref = ref NONE : (string * string * int) option ref
 val proving_with_goalfrag_ref = ref false
@@ -33,6 +37,7 @@ fun bool_text true = "true"
 fun seconds (a, b) = Time.toReal (Time.-(b, a))
 
 fun fmt_time t = Real.fmt (StringCvt.FIX (SOME 3)) t
+fun fmt_ms t = Real.fmt (StringCvt.FIX (SOME 3)) (1000.0 * t)
 
 fun delete_file path = OS.FileSys.remove path handle _ => ()
 
@@ -271,11 +276,26 @@ fun group_atom_expr body (TacticParse.FAtom (TacticParse.Group (_, _, e))) =
       else if is_composable e then SOME e else NONE
   | group_atom_expr _ _ = NONE
 
+fun expr_contains_then1 e =
+  case e of
+      TacticParse.Then es => List.exists expr_contains_then1 es
+    | TacticParse.ThenLT (lhs, es) => expr_contains_then1 lhs orelse List.exists expr_contains_then1 es
+    | TacticParse.Group (_, _, e) => expr_contains_then1 e
+    | TacticParse.RepairGroup (_, _, e, _) => expr_contains_then1 e
+    | TacticParse.LNullOk e => expr_contains_then1 e
+    | TacticParse.LThen1 _ => true
+    | _ => false
+
+fun scope_per_goal_if_needed e frags =
+  if expr_contains_then1 e then
+    TacticParse.FFOpen TacticParse.FOpen :: frags @ [TacticParse.FFClose TacticParse.FClose]
+  else frags
+
 fun reexpand_group_atoms body frags =
   let
     fun reexpand e =
       let val subFrags = TacticParse.linearize (fn x => Option.isSome (TacticParse.topSpan x)) e
-      in reexpand_group_atoms body (flatten_frags subFrags) end
+      in scope_per_goal_if_needed e (reexpand_group_atoms body (flatten_frags subFrags)) end
     fun go [] acc = rev acc
       | go (f::rest) acc =
           (case group_atom_expr body f of
@@ -322,6 +342,22 @@ fun step_end (StepOpen {end_pos, ...}) = end_pos
   | step_end (StepExpandList {end_pos, ...}) = end_pos
   | step_end (StepSelect {end_pos, ...}) = end_pos
   | step_end (StepSelects {end_pos, ...}) = end_pos
+
+fun step_label (StepOpen {label, ...}) = label
+  | step_label (StepMid {label, ...}) = label
+  | step_label (StepClose {label, ...}) = label
+  | step_label (StepExpand {label, ...}) = label
+  | step_label (StepExpandList {label, ...}) = label
+  | step_label (StepSelect {label, ...}) = label
+  | step_label (StepSelects {label, ...}) = label
+
+fun step_kind (StepOpen _) = "open"
+  | step_kind (StepMid _) = "mid"
+  | step_kind (StepClose _) = "close"
+  | step_kind (StepExpand _) = "expand"
+  | step_kind (StepExpandList _) = "expand_list"
+  | step_kind (StepSelect _) = "select"
+  | step_kind (StepSelects _) = "selects"
 
 fun substring s (a, b) = String.substring(s, a, b - a)
 
@@ -531,10 +567,61 @@ fun step (StepOpen {label, ...}) = apply_ftac label (open_ftac label)
   | step (StepSelect {label, ...}) = raise Fail ("unmerged select fragment: " ^ label)
   | step (StepSelects {label, ...}) = raise Fail ("unmerged select fragments: " ^ label)
 
+fun trace_enabled () =
+  !trace_active_ref orelse Option.getOpt(env_bool "HOLBUILD_GOALFRAG_TRACE", false)
+
+fun current_goal_count () = length (proofManagerLib.top_goals()) handle _ => ~1
+
+fun trace_line parts =
+  if trace_enabled () then TextIO.output(TextIO.stdErr, String.concat parts) else ()
+
+fun trace_goalfrag_plan theorem_name plan =
+  if trace_enabled () then
+    (TextIO.output(TextIO.stdErr,
+       String.concat ["holbuild goalfrag plan theorem=", theorem_name,
+                      " steps=", Int.toString (length plan), "\n"]);
+     List.app
+       (fn (index, step') =>
+          TextIO.output(TextIO.stdErr,
+            String.concat ["holbuild goalfrag plan step=", Int.toString index,
+                           " kind=", step_kind step',
+                           " end=", Int.toString (step_end step'),
+                           " label=", step_label step', "\n"]))
+       (ListPair.zip (List.tabulate(length plan, fn i => i), plan)))
+  else ()
+
+fun trace_goalfrag_before index step' =
+  trace_line ["holbuild goalfrag before theorem=", !trace_current_theorem_ref,
+              " step=", Int.toString index,
+              " kind=", step_kind step',
+              " goals=", Int.toString (current_goal_count()),
+              " label=", step_label step', "\n"]
+
+fun trace_goalfrag_after status elapsed index step' =
+  trace_line ["holbuild goalfrag after theorem=", !trace_current_theorem_ref,
+              " step=", Int.toString index,
+              " kind=", step_kind step',
+              " status=", status,
+              " elapsed_ms=", fmt_ms elapsed,
+              " goals=", Int.toString (current_goal_count()),
+              " label=", step_label step', "\n"]
+
+fun run_traced_step index step' =
+  let
+    val _ = trace_goalfrag_before index step'
+    val t0 = Time.now()
+    val result = (step step'; NONE) handle e => SOME e
+    val elapsed = seconds (t0, Time.now())
+  in
+    case result of
+        NONE => trace_goalfrag_after "ok" elapsed index step'
+      | SOME e => (trace_goalfrag_after "failed" elapsed index step'; raise e)
+  end
+
 fun run_steps_from _ [] = ()
   | run_steps_from index (step' :: rest) =
       (successful_step_count_ref := index;
-       step step';
+       run_traced_step index step';
        successful_step_count_ref := index + 1;
        successful_prefix_end_ref := step_end step';
        run_steps_from (index + 1) rest)
@@ -557,11 +644,33 @@ fun atomic_prove label g tac =
   with_tactic_timeout label (fn () => Tactical.TAC_PROOF(g, tac)) ()
   handle e => (proofManagerLib.set_goal g; report_step_failure label e)
 
+fun trace_matches name =
+  case !trace_theorem_ref of
+      NONE => false
+    | SOME wanted => wanted = name
+
+datatype 'a traced_result = TraceOk of 'a | TraceError of exn
+
+fun with_theorem_trace name f =
+  let
+    val old_active = !trace_active_ref
+    val old_name = !trace_current_theorem_ref
+    val _ = trace_active_ref := trace_matches name
+    val _ = trace_current_theorem_ref := name
+    val result = TraceOk (f ()) handle e => TraceError e
+    val _ = trace_active_ref := old_active
+    val _ = trace_current_theorem_ref := old_name
+  in
+    case result of TraceOk value => value | TraceError e => raise e
+  end
+
 fun goalfrag_prove name end_path end_ok checkpoint_depth g tac tactic_text =
   let
     val _ = active_tactic_text_ref := tactic_text
     val _ = proofManagerLib.set_goalfrag g
-    val _ = run_steps (steps tactic_text)
+    val plan = steps tactic_text
+    val _ = trace_goalfrag_plan name plan
+    val _ = run_steps plan
     val th = proofManagerLib.top_thm()
              handle e => (print_goal_state (name ^ " finish"); raise e)
     val _ = save_checkpoint "end_of_proof" false end_path end_ok checkpoint_depth
@@ -611,8 +720,9 @@ fun prove_outer_theorem (g, tac) (name, tactic_text, _, _, end_path, end_ok, _, 
     val atomic = has_attrs orelse tactic_text = ""
     val _ = proving_with_goalfrag_ref := true
     val th =
-      (if atomic then atomic_prove name g tac
-       else goalfrag_prove name end_path end_ok checkpoint_depth g tac tactic_text)
+      with_theorem_trace name (fn () =>
+        if atomic then atomic_prove name g tac
+        else goalfrag_prove name end_path end_ok checkpoint_depth g tac tactic_text)
       handle e => (proving_with_goalfrag_ref := false; raise e)
     val _ = proving_with_goalfrag_ref := false
     val _ = theorem_info_ref := NONE
@@ -635,10 +745,11 @@ fun goalfrag_prover (g, tac) =
              drop_all();
              raise e)
 
-fun install ({checkpoint_enabled, tactic_timeout, timeout_marker} : config) =
+fun install ({checkpoint_enabled, tactic_timeout, timeout_marker, trace_theorem} : config) =
   (checkpoint_enabled_ref := checkpoint_enabled;
    tactic_timeout_ref := tactic_timeout;
    tactic_timeout_marker_ref := timeout_marker;
+   trace_theorem_ref := trace_theorem;
    theorem_info_ref := NONE;
    context_info_ref := NONE;
    proving_with_goalfrag_ref := false;
