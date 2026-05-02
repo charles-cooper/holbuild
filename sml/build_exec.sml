@@ -176,17 +176,13 @@ fun project_preload_lines dep =
     | HolbuildSourceIndex.Sml => [load_project_line (load_stem dep)]
     | HolbuildSourceIndex.Sig => []
 
-fun checkpoint_ok_path path = path ^ ".ok"
+fun checkpoint_ok_path path = HolbuildCheckpointStore.ok_path path
 
-fun remove_checkpoint path =
-  (remove_file (checkpoint_ok_path path); remove_file path)
+fun remove_checkpoint path = HolbuildCheckpointStore.remove_checkpoint path
 
-fun checkpoint_ok_v1 () = "holbuild-checkpoint-ok-v1\n"
+fun checkpoint_ok_v1 () = HolbuildCheckpointStore.ok_v1 ()
 
-fun checkpoint_ok_text kind fields =
-  String.concatWith "\n"
-    ("holbuild-checkpoint-ok-v2" :: ("kind=" ^ kind) ::
-     map (fn (key, value) => key ^ "=" ^ value) fields) ^ "\n"
+fun checkpoint_ok_text kind fields = HolbuildCheckpointStore.ok_text kind fields
 
 fun save_heap_line {label, share_common_data, output, ok_text} =
   let val default_share = if share_common_data then "true" else "false"
@@ -1694,25 +1690,7 @@ fun metadata_value key lines =
                lines
   end
 
-fun remove_incomplete_checkpoint_residue path =
-  if file_exists (checkpoint_ok_path path) andalso not (file_exists path) then
-    (warn ("checkpoint metadata exists without checkpoint file; discarding metadata: " ^ path);
-     remove_file (checkpoint_ok_path path);
-     remove_file (path ^ ".meta");
-     remove_file (path ^ ".prefix"))
-  else ()
-
-fun checkpoint_ok_matches path fields =
-  (remove_incomplete_checkpoint_residue path;
-   file_exists path andalso
-   case current_metadata (checkpoint_ok_path path) of
-       SOME text =>
-         let val lines = metadata_lines text
-         in
-           List.exists (fn line => line = "holbuild-checkpoint-ok-v2") lines andalso
-           List.all (fn (key, value) => metadata_value key lines = SOME value) fields
-         end
-     | NONE => false)
+fun checkpoint_ok_matches path fields = HolbuildCheckpointStore.ok_matches warn path fields
 
 fun deps_checkpoint_ok_text deps_key =
   checkpoint_ok_text "deps_loaded" [("deps_key", deps_key)]
