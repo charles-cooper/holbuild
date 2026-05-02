@@ -144,12 +144,23 @@ fun save_theorem_context () =
 fun top_goal_text [] = "<no open goals>\n"
   | top_goal_text (goal :: _) = PP.pp_to_string 100 proofManagerLib.std_goal_pp goal ^ "\n"
 
+fun active_theorem_name () =
+  case !theorem_info_ref of
+      SOME (name, _, _, _, _, _, _, _, _, _) => SOME name
+    | NONE => NONE
+
+fun failed_theorem_line () =
+  case active_theorem_name () of
+      NONE => ""
+    | SOME name => "\nholbuild failed theorem: " ^ name
+
 fun print_goal_state label =
   let
     val goals = proofManagerLib.top_goals()
   in
     TextIO.output(TextIO.stdErr,
       String.concat ["\nholbuild goal state at failed fragment: ", label,
+                     failed_theorem_line (),
                      "\nholbuild remaining goals: ", Int.toString (length goals), "\n",
                      "holbuild top goal:\n",
                      top_goal_text goals,

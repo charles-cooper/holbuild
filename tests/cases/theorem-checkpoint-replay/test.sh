@@ -366,6 +366,35 @@ if grep -q "fragment: CONJ_TAC >- FAIL_TAC" "$branch_failure_log"; then
   exit 1
 fi
 
+same_fragment_project=$tmpdir/same-fragment-project
+mkdir -p "$same_fragment_project/src"
+cp "$project/holproject.toml" "$same_fragment_project/holproject.toml"
+cat > "$same_fragment_project/src/AScript.sml" <<'SML'
+open HolKernel Parse boolLib bossLib;
+val _ = new_theory "A";
+Theorem first_same_prefix:
+  !x:bool. x = x
+Proof
+  gen_tac >> REFL_TAC
+QED
+Theorem second_same_prefix:
+  !x:bool. x = x
+Proof
+  gen_tac >> FAIL_TAC "second failed"
+QED
+val _ = export_theory();
+SML
+same_fragment_log=$tmpdir/same-fragment.log
+if (cd "$same_fragment_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --skip-checkpoints ATheory) > "$same_fragment_log" 2>&1; then
+  echo "expected same-fragment proof to fail build" >&2
+  exit 1
+fi
+require_grep "theorem: second_same_prefix" "$same_fragment_log"
+if grep -q "theorem: first_same_prefix" "$same_fragment_log"; then
+  echo "failed fragment was attributed to earlier theorem with same prefix" >&2
+  exit 1
+fi
+
 timeout_project=$tmpdir/timeout-project
 mkdir -p "$timeout_project/src"
 cp "$project/holproject.toml" "$timeout_project/holproject.toml"

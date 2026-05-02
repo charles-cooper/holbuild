@@ -256,14 +256,32 @@ fun quoted_after marker line =
           scan quote_start
         end
 
+val failed_theorem_prefix = "holbuild failed theorem: "
+
+fun failed_theorem_marker line =
+  if String.isPrefix failed_theorem_prefix line then
+    SOME (String.extract(line, size failed_theorem_prefix, NONE))
+  else NONE
+
 fun find_failed_theorem_name lines =
-  first_some (quoted_after "Failed to prove theorem \"") lines
+  case first_some failed_theorem_marker lines of
+      SOME name => SOME name
+    | NONE => first_some (quoted_after "Failed to prove theorem \"") lines
 
 fun failed_theorem_source_summary source_path source_text checkpoints label theorem_name =
-  case List.find (fn (checkpoint : HolbuildTheoryCheckpoints.checkpoint) => #name checkpoint = theorem_name) checkpoints of
-      NONE => NONE
-    | SOME checkpoint =>
-        SOME (checkpoint_source_summary source_path source_text checkpoint label (#tactic_end checkpoint))
+  let
+    fun locate_with_probe (checkpoint : HolbuildTheoryCheckpoints.checkpoint) probe =
+      Option.map
+        (fn relative => #tactic_start checkpoint + relative)
+        (find_substring probe (#tactic_text checkpoint))
+    fun locate checkpoint = first_some (locate_with_probe checkpoint) (source_location_probes label)
+  in
+    case List.find (fn (checkpoint : HolbuildTheoryCheckpoints.checkpoint) => #name checkpoint = theorem_name) checkpoints of
+        NONE => NONE
+      | SOME checkpoint =>
+          SOME (checkpoint_source_summary source_path source_text checkpoint label
+                  (Option.getOpt(locate checkpoint, #tactic_start checkpoint)))
+  end
 
 val goal_state_limit = 4096
 val goal_state_start_marker = "holbuild top goal:"
@@ -348,13 +366,12 @@ fun summarize_failed_fragment_source source_path source_text checkpoints path =
     val lines = String.fields (fn c => c = #"\n") (read_text path)
     val label = find_failed_fragment_label lines
   in
-    case Option.mapPartial (failed_fragment_source_summary source_path source_text checkpoints) label of
-        SOME summary => SOME summary
-      | NONE =>
-          (case (label, find_failed_theorem_name lines) of
-               (SOME label', SOME theorem_name) =>
-                 failed_theorem_source_summary source_path source_text checkpoints label' theorem_name
-             | _ => NONE)
+    case (label, find_failed_theorem_name lines) of
+        (SOME label', SOME theorem_name) =>
+          (case failed_theorem_source_summary source_path source_text checkpoints label' theorem_name of
+               SOME summary => SOME summary
+             | NONE => failed_fragment_source_summary source_path source_text checkpoints label')
+      | _ => Option.mapPartial (failed_fragment_source_summary source_path source_text checkpoints) label
   end
   handle _ => NONE
 
