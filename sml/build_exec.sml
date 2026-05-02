@@ -915,14 +915,11 @@ fun static_error_summary source_path source_text lines =
                 NONE => ""
               | SOME line =>
                   String.concat
-                    ["source: ", source_path, "\n",
-                     "line: ", Int.toString line, "\n",
-                     "----- begin source context -----\n",
-                     source_context_text source_text line,
-                     "----- end source context -----\n"]
+                    ["source: ", source_path, ":", Int.toString line, "\n",
+                     source_context_text source_text line]
         in
           SOME (String.concat
-            ["holbuild static error:\n",
+            ["static error:\n",
              String.concat (map (fn line => line ^ "\n") block),
              source_context])
         end
@@ -962,17 +959,17 @@ fun failed_fragment_source_summary source_path source_text checkpoints label =
     case first_some locate checkpoints of
         NONE => NONE
       | SOME {checkpoint, offset} =>
-        let val line = line_number_at source_text offset
+        let
+          val theorem_line = line_number_at source_text (#theorem_start checkpoint)
+          val proof_line = line_number_at source_text (#tactic_start checkpoint)
+          val fragment_line = line_number_at source_text offset
         in
           SOME (String.concat
-            ["holbuild failed fragment source context (best effort):\n",
-             "theorem: ", #name checkpoint, "\n",
+            ["theorem: ", #name checkpoint, " (line ", Int.toString theorem_line, ")\n",
+             "proof: line ", Int.toString proof_line, "\n",
              "fragment: ", label, "\n",
-             "source: ", source_path, "\n",
-             "line: ", Int.toString line, "\n",
-             "----- begin source context -----\n",
-             source_context_text source_text line,
-             "----- end source context -----\n"])
+             "source: ", source_path, ":", Int.toString fragment_line, "\n",
+             source_context_text source_text fragment_line])
         end
   end
 
@@ -990,16 +987,44 @@ fun goal_state_summary text =
       else ""
   in
     String.concat
-      ["holbuild top goal at failed fragment (first open goal, 4 KiB max):\n",
+      ["top goal at failed fragment:\n",
        truncation_line,
-       "----- begin top goal -----\n",
        preview,
-       if size preview = 0 orelse String.sub(preview, size preview - 1) <> #"\n" then "\n" else "",
-       "----- end top goal -----\n"]
+       if size preview = 0 orelse String.sub(preview, size preview - 1) <> #"\n" then "\n" else ""]
   end
 
 fun summarize_goal_state path =
   Option.map goal_state_summary (find_top_goal_state (String.fields (fn c => c = #"\n") (read_text path)))
+  handle _ => NONE
+
+fun child_failure_line line =
+  String.isPrefix "HOL message:" line orelse
+  String.isPrefix "error in " line orelse
+  String.isPrefix "Uncaught exception" line orelse
+  Option.isSome (find_substring "Exception raised" line)
+
+fun take_n n lines acc =
+  if n <= 0 then rev acc
+  else
+    case lines of
+        [] => rev acc
+      | line :: rest => take_n (n - 1) rest (line :: acc)
+
+fun child_failure_excerpt lines =
+  case lines of
+      [] => NONE
+    | line :: rest =>
+        if child_failure_line line then SOME (take_n 12 (line :: rest) [])
+        else child_failure_excerpt rest
+
+fun child_failure_summary path =
+  let val lines = String.fields (fn c => c = #"\n") (read_text path)
+  in
+    case child_failure_excerpt lines of
+        NONE => NONE
+      | SOME excerpt =>
+          SOME ("child failure:\n" ^ String.concat (map (fn line => line ^ "\n") excerpt))
+  end
   handle _ => NONE
 
 fun summarize_failed_fragment_source source_path source_text checkpoints path =
@@ -1598,7 +1623,6 @@ fun metadata_value key lines =
   end
 
 fun checkpoint_ok_matches path fields =
-  file_exists path andalso
   case current_metadata (checkpoint_ok_path path) of
       SOME text =>
         let val lines = metadata_lines text
@@ -1657,8 +1681,7 @@ fun failed_prefix_metadata path =
 fun failed_prefix_text path = current_metadata (path ^ ".prefix")
 
 fun failed_prefix_checkpoint checkpoint =
-  if file_exists (#failed_prefix_path checkpoint) andalso
-     current_metadata (checkpoint_ok_path (#failed_prefix_path checkpoint)) = SOME (#failed_prefix_ok checkpoint) then
+  if current_metadata (checkpoint_ok_path (#failed_prefix_path checkpoint)) = SOME (#failed_prefix_ok checkpoint) then
     case (failed_prefix_metadata (#failed_prefix_path checkpoint),
           failed_prefix_text (#failed_prefix_path checkpoint)) of
         (SOME step_count, SOME prefix_text) =>
@@ -1859,15 +1882,24 @@ fun build_theory cache_allowed policy tc project base_context plan keys toolchai
         val trace_context = if goalfrag_trace policy then Option.mapPartial summarize_goalfrag_trace failure_log else NONE
         val static_error = Option.mapPartial (fn path => static_error_summary (source_file node) source_text (String.fields (fn c => c = #"\n") (read_text path))) failure_log
         val source_context = Option.mapPartial (summarize_failed_fragment_source (source_file node) source_text theorem_checkpoints) failure_log
+        val child_failure =
+          if Option.isSome trace_context orelse Option.isSome static_error orelse
+             Option.isSome source_context orelse Option.isSome goal_state then NONE
+          else Option.mapPartial child_failure_summary failure_log
+        val fallback =
+          if Option.isSome child_failure then ""
+          else
+            case String.fields (fn c => c = #"\n") msg of
+                [] => "hol run failed while building theory script\n"
+              | first :: _ => first ^ "\n"
         val _ = if Option.isSome goal_state then () else discard_failure_checkpoints ()
         val detail =
           String.concat
-            [logical_name node,
-             " goalfrag/checkpoint run failed\n",
-             case trace_context of NONE => "" | SOME text => text,
+            [case trace_context of NONE => "" | SOME text => text,
              case static_error of NONE => "" | SOME text => text,
              case source_context of NONE => "" | SOME text => text,
              case goal_state of NONE => "" | SOME text => text,
+             case child_failure of NONE => fallback | SOME text => text,
              case failure_log of NONE => "" | SOME path => "instrumented log: " ^ path ^ "\n"]
       in
         Error detail

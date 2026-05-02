@@ -101,8 +101,8 @@ errors = [e for e in events if e.get('event') == 'error']
 if not errors:
     raise SystemExit('missing structured error event')
 message = '\n'.join(e.get('message', '') for e in errors)
-if '----- begin top goal -----' not in message or '----- end top goal -----' not in message:
-    raise SystemExit('structured error did not include top-goal markers')
+if 'top goal at failed fragment:' not in message:
+    raise SystemExit('structured error did not include top-goal context')
 if 'json failure' not in message:
     raise SystemExit('structured error lost failure detail')
 PY

@@ -90,6 +90,22 @@ val _ = export_theory();
 SML
 }
 
+write_non_goal_failure_source() {
+  cat > "$project/src/AScript.sml" <<'SML'
+open HolKernel Parse boolLib bossLib;
+val _ = new_theory "A";
+
+Theorem first:
+  T
+Proof
+  ACCEPT_TAC TRUTH
+QED
+
+val _ = print "HOL message: expected non-goal failure\n";
+val _ = raise Fail "expected non-goal failure";
+SML
+}
+
 assert_no_checkpoints() {
   if find "$project/.holbuild/checkpoints" \( -name '*.save' -o -name '*.save.ok' \) -print -quit 2>/dev/null | grep -q .; then
     echo "$1" >&2
@@ -177,6 +193,29 @@ if grep -q "resuming ATheory from checkpoint first" "$missing_ok_log"; then
 fi
 assert_no_checkpoints "missing-checkpoint rebuild retained checkpoint files"
 
+run_expect_suffix_failure "$tmpdir/missing-save-seed.log"
+missing_save_context=$(first_context_path)
+missing_save_failed_prefix=$(second_failed_prefix_path)
+rm -f "$missing_save_context" "$missing_save_failed_prefix" "$missing_save_failed_prefix.ok" "$missing_save_failed_prefix.meta" "$missing_save_failed_prefix.prefix"
+write_good_source
+force_rebuild
+missing_save_log=$tmpdir/missing-save.log
+if (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$missing_save_log" 2>&1; then
+  echo "missing selected checkpoint should panic before spawning HOL" >&2
+  exit 1
+fi
+require_grep "holbuild internal error (panic): selected missing HOL base-state checkpoint" "$missing_save_log"
+if grep -q "instrumented log:\|last log line\|child log tail" "$missing_save_log"; then
+  echo "missing selected checkpoint fell through to child-run diagnostics" >&2
+  exit 1
+fi
+rm -rf "$project/.holbuild/checkpoints"
+write_good_source
+force_rebuild
+(cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$tmpdir/missing-save-clean-rebuild.log" 2>&1
+require_file "$project/.holbuild/obj/src/ATheory.dat"
+assert_no_checkpoints "clean rebuild after missing selected checkpoint retained checkpoint files"
+
 run_expect_suffix_failure "$tmpdir/corrupt-seed.log"
 corrupt_context=$(first_context_path)
 corrupt_failed_prefix=$(second_failed_prefix_path)
@@ -190,7 +229,6 @@ if (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$corru
   exit 1
 fi
 require_grep "resuming ATheory from checkpoint first" "$corrupt_log"
-require_grep "ATheory goalfrag/checkpoint run failed" "$corrupt_log"
 require_grep "instrumented log:" "$corrupt_log"
 if grep -q -- "--- child log tail ---" "$corrupt_log"; then
   echo "checkpoint failure duplicated full child log tail" >&2
@@ -221,7 +259,6 @@ if (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$corru
   exit 1
 fi
 require_grep "resuming ATheory from checkpoint deps_loaded" "$corrupt_deps_log"
-require_grep "ATheory goalfrag/checkpoint run failed" "$corrupt_deps_log"
 if [[ -e "$corrupt_deps" || -e "$corrupt_deps.ok" ]]; then
   echo "failed replay did not discard corrupt deps checkpoint" >&2
   exit 1
@@ -255,3 +292,17 @@ residue_after_up_to_date=$(checkpoint_count)
   echo "up-to-date check should not eagerly scan/clean checkpoint residue" >&2
   exit 1
 }
+
+rm -rf "$project/.holbuild"
+write_non_goal_failure_source
+non_goal_failure_log=$tmpdir/non-goal-failure.log
+if (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$non_goal_failure_log" 2>&1; then
+  echo "expected non-goal child failure" >&2
+  exit 1
+fi
+require_grep "child failure:" "$non_goal_failure_log"
+require_grep "HOL message: expected non-goal failure" "$non_goal_failure_log"
+if grep -q -- "--- child log tail ---" "$non_goal_failure_log"; then
+  echo "non-goal failure duplicated full child log tail" >&2
+  exit 1
+fi

@@ -273,12 +273,12 @@ if (cd "$failure_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) >
   exit 1
 fi
 require_grep "expected failure" "$failure_log"
-require_grep "holbuild top goal at failed fragment (first open goal, 4 KiB max)" "$failure_log"
+require_grep "top goal at failed fragment:" "$failure_log"
 require_grep "top goal exceeded 4 KiB" "$failure_log"
 require_grep "full top goal is in the instrumented log above" "$failure_log"
-require_grep "begin top goal" "$failure_log"
-require_grep "end top goal" "$failure_log"
-require_grep "holbuild failed fragment source context (best effort)" "$failure_log"
+require_grep "theorem: b_thm (line " "$failure_log"
+require_grep "proof: line " "$failure_log"
+require_grep "source: .*AScript.sml:" "$failure_log"
 require_grep "FAIL_TAC \"expected failure\"" "$failure_log"
 failure_child_log=$(find "$failure_project/.holbuild/logs" -name '*-ATheory-instrumented-failure.log' -print -quit)
 require_file "$failure_child_log"
@@ -296,14 +296,14 @@ if (cd "$failure_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) >
   exit 1
 fi
 require_grep "resuming ATheory from checkpoint b_thm failed_prefix" "$failure_again_log"
-require_grep "holbuild top goal at failed fragment" "$failure_again_log"
+require_grep "top goal at failed fragment:" "$failure_again_log"
 require_file "$a_thm_context"
 require_file "$b_thm_failed_prefix"
 failed_prefix_plan_log=$tmpdir/failed-prefix-plan.log
 (cd "$failure_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --goalfrag-plan ATheory:b_thm) > "$failed_prefix_plan_log" 2>&1
 require_grep "holbuild goalfrag plan ATheory:b_thm source=src/AScript.sml (" "$failed_prefix_plan_log"
 require_grep "FAIL_TAC \"expected failure\"" "$failed_prefix_plan_log"
-if grep -q "resuming ATheory\|ATheory inspected\|holbuild top goal at failed fragment\|goalfrag/checkpoint run failed" "$failed_prefix_plan_log"; then
+if grep -q "resuming ATheory\|ATheory inspected\|top goal at failed fragment" "$failed_prefix_plan_log"; then
   echo "--goalfrag-plan executed/replayed the build instead of statically printing the plan" >&2
   exit 1
 fi
@@ -374,7 +374,7 @@ if (cd "$timeout_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --tactic-t
 fi
 require_grep "tactic timed out after 0.1s while building ATheory: loop_tac" "$timeout_log"
 require_grep "instrumented log:" "$timeout_log"
-if grep -q "goalfrag/checkpoint run failed\|plain-source fallback disabled" "$timeout_log"; then
+if grep -q "plain-source fallback disabled" "$timeout_log"; then
   echo "timeout was reported as generic instrumentation failure" >&2
   exit 1
 fi
