@@ -692,21 +692,33 @@ fun validate_hol_context context =
     else
       raise Error
         (String.concat
-           ["holbuild internal error (panic): selected missing HOL base-state checkpoint\n",
+           ["selected HOL base-state checkpoint is missing\n",
             "checkpoint: ", path, "\n",
-            "This usually means checkpoint metadata is stale or the checkpoint family was partially removed.\n"])
+            "checkpoint metadata is stale or the checkpoint family was partially removed; remove .holbuild/checkpoints and retry.\n"])
   end
 
 fun tail_text path =
-  let
-    val tmp = FS.tmpName ()
-    val _ = OS.Process.system ("tail -n 80 " ^ HolbuildToolchain.quote path ^
-                               " > " ^ HolbuildToolchain.quote tmp)
-    val text = read_text tmp handle _ => ""
-    val _ = remove_file tmp
-  in
-    text
-  end
+  if not (file_exists path) then ""
+  else
+    let
+      val tmp = FS.tmpName ()
+      val _ = OS.Process.system ("tail -n 80 " ^ HolbuildToolchain.quote path ^
+                                 " > " ^ HolbuildToolchain.quote tmp ^ " 2>/dev/null")
+      val text = read_text tmp handle _ => ""
+      val _ = remove_file tmp
+    in
+      text
+    end
+
+fun child_log_detail path =
+  if file_exists path then
+    String.concatWith "\n"
+      ["child log: " ^ path,
+       "--- child log tail ---",
+       tail_text path,
+       "--- end child log tail ---"]
+  else
+    "child log was not created: " ^ path
 
 fun echo_child_logs () = env_bool "HOLBUILD_ECHO_CHILD_LOGS" false
 
@@ -723,10 +735,7 @@ fun run_hol_files_to_log tc stage context files log_name error_message =
     else
       raise Error (String.concatWith "\n"
         [error_message,
-         "child log: " ^ log,
-         "--- child log tail ---",
-         tail_text log,
-         "--- end child log tail ---"])
+         child_log_detail log])
   end
 
 fun toolchain_base_context tc = HolState (HolbuildToolchain.base_state tc)
@@ -998,6 +1007,7 @@ fun summarize_goal_state path =
   handle _ => NONE
 
 fun child_failure_line line =
+  String.isPrefix "Couldn't load HOL base-state" line orelse
   String.isPrefix "HOL message:" line orelse
   String.isPrefix "error in " line orelse
   String.isPrefix "Uncaught exception" line orelse
@@ -1649,12 +1659,16 @@ fun theorem_context_checkpoint_exists project node checkpoint =
        ("checkpoint_key", #checkpoint_key checkpoint)]
   end
 
+fun theorem_replay_failure_checkpoints checkpoint =
+  [#context_path checkpoint, #end_of_proof_path checkpoint]
+
 fun replay_candidates project node checkpoints =
   List.mapPartial
     (fn checkpoint =>
         if theorem_context_checkpoint_exists project node checkpoint then
           SOME {boundary = #boundary checkpoint, path = #context_path checkpoint,
-                safe_name = #safe_name checkpoint}
+                safe_name = #safe_name checkpoint,
+                failure_checkpoints = theorem_replay_failure_checkpoints checkpoint}
         else NONE)
     checkpoints
 
@@ -1806,12 +1820,12 @@ fun write_theory_script policy project base_context plan keys input_key toolchai
             end
         | NONE =>
             case replay_candidate project node checkpoints of
-                SOME {boundary, path, safe_name} =>
+                SOME {boundary, path, safe_name, failure_checkpoints} =>
                   let
                     val _ = write_text staged_script (instrumented_source policy (SOME timeout_marker) plan_only_marker source_text boundary checkpoints)
                     val _ = checkpoint_resume_message node safe_name
                   in
-                    {context = HolState path, files = [staged_script], failure_checkpoints = [path, deps_loaded]}
+                    {context = HolState path, files = [staged_script], failure_checkpoints = failure_checkpoints @ [deps_loaded]}
                   end
               | NONE =>
                   if deps_checkpoint_exists deps_loaded deps_key then run_from_deps_checkpoint ()
@@ -2067,11 +2081,53 @@ fun output_exists_for_node node path =
       HolbuildSourceIndex.TheoryScript => file_nonempty path
     | _ => file_exists path
 
-fun up_to_date checkpoint_policy project _ _ input_key _ node _ =
+fun theory_name_from_logical logical =
+  if has_suffix "Theory" logical then drop_suffix "Theory" logical else logical
+
+fun theory_dat_parent_hash dat_text parent_name =
+  let val marker = "(\"" ^ parent_name ^ "\" . \""
+  in
+    case find_substring marker dat_text of
+        NONE => NONE
+      | SOME start =>
+          let val hash_start = start + size marker
+          in
+            if hash_start + 40 <= size dat_text then
+              let val hash = String.substring(dat_text, hash_start, 40)
+              in if valid_sha1_text hash then SOME hash else NONE end
+            else NONE
+          end
+  end
+
+fun project_theory_deps plan node =
+  List.filter
+    (fn dep => #kind (HolbuildBuildPlan.source_of dep) = HolbuildSourceIndex.TheoryScript)
+    (HolbuildBuildPlan.direct_project_deps plan node)
+
+fun theory_parent_hash_matches dat_text dep =
+  let
+    val parent_name = theory_name_from_logical (logical_name dep)
+    val parent_hash = file_hash (#data_path (theory_outputs dep))
+  in
+    case theory_dat_parent_hash dat_text parent_name of
+        NONE => true
+      | SOME recorded_hash => recorded_hash = parent_hash
+  end
+
+fun theory_parent_hashes_match plan node =
+  case #kind (HolbuildBuildPlan.source_of node) of
+      HolbuildSourceIndex.TheoryScript =>
+        let val dat_text = read_text (#data_path (theory_outputs node))
+        in List.all (theory_parent_hash_matches dat_text) (project_theory_deps plan node) end
+    | _ => true
+  handle _ => false
+
+fun up_to_date checkpoint_policy project plan _ input_key _ node _ =
   List.all (output_exists_for_node node) (output_paths checkpoint_policy project node) andalso
   (case current_metadata (metadata_path project node) of
        SOME text => metadata_input_key_matches input_key text
-     | NONE => false)
+     | NONE => false) andalso
+  theory_parent_hashes_match plan node
 
 fun write_metadata checkpoint_policy project plan keys input_key toolchain_key node theorem_checkpoints =
   write_text (metadata_path project node)
@@ -2117,13 +2173,16 @@ fun build_theory_node (options : build_options) tc project base_context plan key
     val force = #force options
     val cache_allowed = #use_cache options andalso cache_enabled node
     val cache_restore_allowed = cache_allowed andalso not force
+    fun materialize_valid_cache () =
+      materialize_theory_cache tc project plan input_key node andalso
+      (if theory_parent_hashes_match plan node then true
+       else (remove_failed_cache_outputs project node; false))
   in
     if not force andalso not (always_reexecute node) andalso
        up_to_date policy project plan keys input_key toolchain_key node metadata_checkpoints then
       (remove_tree_if_exists stage;
        HolbuildStatus.UpToDate)
-    else if cache_restore_allowed andalso
-            materialize_theory_cache tc project plan input_key node then
+    else if cache_restore_allowed andalso materialize_valid_cache () then
       (remove_tree stage;
        write_metadata policy project plan keys input_key toolchain_key node metadata_checkpoints;
        remove_checkpoint_family project node;

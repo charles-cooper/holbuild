@@ -201,11 +201,12 @@ write_good_source
 force_rebuild
 missing_save_log=$tmpdir/missing-save.log
 if (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$missing_save_log" 2>&1; then
-  echo "missing selected checkpoint should panic before spawning HOL" >&2
+  echo "missing selected checkpoint should fail before spawning HOL" >&2
   exit 1
 fi
-require_grep "holbuild internal error (panic): selected missing HOL base-state checkpoint" "$missing_save_log"
-if grep -q "instrumented log:\|last log line\|child log tail" "$missing_save_log"; then
+require_grep "selected HOL base-state checkpoint is missing" "$missing_save_log"
+require_grep "remove .holbuild/checkpoints and retry" "$missing_save_log"
+if grep -q "instrumented log:\|last log line\|child log tail\|Couldn't load HOL base-state" "$missing_save_log"; then
   echo "missing selected checkpoint fell through to child-run diagnostics" >&2
   exit 1
 fi
