@@ -303,6 +303,9 @@ fun log_dir (project : HolbuildProject.t) = Path.concat(#root project, ".holbuil
 fun retained_checkpoint_failure_log project node input_key =
   Path.concat(log_dir project, input_key ^ "-" ^ logical_name node ^ "-instrumented-failure.log")
 
+fun retained_goalfrag_trace_log project node input_key =
+  Path.concat(log_dir project, input_key ^ "-" ^ logical_name node ^ "-goalfrag-trace.log")
+
 fun staged_theory_file stage node ext = Path.concat(Path.concat(stage, ".hol/objs"), logical_name node ^ ext)
 fun staged_dat_reference stage node = Path.concat(stage, logical_name node ^ ".dat")
 
@@ -782,25 +785,165 @@ fun find_substring needle haystack =
     if n = 0 then NONE else loop 0
   end
 
+fun source_lines source_text = String.fields (fn c => c = #"\n") source_text
+
+fun nth_line lines n = List.nth(lines, n - 1) handle _ => ""
+
 fun source_context_text source_text line =
   let
-    val lines = String.fields (fn c => c = #"\n") source_text
+    val lines = source_lines source_text
     val start = Int.max(1, line - 2)
     val stop = Int.min(length lines, line + 2)
-    fun nth n = List.nth(lines, n - 1) handle _ => ""
     fun row n =
-      String.concat [if n = line then "> " else "  ", Int.toString n, " | ", nth n, "\n"]
+      String.concat [if n = line then "> " else "  ", Int.toString n, " | ", nth_line lines n, "\n"]
     fun loop n acc = if n > stop then rev acc else loop (n + 1) (row n :: acc)
   in
     String.concat (loop start [])
   end
 
+fun take_static_error_block [] acc = rev acc
+  | take_static_error_block (line :: rest) acc =
+      if String.isPrefix "Uncaught exception" line then rev acc
+      else take_static_error_block rest (line :: acc)
+
+fun find_static_error_block [] = NONE
+  | find_static_error_block (line :: rest) =
+      if Option.isSome (find_substring ": error: " line) then
+        SOME (take_static_error_block rest [line])
+      else find_static_error_block rest
+
+fun parse_decimal_prefix text start =
+  let
+    val n = size text
+    fun scan i =
+      if i < n andalso Char.isDigit (String.sub(text, i)) then scan (i + 1) else i
+    val stop = scan start
+  in
+    if stop = start then NONE
+    else Int.fromString (String.substring(text, start, stop - start))
+  end
+
+fun marker_line_after marker text =
+  case find_substring marker text of
+      NONE => NONE
+    | SOME i => parse_decimal_prefix text (i + size marker)
+
+fun trim text =
+  let
+    val n = size text
+    fun left i = if i >= n orelse not (Char.isSpace (String.sub(text, i))) then i else left (i + 1)
+    fun right i = if i < 0 orelse not (Char.isSpace (String.sub(text, i))) then i else right (i - 1)
+    val l = left 0
+    val r = right (n - 1)
+  in
+    if r < l then "" else String.substring(text, l, r - l + 1)
+  end
+
+fun find_line_number text wanted =
+  let
+    val needle = trim wanted
+    fun loop _ [] = NONE
+      | loop n (line :: rest) =
+          if needle <> "" andalso trim line = needle then SOME n else loop (n + 1) rest
+  in
+    loop 1 (source_lines text)
+  end
+
+fun split_first_char ch text =
+  case find_substring (String.str ch) text of
+      NONE => NONE
+    | SOME i => SOME (String.substring(text, 0, i), String.extract(text, i + 1, NONE))
+
+fun parse_static_error_location line =
+  case find_substring ": error: " line of
+      NONE => NONE
+    | SOME marker =>
+        let
+          val before_error = String.substring(line, 0, marker)
+          fun loop path rest last =
+            case split_first_char #":" rest of
+                NONE => Option.map (fn line_no => {path = path, line = line_no}) last
+              | SOME (piece, after) =>
+                  loop (path ^ ":" ^ piece) after (Int.fromString after)
+        in
+          case split_first_char #":" before_error of
+              NONE => NONE
+            | SOME (path, rest) => loop path rest (Int.fromString rest)
+        end
+
+fun source_line_from_staged_error source_text block =
+  case block of
+      [] => NONE
+    | first :: _ =>
+        case parse_static_error_location first of
+            NONE => NONE
+          | SOME {path, line} =>
+              (find_line_number source_text (nth_line (source_lines (read_text path)) line)
+               handle _ => NONE)
+
+fun source_line_from_loc_marker source_text block =
+  case marker_line_after "(*#loc " (String.concatWith "\n" block) of
+      SOME line => if line <= length (source_lines source_text) then SOME line else NONE
+    | NONE => NONE
+
+fun static_error_source_line source_text block =
+  case source_line_from_staged_error source_text block of
+      SOME line => SOME line
+    | NONE => source_line_from_loc_marker source_text block
+
+fun static_error_summary source_path source_text lines =
+  case find_static_error_block lines of
+      NONE => NONE
+    | SOME block =>
+        let
+          val source_context =
+            case static_error_source_line source_text block of
+                NONE => ""
+              | SOME line =>
+                  String.concat
+                    ["source: ", source_path, "\n",
+                     "line: ", Int.toString line, "\n",
+                     "----- begin source context -----\n",
+                     source_context_text source_text line,
+                     "----- end source context -----\n"]
+        in
+          SOME (String.concat
+            ["holbuild static error:\n",
+             String.concat (map (fn line => line ^ "\n") block),
+             source_context])
+        end
+
+fun drop_prefix prefix text =
+  if String.isPrefix prefix text then SOME (String.extract(text, size prefix, NONE)) else NONE
+
+fun strip_trailing_paren text =
+  if size text > 0 andalso String.sub(text, size text - 1) = #")" then
+    String.substring(text, 0, size text - 1)
+  else text
+
+fun select_then1_source_probes label =
+  case drop_prefix "Q.SELECT_GOALS_LT_THEN1 " label of
+      NONE => []
+    | SOME rest =>
+        case find_substring "] (" rest of
+            NONE => []
+          | SOME split =>
+              let
+                val pattern = String.substring(rest, 0, split + 1)
+                val body = strip_trailing_paren (String.extract(rest, split + 3, NONE))
+              in
+                [pattern, body]
+              end
+
+fun source_location_probes label = label :: select_then1_source_probes label
+
 fun failed_fragment_source_summary source_path source_text checkpoints label =
   let
-    fun locate checkpoint =
+    fun locate_with_probe checkpoint probe =
       Option.map
         (fn relative => {checkpoint = checkpoint, offset = #tactic_start checkpoint + relative})
-        (find_substring label (#tactic_text checkpoint))
+        (find_substring probe (#tactic_text checkpoint))
+    fun locate checkpoint = first_some (locate_with_probe checkpoint) (source_location_probes label)
   in
     case first_some locate checkpoints of
         NONE => NONE
@@ -854,13 +997,42 @@ fun summarize_failed_fragment_source source_path source_text checkpoints path =
   end
   handle _ => NONE
 
+fun field_after key line =
+  let
+    val needle = key ^ "="
+    val n = size line
+    val m = size needle
+    fun scan i =
+      if i + m > n then NONE
+      else if String.substring(line, i, m) = needle then
+        let
+          val start = i + m
+          fun stop j = if j >= n orelse Char.isSpace (String.sub(line, j)) then j else stop (j + 1)
+        in
+          SOME (String.substring(line, start, stop start - start))
+        end
+      else scan (i + 1)
+  in
+    scan 0
+  end
+
+fun failed_trace_theorem lines =
+  case List.filter (fn line => String.isPrefix "holbuild goalfrag after " line andalso
+                               String.isSubstring "status=failed" line) lines of
+      [] => NONE
+    | failed => field_after "theorem" (List.last failed)
+
 fun summarize_goalfrag_trace path =
   let
     val lines = String.fields (fn c => c = #"\n") (read_text path)
     val trace_lines = List.filter (String.isPrefix "holbuild goalfrag ") lines
+    val focused =
+      case failed_trace_theorem trace_lines of
+          NONE => trace_lines
+        | SOME theorem => List.filter (fn line => field_after "theorem" line = SOME theorem) trace_lines
   in
-    if null trace_lines then NONE
-    else SOME ("holbuild goalfrag trace:\n" ^ String.concat (map (fn line => line ^ "\n") trace_lines))
+    if null focused then NONE
+    else SOME ("holbuild goalfrag trace:\n" ^ String.concat (map (fn line => line ^ "\n") focused))
   end
   handle _ => NONE
 
@@ -868,16 +1040,19 @@ fun summarize_log path =
   Option.map (truncate_text 240) (last_nonempty_line (read_text path))
   handle _ => NONE
 
+fun preserve_log src dst =
+  if file_exists src then
+    (ensure_parent dst; copy_binary src dst; SOME dst)
+    handle _ => SOME src
+  else NONE
+
 fun preserve_checkpoint_failure_log project node input_key stage =
-  let
-    val src = Path.concat(stage, "holbuild-build.log")
-    val dst = retained_checkpoint_failure_log project node input_key
-  in
-    if file_exists src then
-      (ensure_parent dst; copy_binary src dst; SOME dst)
-      handle _ => SOME src
-    else NONE
-  end
+  preserve_log (Path.concat(stage, "holbuild-build.log"))
+               (retained_checkpoint_failure_log project node input_key)
+
+fun preserve_goalfrag_trace_log project node input_key stage =
+  preserve_log (Path.concat(stage, "holbuild-build.log"))
+               (retained_goalfrag_trace_log project node input_key)
 
 fun cache_root () = HolbuildCache.cache_root ()
 
@@ -1482,13 +1657,13 @@ fun first_failed_prefix_checkpoint checkpoints =
       [] => NONE
     | first :: _ => SOME first
 
-type build_options = {use_cache : bool, force : bool, skip_checkpoints : bool, goalfrag : bool, tactic_timeout : real option, goalfrag_plan : string option, goalfrag_trace : string option}
+type build_options = {use_cache : bool, force : bool, skip_checkpoints : bool, goalfrag : bool, tactic_timeout : real option, goalfrag_plan : string option, goalfrag_trace : bool}
 
 datatype checkpoint_policy =
-  CheckpointPolicy of {checkpoint : bool, goalfrag : bool, tactic_timeout : real option, goalfrag_plan : string option, goalfrag_trace : string option}
+  CheckpointPolicy of {checkpoint : bool, goalfrag : bool, tactic_timeout : real option, goalfrag_plan : string option, goalfrag_trace : bool}
 
 val no_checkpoint_policy =
-  CheckpointPolicy {checkpoint = false, goalfrag = false, tactic_timeout = NONE, goalfrag_plan = NONE, goalfrag_trace = NONE}
+  CheckpointPolicy {checkpoint = false, goalfrag = false, tactic_timeout = NONE, goalfrag_plan = NONE, goalfrag_trace = false}
 
 fun checkpoint_enabled (CheckpointPolicy {checkpoint, ...}) = checkpoint
 fun goalfrag_enabled (CheckpointPolicy {goalfrag, ...}) = goalfrag
@@ -1496,7 +1671,7 @@ fun tactic_timeout (CheckpointPolicy {tactic_timeout, ...}) = tactic_timeout
 fun goalfrag_plan (CheckpointPolicy {goalfrag_plan, ...}) = goalfrag_plan
 fun goalfrag_trace (CheckpointPolicy {goalfrag_trace, ...}) = goalfrag_trace
 
-fun goalfrag_plan_only (CheckpointPolicy {goalfrag_plan = SOME _, goalfrag_trace = NONE, ...}) = true
+fun goalfrag_plan_only (CheckpointPolicy {goalfrag_plan = SOME _, goalfrag_trace = false, ...}) = true
   | goalfrag_plan_only _ = false
 
 fun timeout_text NONE = "none"
@@ -1527,7 +1702,7 @@ fun instrumented_source policy timeout_marker plan_only_marker source_text start
        tactic_timeout = tactic_timeout policy,
        timeout_marker = timeout_marker,
        plan_theorem = goalfrag_plan policy,
-       trace_theorem = goalfrag_trace policy,
+       trace_all = goalfrag_trace policy,
        plan_only_marker = plan_only_marker}
   else plain_source_from_checkpoint source_text start_offset
 
@@ -1547,7 +1722,7 @@ fun failed_prefix_resume_source policy timeout_marker plan_only_marker source ch
          tactic_timeout = tactic_timeout policy,
          timeout_marker = SOME timeout_marker,
          plan_theorem = goalfrag_plan policy,
-         trace_theorem = goalfrag_trace policy,
+         trace_all = goalfrag_trace policy,
          plan_only_marker = plan_only_marker}
         [checkpoint]
     val theorem_binding = #safe_name checkpoint
@@ -1667,8 +1842,9 @@ fun build_theory cache_allowed policy tc project base_context plan keys toolchai
       let
         val failure_log = preserve_checkpoint_failure_log project node input_key stage
         val goal_state = Option.mapPartial summarize_goal_state failure_log
-        val trace_context = if Option.isSome (goalfrag_trace policy) then Option.mapPartial summarize_goalfrag_trace failure_log else NONE
-        val reason = if Option.isSome goal_state then NONE else Option.mapPartial summarize_log failure_log
+        val trace_context = if goalfrag_trace policy then Option.mapPartial summarize_goalfrag_trace failure_log else NONE
+        val static_error = Option.mapPartial (fn path => static_error_summary (source_file node) source_text (String.fields (fn c => c = #"\n") (read_text path))) failure_log
+        val reason = if Option.isSome goal_state orelse Option.isSome static_error then NONE else Option.mapPartial summarize_log failure_log
         val source_context = Option.mapPartial (summarize_failed_fragment_source (source_file node) source_text theorem_checkpoints) failure_log
         val _ = if Option.isSome goal_state then () else discard_failure_checkpoints ()
         val detail =
@@ -1677,6 +1853,7 @@ fun build_theory cache_allowed policy tc project base_context plan keys toolchai
              " goalfrag/checkpoint run failed\n",
              case failure_log of NONE => "" | SOME path => "instrumented log: " ^ path ^ "\n",
              case trace_context of NONE => "" | SOME text => text,
+             case static_error of NONE => "" | SOME text => text,
              case source_context of NONE => "" | SOME text => text,
              case goal_state of NONE => "" | SOME text => text,
              case reason of NONE => "" | SOME line => "last log line: " ^ line ^ "\n"]
@@ -1697,8 +1874,12 @@ fun build_theory cache_allowed policy tc project base_context plan keys toolchai
       if goalfrag_plan_only policy andalso file_exists plan_only_marker then
         (HolbuildStatus.message_stdout (read_text build_log handle _ => "");
          raise GoalfragPlanPrinted)
-      else if Option.isSome (goalfrag_plan policy) orelse Option.isSome (goalfrag_trace policy) then
+      else if Option.isSome (goalfrag_plan policy) then
         HolbuildStatus.message_stdout (read_text build_log handle _ => "")
+      else if goalfrag_trace policy then
+        (case preserve_goalfrag_trace_log project node input_key stage of
+             NONE => ()
+           | SOME path => HolbuildStatus.message_stdout ("goalfrag trace log: " ^ path ^ "\n"))
       else ()
     val _ = copy_binary staged_dat data_path
     val _ = copy_binary staged_dat (hfs_remapped_path data_path)
@@ -1865,7 +2046,7 @@ fun checkpoint_policy_for_node ({skip_checkpoints, goalfrag, tactic_timeout, goa
                     goalfrag = goalfrag,
                     tactic_timeout = effective_tactic_timeout goalfrag (root_package_node project node) tactic_timeout,
                     goalfrag_plan = if goalfrag then goalfrag_plan else NONE,
-                    goalfrag_trace = if goalfrag then goalfrag_trace else NONE}
+                    goalfrag_trace = goalfrag andalso goalfrag_trace}
 
 fun build_config_lines_for_node options project node =
   case #kind (HolbuildBuildPlan.source_of node) of
@@ -2039,8 +2220,8 @@ fun build_parallel status options tc project base_context plan keys toolchain_ke
     val remaining_deps = Array.array (node_count, 0)
     val dependents = Array.array (node_count, [] : int list)
     val ready = ref ([] : int list)
-    val mutex = Thread.Mutex.mutex ()
-    val cv = Thread.ConditionVar.conditionVar ()
+    val mutex = Mutex.mutex ()
+    val cv = ConditionVar.conditionVar ()
     val running = ref 0
     val completed = ref 0
     val active = ref jobs
@@ -2069,9 +2250,9 @@ fun build_parallel status options tc project base_context plan keys toolchain_ke
 
     val _ = register_nodes 0
 
-    fun signal () = Thread.ConditionVar.broadcast cv
-    fun lock () = Thread.Mutex.lock mutex
-    fun unlock () = Thread.Mutex.unlock mutex
+    fun signal () = ConditionVar.broadcast cv
+    fun lock () = Mutex.lock mutex
+    fun unlock () = Mutex.unlock mutex
 
     fun pop_ready () =
       case !ready of
@@ -2088,7 +2269,7 @@ fun build_parallel status options tc project base_context plan keys toolchain_ke
                   SOME id => (running := !running + 1; SOME id)
                 | NONE =>
                     if !completed = node_count andalso !running = 0 then NONE
-                    else (Thread.ConditionVar.wait (cv, mutex); next_work_locked ())
+                    else (ConditionVar.wait (cv, mutex); next_work_locked ())
 
     fun with_lock f =
       (lock (); f () before unlock ())
@@ -2189,7 +2370,7 @@ fun build_parallel status options tc project base_context plan keys toolchain_ke
 
     fun wait_workers_locked () =
       if !active = 0 then ()
-      else (Thread.ConditionVar.wait (cv, mutex); wait_workers_locked ())
+      else (ConditionVar.wait (cv, mutex); wait_workers_locked ())
 
     fun wait_workers () =
       let
@@ -2202,7 +2383,7 @@ fun build_parallel status options tc project base_context plan keys toolchain_ke
           | SOME msg => raise Error msg
       end
   in
-    List.app (fn _ => ignore (Thread.Thread.fork (worker, [])))
+    List.app (fn _ => ignore (Thread.fork (worker, [])))
              (List.tabulate (jobs, fn i => i));
     wait_workers ()
   end

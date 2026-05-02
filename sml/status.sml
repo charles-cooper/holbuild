@@ -18,12 +18,12 @@ type t = {
   active : active_node list ref,
   started_at : Time.time,
   ended : bool ref,
-  mutex : Thread.Mutex.mutex
+  mutex : Mutex.mutex
 }
 
 val current_status : t option ref = ref NONE
 val json_mode_ref = ref false
-val json_mutex = Thread.Mutex.mutex ()
+val json_mutex = Mutex.mutex ()
 
 val clear_to_eol = "\027[0K"
 
@@ -57,11 +57,11 @@ fun json_int_field name value =
 fun json_fields fields = "{" ^ String.concatWith "," fields ^ "}\n"
 
 fun emit_json stream event fields =
-  (Thread.Mutex.lock json_mutex;
+  (Mutex.lock json_mutex;
    (TextIO.output(stream, json_fields (json_string_field "event" event :: fields));
     TextIO.flushOut stream)
-   before Thread.Mutex.unlock json_mutex)
-  handle e => (Thread.Mutex.unlock json_mutex; raise e)
+   before Mutex.unlock json_mutex)
+  handle e => (Mutex.unlock json_mutex; raise e)
 
 fun json_message stream_name stream text =
   emit_json stream "message"
@@ -208,8 +208,8 @@ fun redraw (status as {enabled, ended, width, ...} : t) =
      TextIO.flushOut TextIO.stdOut)
 
 fun with_lock ({mutex, ...} : t) f =
-  (Thread.Mutex.lock mutex; f () before Thread.Mutex.unlock mutex)
-  handle e => (Thread.Mutex.unlock mutex; raise e)
+  (Mutex.lock mutex; f () before Mutex.unlock mutex)
+  handle e => (Mutex.unlock mutex; raise e)
 
 fun create {total, jobs} =
   let
@@ -226,7 +226,7 @@ fun create {total, jobs} =
        active = ref [],
        started_at = Time.now (),
        ended = ref false,
-       mutex = Thread.Mutex.mutex ()}
+       mutex = Mutex.mutex ()}
   in
     current_status := SOME status;
     status

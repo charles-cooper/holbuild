@@ -96,8 +96,8 @@ bin/holbuild -j4 build MyTheory
 bin/holbuild --maxheap 4096 build MyTheory
 bin/holbuild build --skip-checkpoints MyTheory
 bin/holbuild build --tactic-timeout 5 MyTheory
-bin/holbuild build --force --goalfrag-plan my_theorem MyTheory
-bin/holbuild build --force --goalfrag-trace my_theorem MyTheory
+bin/holbuild goalfrag-plan MyTheory:my_theorem
+bin/holbuild build --force --goalfrag-trace MyTheory
 bin/holbuild --json build MyTheory
 ```
 
@@ -135,12 +135,14 @@ a build but are removed after successful artifact/metadata writes.
 `--skip-goalfrag` opts out of modern theorem instrumentation.
 `--tactic-timeout SECONDS` sets the root-project per-tactic goalfrag timeout;
 the default is 2.5 seconds, and `0` disables the timeout. Dependency packages
-build with no tactic timeout. `--goalfrag-plan THEOREM` prints the generated
-goalfrag plan for one theorem and exits without continuing downstream builds.
-`--goalfrag-trace THEOREM` prints that plan plus
-before/after execution trace lines with goal counts and per-fragment elapsed
-milliseconds. Use these with `--force` when you need to force execution for
-proof-performance/debug inspection. Combining `--skip-goalfrag` with
+build with no tactic timeout. `goalfrag-plan THEORY:THEOREM` statically prints a
+faithful, pretty form of the executable GoalFrag step IR for one theorem and exits
+without building. Each numbered line is one executable tactic/list-tactic/GoalFrag
+operation; indentation and body text are formatting only. `--goalfrag-trace`
+runs a build, records runtime traces for all instrumented proofs in the child log,
+and prints the failed theorem's trace excerpt on failure. Use trace with `--force`
+when you need to force source execution for proof-performance/debug inspection.
+Combining `--skip-goalfrag` with
 `--tactic-timeout`, `--goalfrag-plan`, or `--goalfrag-trace` is an error because
 all three are implemented by the goalfrag runtime. Goalfrag/checkpoint/timeout
 policy affects execution and diagnostics, not final theory artifact action keys. `--json` emits newline-delimited

@@ -170,51 +170,28 @@ mkdir -p "$trace_project/src"
 cp "$project/holproject.toml" "$trace_project/holproject.toml"
 cp "$project/src/AScript.sml" "$trace_project/src/AScript.sml"
 plan_log=$tmpdir/goalfrag-plan.log
-(cd "$trace_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --force --goalfrag-plan b_thm ATheory) > "$plan_log" 2>&1
-require_grep "holbuild goalfrag plan theorem=b_thm steps=" "$plan_log"
-require_grep "holbuild goalfrag plan step=.*kind=open.*label=open_then1" "$plan_log"
-if grep -q "holbuild goalfrag before theorem=b_thm" "$plan_log" || grep -q "elapsed_ms=" "$plan_log"; then
-  echo "--goalfrag-plan emitted execution trace" >&2
-  exit 1
-fi
-plan_stop_project=$tmpdir/plan-stop-project
-mkdir -p "$plan_stop_project/src"
-cp "$project/holproject.toml" "$plan_stop_project/holproject.toml"
-cp "$project/src/AScript.sml" "$plan_stop_project/src/AScript.sml"
-cat > "$plan_stop_project/src/BScript.sml" <<'SML'
-open HolKernel Parse boolLib bossLib;
-open ATheory;
-
-val _ = new_theory "B";
-
-Theorem use_a:
-  T
-Proof
-  ACCEPT_TAC a_thm
-QED
-
-val _ = export_theory();
-SML
-plan_stop_log=$tmpdir/goalfrag-plan-stop.log
-(cd "$plan_stop_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --goalfrag-plan b_thm BTheory) > "$plan_stop_log" 2>&1
-require_grep "ATheory inspected" "$plan_stop_log"
-if grep -q "BTheory built\|goalfrag/checkpoint run failed\|hol run failed" "$plan_stop_log"; then
-  echo "--goalfrag-plan continued building after printing the selected plan" >&2
-  exit 1
-fi
-if [ -e "$plan_stop_project/.holbuild/obj/src/BTheory.dat" ]; then
-  echo "--goalfrag-plan produced downstream artifacts after inspection" >&2
+(cd "$trace_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" goalfrag-plan ATheory:b_thm) > "$plan_log" 2>&1
+require_grep "holbuild goalfrag plan ATheory:b_thm source=src/AScript.sml (" "$plan_log"
+require_grep "^[[:space:]]*00 .*CONJ_TAC" "$plan_log"
+require_grep "^[[:space:]]*[0-9][0-9] .*ACCEPT_TAC TRUTH" "$plan_log"
+if grep -q "holbuild goalfrag before theorem=b_thm\|elapsed_ms=\|ATheory built\|ATheory inspected\|resuming ATheory" "$plan_log"; then
+  echo "--goalfrag-plan executed the build instead of statically printing the plan" >&2
   exit 1
 fi
 trace_log=$tmpdir/goalfrag-trace.log
-(cd "$trace_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --force --goalfrag-trace b_thm ATheory) > "$trace_log" 2>&1
-require_grep "holbuild goalfrag plan theorem=b_thm steps=" "$trace_log"
-require_grep "holbuild goalfrag before theorem=b_thm step=0" "$trace_log"
-require_grep "holbuild goalfrag after theorem=b_thm step=0.*elapsed_ms=" "$trace_log"
-if grep -q "holbuild goalfrag plan theorem=a_thm" "$trace_log"; then
-  echo "--goalfrag-trace traced an unrequested theorem" >&2
+(cd "$trace_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --force --goalfrag-trace ATheory) > "$trace_log" 2>&1
+require_grep "ATheory built" "$trace_log"
+if grep -q "holbuild goalfrag plan theorem=\|holbuild goalfrag before theorem=" "$trace_log"; then
+  echo "--goalfrag-trace should not dump successful proof traces to stdout" >&2
   exit 1
 fi
+require_grep "goalfrag trace log:" "$trace_log"
+trace_child_log=$(find "$trace_project/.holbuild/logs" -name '*-ATheory-goalfrag-trace.log' -print -quit)
+require_file "$trace_child_log"
+require_grep "holbuild goalfrag plan theorem=a_thm steps=" "$trace_child_log"
+require_grep "holbuild goalfrag plan theorem=b_thm steps=" "$trace_child_log"
+require_grep "holbuild goalfrag before theorem=b_thm step=0" "$trace_child_log"
+require_grep "holbuild goalfrag after theorem=b_thm step=0.*elapsed_ms=" "$trace_child_log"
 force_log=$tmpdir/force.log
 (cd "$trace_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --force ATheory) > "$force_log" 2>&1
 require_grep "ATheory built" "$force_log"
@@ -323,12 +300,11 @@ require_grep "holbuild top goal at failed fragment" "$failure_again_log"
 require_file "$a_thm_context"
 require_file "$b_thm_failed_prefix"
 failed_prefix_plan_log=$tmpdir/failed-prefix-plan.log
-(cd "$failure_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --goalfrag-plan b_thm ATheory) > "$failed_prefix_plan_log" 2>&1
-require_grep "resuming ATheory from checkpoint b_thm failed_prefix" "$failed_prefix_plan_log"
-require_grep "holbuild goalfrag plan theorem=b_thm steps=" "$failed_prefix_plan_log"
-require_grep "ATheory inspected" "$failed_prefix_plan_log"
-if grep -q "holbuild top goal at failed fragment\|goalfrag/checkpoint run failed" "$failed_prefix_plan_log"; then
-  echo "--goalfrag-plan replayed a failing proof instead of stopping after the plan" >&2
+(cd "$failure_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --goalfrag-plan ATheory:b_thm) > "$failed_prefix_plan_log" 2>&1
+require_grep "holbuild goalfrag plan ATheory:b_thm source=src/AScript.sml (" "$failed_prefix_plan_log"
+require_grep "FAIL_TAC \"expected failure\"" "$failed_prefix_plan_log"
+if grep -q "resuming ATheory\|ATheory inspected\|holbuild top goal at failed fragment\|goalfrag/checkpoint run failed" "$failed_prefix_plan_log"; then
+  echo "--goalfrag-plan executed/replayed the build instead of statically printing the plan" >&2
   exit 1
 fi
 python3 - <<PY
@@ -363,7 +339,7 @@ QED
 val _ = export_theory();
 SML
 branch_failure_log=$tmpdir/branch-failure.log
-if (cd "$branch_failure_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --goalfrag-trace branch_failure ATheory) > "$branch_failure_log" 2>&1; then
+if (cd "$branch_failure_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --goalfrag-trace ATheory) > "$branch_failure_log" 2>&1; then
   echo "expected branch proof to fail build" >&2
   exit 1
 fi

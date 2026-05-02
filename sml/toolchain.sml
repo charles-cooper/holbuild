@@ -108,16 +108,16 @@ fun kill_process_group signal pid =
   Posix.Process.kill (Posix.Process.K_GROUP pid, signal) handle OS.SysErr _ => ()
 
 val active_child_groups = ref ([] : Posix.ProcEnv.pid list)
-val active_child_mutex = Thread.Mutex.mutex ()
+val active_child_mutex = Mutex.mutex ()
 
 fun with_active_child_lock f =
   let
-    val _ = Thread.Mutex.lock active_child_mutex
-    val result = f () before Thread.Mutex.unlock active_child_mutex
+    val _ = Mutex.lock active_child_mutex
+    val result = f () before Mutex.unlock active_child_mutex
   in
     result
   end
-  handle e => (Thread.Mutex.unlock active_child_mutex; raise e)
+  handle e => (Mutex.unlock active_child_mutex; raise e)
 
 fun register_child_group pid =
   with_active_child_lock (fn () => active_child_groups := pid :: !active_child_groups)

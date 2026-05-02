@@ -609,15 +609,26 @@ cases. The CLI default is 2.5 seconds per tactic step for the root package;
 `--tactic-timeout SECONDS` changes that root-package timeout, and
 `--tactic-timeout 0` disables it. Dependency package builds use no tactic timeout,
 so a consumer's proof-debug timeout does not make dependency builds fail.
-`--goalfrag-plan THEOREM` and `--goalfrag-trace THEOREM` are debugging/inspection paths:
-the former prints the generated GoalFrag step plan for one theorem and stops the
-build without continuing downstream targets, while the latter prints that plan
-plus before/after execution trace lines with per-fragment elapsed time and
-open-goal counts. They are not action-key inputs.
-Use `--force` with these options when the artifact is already up to date and you
-need source execution for inspection; `--force` bypasses local up-to-date checks
-and global cache restore without disabling cache publication. Because timeouts,
-planning, and tracing only exist in the goalfrag runtime,
+`goalfrag-plan THEORY:THEOREM` and `--goalfrag-trace` are debugging/inspection paths.
+`holbuild goalfrag-plan THEORY:THEOREM` is static inspection: it discovers sources,
+finds the named theorem in the named theory script, pretty-prints the final
+executable GoalFrag step IR, and exits without acquiring the project build lock,
+planning dependencies, consulting cache/up-to-date state, or executing the proof.
+The pretty form must remain faithful to the IR: each
+numbered line is one executable tactic/list-tactic/GoalFrag operation; indentation
+and parenthesized body text are formatting only. For example, a `>>~-` source
+fragment may display as one numbered `list_tac Q.SELECT_GOALS_LT_THEN1 ...` step
+when that is what the runtime executes, not as an ordinary `>-` branch. The goal
+is that a developer can debug a divergence by inspecting the plan and knowing the
+HOL tactic combinator semantics.
+
+`--goalfrag-trace` executes the build and records runtime plans plus before/after
+trace lines for all instrumented proofs in the child log. On failure, holbuild
+prints the failed theorem's trace excerpt with per-fragment elapsed time and
+open-goal counts. Use `--force` with trace when the artifact is already up to date
+and you need source execution; `--force` bypasses local up-to-date checks and
+global cache restore without disabling cache publication. Planning/tracing are not action-key inputs. Because
+timeouts, planning, and tracing only exist in the goalfrag runtime,
 `--skip-goalfrag --tactic-timeout ...`, `--skip-goalfrag --goalfrag-plan ...`, and
 `--skip-goalfrag --goalfrag-trace ...` are rejected instead of silently ignoring
 the request. Goalfrag, checkpoint creation, tactic timeout, planning, and tracing are execution/debug policy,

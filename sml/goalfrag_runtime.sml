@@ -7,14 +7,14 @@ type config = {checkpoint_enabled : bool,
                tactic_timeout : real option,
                timeout_marker : string option,
                plan_theorem : string option,
-               trace_theorem : string option,
+               trace_all : bool,
                plan_only_marker : string option}
 
 val checkpoint_enabled_ref = ref false
 val tactic_timeout_ref = ref (NONE : real option)
 val tactic_timeout_marker_ref = ref (NONE : string option)
 val plan_theorem_ref = ref (NONE : string option)
-val trace_theorem_ref = ref (NONE : string option)
+val trace_all_ref = ref false
 val plan_only_marker_ref = ref (NONE : string option)
 val plan_active_ref = ref false
 val trace_active_ref = ref false
@@ -383,6 +383,8 @@ fun frag_text body (TacticParse.FAtom a) =
         case a of
             TacticParse.LReverse => "Tactical.REVERSE_LT"
           | TacticParse.LTacsToLT _ => if String.size raw = 0 then raw else "Tactical.TACS_TO_LT (" ^ raw ^ ")"
+          | TacticParse.Rename _ => "Q.RENAME_TAC " ^ raw
+          | TacticParse.Group (_, _, TacticParse.Rename _) => "Q.RENAME_TAC " ^ raw
           | TacticParse.Subgoal _ => if is_term_quote raw then "sg " ^ raw else raw
           | _ => raw
       end
@@ -444,6 +446,27 @@ fun merge_reverse_steps [] acc = rev acc
                         (StepExpand {end_pos, label} :: acc) =
       merge_reverse_steps rest (StepExpand {end_pos = end_pos, label = "Tactical.REVERSE (" ^ label ^ ")"} :: acc)
   | merge_reverse_steps (step :: rest) acc = merge_reverse_steps rest (step :: acc)
+
+fun drop_prefix prefix text =
+  if String.isPrefix prefix text then SOME (String.extract(text, size prefix, NONE)) else NONE
+
+fun rename_pattern label =
+  case drop_prefix "Q.RENAME_TAC " label of
+      SOME pattern => pattern
+    | NONE => label
+
+fun merge_select_then1_steps [] acc = rev acc
+  | merge_select_then1_steps (StepOpen {label = "open_select_lt", ...} ::
+                              StepExpand {label = pattern, ...} ::
+                              StepMid {label = "next_select_lt", ...} ::
+                              StepOpen {label = "open_paren", ...} :: rest) acc =
+      (case collect_then1_steps rest of
+           SOME (tacText, tacEnd, StepClose _ :: rest') =>
+             merge_select_then1_steps rest'
+               (StepExpandList {end_pos = tacEnd,
+                                label = "Q.SELECT_GOALS_LT_THEN1 " ^ rename_pattern pattern ^ " (" ^ tacText ^ ")"} :: acc)
+         | _ => merge_select_then1_steps rest acc)
+  | merge_select_then1_steps (step :: rest) acc = merge_select_then1_steps rest (step :: acc)
 
 fun merge_select_steps [] acc = rev acc
   | merge_select_steps (selectStep :: rest) acc =
@@ -508,8 +531,9 @@ fun steps body =
                 | NONE => assign rest last acc
           end
   in
-    merge_select_steps
-      (merge_reverse_steps (merge_by_steps (assign frags 0 []) []) []) []
+    merge_select_then1_steps
+      (merge_select_steps
+        (merge_reverse_steps (merge_by_steps (assign frags 0 []) []) []) []) []
   end
 
 fun report_step_failure label e = (save_failed_prefix_checkpoint (); print_goal_state label; raise e)
@@ -604,6 +628,7 @@ fun trace_goalfrag_plan theorem_name plan =
        (fn (index, step') =>
           TextIO.output(TextIO.stdErr,
             String.concat ["holbuild goalfrag plan step=", Int.toString index,
+                           " theorem=", theorem_name,
                            " kind=", step_kind step',
                            " end=", Int.toString (step_end step'),
                            " label=", display_label (step_label step'), "\n"]))
@@ -681,8 +706,8 @@ fun with_theorem_trace name f =
     val old_active = !trace_active_ref
     val old_plan_active = !plan_active_ref
     val old_name = !trace_current_theorem_ref
-    val _ = plan_active_ref := (inspection_matches (!plan_theorem_ref) name orelse inspection_matches (!trace_theorem_ref) name)
-    val _ = trace_active_ref := inspection_matches (!trace_theorem_ref) name
+    val _ = plan_active_ref := (inspection_matches (!plan_theorem_ref) name orelse !trace_all_ref)
+    val _ = trace_active_ref := !trace_all_ref
     val _ = trace_current_theorem_ref := name
     val result = TraceOk (f ()) handle e => TraceError e
     val _ = trace_active_ref := old_active
@@ -777,12 +802,12 @@ fun goalfrag_prover (g, tac) =
              drop_all();
              raise e)
 
-fun install ({checkpoint_enabled, tactic_timeout, timeout_marker, plan_theorem, trace_theorem, plan_only_marker} : config) =
+fun install ({checkpoint_enabled, tactic_timeout, timeout_marker, plan_theorem, trace_all, plan_only_marker} : config) =
   (checkpoint_enabled_ref := checkpoint_enabled;
    tactic_timeout_ref := tactic_timeout;
    tactic_timeout_marker_ref := timeout_marker;
    plan_theorem_ref := plan_theorem;
-   trace_theorem_ref := trace_theorem;
+   trace_all_ref := trace_all;
    plan_only_marker_ref := plan_only_marker;
    plan_active_ref := false;
    trace_active_ref := false;

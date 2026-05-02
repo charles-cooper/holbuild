@@ -14,7 +14,8 @@ fun usage () = print
   "holbuild: experimental project-aware build frontend for HOL4\n\n\
   \Usage:\n\
   \  holbuild [--json] [--holdir PATH] [--maxheap MB] [-jN] context\n\
-  \  holbuild [--json] [--holdir PATH] [--maxheap MB] [-jN] build [--dry-run] [--force] [--no-cache] [--skip-checkpoints] [--skip-goalfrag] [--tactic-timeout SECONDS] [--goalfrag-plan THEOREM] [--goalfrag-trace THEOREM] [TARGET ...]\n\
+  \  holbuild [--json] [--holdir PATH] [--maxheap MB] [-jN] goalfrag-plan THEORY:THEOREM\n\
+  \  holbuild [--json] [--holdir PATH] [--maxheap MB] [-jN] build [--dry-run] [--force] [--no-cache] [--skip-checkpoints] [--skip-goalfrag] [--tactic-timeout SECONDS] [--goalfrag-plan THEORY:THEOREM] [--goalfrag-trace] [TARGET ...]\n\
   \  holbuild [--json] [--holdir PATH] [--maxheap MB] [-jN] heap NAME\n\
   \  holbuild [--json] [--holdir PATH] [--maxheap MB] run [ARG ...]\n\
   \  holbuild [--json] [--holdir PATH] [--maxheap MB] repl [ARG ...]\n\
@@ -58,10 +59,9 @@ fun split_flags args =
             loop dry force use_cache skip_checkpoints false tactic_timeout tactic_timeout_set goalfrag_plan goalfrag_trace xs
         | "--goalfrag-plan" :: theorem :: xs =>
             loop dry force use_cache skip_checkpoints goalfrag tactic_timeout tactic_timeout_set (SOME theorem) goalfrag_trace xs
-        | "--goalfrag-plan" :: [] => raise Error "--goalfrag-plan requires THEOREM"
-        | "--goalfrag-trace" :: theorem :: xs =>
-            loop dry force use_cache skip_checkpoints goalfrag tactic_timeout tactic_timeout_set goalfrag_plan (SOME theorem) xs
-        | "--goalfrag-trace" :: [] => raise Error "--goalfrag-trace requires THEOREM"
+        | "--goalfrag-plan" :: [] => raise Error "--goalfrag-plan requires THEORY:THEOREM"
+        | "--goalfrag-trace" :: xs =>
+            loop dry force use_cache skip_checkpoints goalfrag tactic_timeout tactic_timeout_set goalfrag_plan true xs
         | "--tactic-timeout" :: seconds :: xs =>
             loop dry force use_cache skip_checkpoints goalfrag (tactic_timeout_value seconds) true goalfrag_plan goalfrag_trace xs
         | "--tactic-timeout" :: [] => raise Error "--tactic-timeout requires SECONDS"
@@ -74,13 +74,12 @@ fun split_flags args =
               loop dry force use_cache skip_checkpoints goalfrag tactic_timeout tactic_timeout_set
                    (SOME (String.extract (x, size "--goalfrag-plan=", NONE))) goalfrag_trace xs
             else if String.isPrefix "--goalfrag-trace=" x then
-              loop dry force use_cache skip_checkpoints goalfrag tactic_timeout tactic_timeout_set
-                   goalfrag_plan (SOME (String.extract (x, size "--goalfrag-trace=", NONE))) xs
+              raise Error "--goalfrag-trace does not take a theorem; use --goalfrag-trace TARGET"
             else
               let val (flags, ys) = loop dry force use_cache skip_checkpoints goalfrag tactic_timeout tactic_timeout_set goalfrag_plan goalfrag_trace xs
               in (flags, x :: ys) end
   in
-    loop false false true false true NONE false NONE NONE args
+    loop false false true false true NONE false NONE false args
   end
 
 fun has_suffix suffix s =
@@ -138,6 +137,65 @@ fun warn_unreachable_root_scripts project index plan =
          if length unreachable > limit then
            warn ("  ... " ^ Int.toString (length unreachable - limit) ^ " more")
          else ())
+  end
+
+fun read_text path =
+  let val ins = TextIO.openIn path
+  in TextIO.inputAll ins before TextIO.closeIn ins end
+
+fun theory_source source = #kind source = HolbuildSourceIndex.TheoryScript
+
+fun describe_source source =
+  #package source ^ ":" ^ #relative_path source ^ " (" ^ #logical_name source ^ ")"
+
+fun parse_goalfrag_selector selector =
+  case String.fields (fn c => c = #":") selector of
+      [theory, theorem] =>
+        if theory = "" orelse theorem = "" then
+          raise Error "--goalfrag-plan requires THEORY:THEOREM"
+        else {theory = theory, theorem = theorem}
+    | _ => raise Error "--goalfrag-plan requires THEORY:THEOREM"
+
+fun theorem_match theorem source =
+  let
+    val text = read_text (#source_path source)
+    val boundaries = HolbuildBuildExec.discover_theorem_boundaries (#source_path source) text
+  in
+    case List.filter (fn boundary => #name boundary = theorem) boundaries of
+        [] => NONE
+      | [boundary] => SOME (source, boundary)
+      | _ => raise Error ("duplicate theorem in " ^ describe_source source ^ ": " ^ theorem)
+  end
+
+fun print_static_goalfrag_plan source theorem boundary =
+  (print (HolbuildGoalfragPlan.format_tactic
+            {theory = #logical_name source,
+             theorem = theorem,
+             source = #relative_path source}
+            (#tactic_text boundary));
+   TextIO.flushOut TextIO.stdOut)
+
+fun find_theory_source index theory =
+  case List.filter (fn source => theory_source source andalso #logical_name source = theory) index of
+      [source] => source
+    | [] => raise Error ("theory not found for --goalfrag-plan: " ^ theory)
+    | matches =>
+        raise Error ("ambiguous theory for --goalfrag-plan: " ^ theory ^ " in " ^
+                     String.concatWith ", " (map describe_source matches))
+
+fun find_theorem_in_source theorem source =
+  case theorem_match theorem source of
+      SOME (_, boundary) => boundary
+    | NONE => raise Error ("theorem not found for --goalfrag-plan: " ^ #logical_name source ^ ":" ^ theorem)
+
+fun print_goalfrag_plan_selector project selector =
+  let
+    val {theory, theorem} = parse_goalfrag_selector selector
+    val index = HolbuildSourceIndex.discover project
+    val source = find_theory_source index theory
+    val boundary = find_theorem_in_source theorem source
+  in
+    print_static_goalfrag_plan source theorem boundary
   end
 
 fun positive_int label text =
@@ -227,11 +285,15 @@ fun build tc cli_jobs args =
     val _ =
       if HolbuildStatus.json_mode () andalso dry_run then
         raise Error "--json does not support build --dry-run yet"
-      else if dry_run andalso (Option.isSome goalfrag_plan orelse Option.isSome goalfrag_trace) then
-        raise Error "--goalfrag-plan/--goalfrag-trace require build execution; use --force to inspect up-to-date targets"
+      else if HolbuildStatus.json_mode () andalso Option.isSome goalfrag_plan then
+        raise Error "--json does not support --goalfrag-plan yet"
+      else if Option.isSome goalfrag_plan andalso goalfrag_trace then
+        raise Error "--goalfrag-plan and --goalfrag-trace are separate modes"
+      else if dry_run andalso goalfrag_trace then
+        raise Error "--goalfrag-trace requires build execution; use --force to inspect up-to-date targets"
       else if not goalfrag andalso tactic_timeout_set then
         raise Error "--tactic-timeout requires goalfrag; remove --skip-goalfrag"
-      else if not goalfrag andalso (Option.isSome goalfrag_plan orelse Option.isSome goalfrag_trace) then
+      else if not goalfrag andalso (Option.isSome goalfrag_plan orelse goalfrag_trace) then
         raise Error "--goalfrag-plan/--goalfrag-trace require goalfrag; remove --skip-goalfrag"
       else ()
     val build_options = {use_cache = use_cache,
@@ -272,8 +334,11 @@ fun build tc cli_jobs args =
           (fn () => HolbuildBuildExec.build build_options tc project plan toolchain_key jobs)
       end
   in
-    if dry_run then describe_dry_run ()
-    else HolbuildBuildExec.with_project_lock project "build" execute_build
+    case goalfrag_plan of
+        SOME selector => print_goalfrag_plan_selector project selector
+      | _ =>
+          if dry_run then describe_dry_run ()
+          else HolbuildBuildExec.with_project_lock project "build" execute_build
   end
 
 fun heap_named project target =
@@ -298,7 +363,7 @@ fun build_heap tc cli_jobs target =
         val toolchain_key = timed_phase "toolchain.key" (fn () => HolbuildToolchain.toolchain_key tc)
         val output_path = HolbuildProject.abs_under (#root project) output
       in
-        HolbuildBuildExec.build {use_cache = true, force = false, skip_checkpoints = false, goalfrag = true, tactic_timeout = SOME 2.5, goalfrag_plan = NONE, goalfrag_trace = NONE}
+        HolbuildBuildExec.build {use_cache = true, force = false, skip_checkpoints = false, goalfrag = true, tactic_timeout = SOME 2.5, goalfrag_plan = NONE, goalfrag_trace = false}
                                tc project plan toolchain_key jobs;
         HolbuildBuildExec.export_heap tc project plan output_path
       end
@@ -327,6 +392,11 @@ fun run_hol tc subcommand user_args =
     else raise Error ("hol " ^ subcommand ^ " failed")
   end
 
+fun goalfrag_plan_command args =
+  case args of
+      [selector] => print_goalfrag_plan_selector (load_project ()) selector
+    | _ => raise Error "usage: holbuild goalfrag-plan THEORY:THEOREM"
+
 fun reject_json command =
   if HolbuildStatus.json_mode () then
     raise Error ("--json does not support " ^ command ^ " yet")
@@ -336,6 +406,7 @@ fun dispatch tc jobs args =
   case args of
       [] => (reject_json "context"; context ())
     | "context" :: [] => (reject_json "context"; context ())
+    | "goalfrag-plan" :: rest => (reject_json "goalfrag-plan"; goalfrag_plan_command rest)
     | "build" :: rest => build tc jobs rest
     | "heap" :: [target] => (reject_json "heap"; build_heap tc jobs target)
     | "heap" :: _ => raise Error "usage: holbuild heap NAME"
@@ -408,7 +479,7 @@ fun main raw_args =
    in
      dispatch_with_options options args
    end)
-  handle Thread.Thread.Interrupt => (HolbuildToolchain.cleanup_active_children (); err "interrupted")
+  handle Thread.Interrupt => (HolbuildToolchain.cleanup_active_children (); err "interrupted")
        | Error msg => err msg
        | HolbuildToolchain.Error msg => err msg
        | HolbuildProject.Error msg => err msg
