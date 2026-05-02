@@ -1047,7 +1047,8 @@ fun failed_prefix_ok deps_key safe_name pre_hash header_hash =
     [("deps_key", deps_key),
      ("safe_name", safe_name),
      ("pre_theorem_key", pre_hash),
-     ("header_key", header_hash)]
+     ("header_key", header_hash),
+     ("failure_diagnostic_key", "failed_theorem_v1")]
 
 fun theorem_checkpoint_specs project node deps_key source boundaries =
   map (fn {name, safe_name, theorem_start, theorem_stop, boundary, tactic_start,
