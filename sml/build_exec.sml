@@ -1040,10 +1040,11 @@ fun theorem_failed_prefix_path project node deps_key safe_name =
 fun discover_theorem_boundaries source_path source_text =
   HolbuildTheorySpans.scan source_path source_text
 
-fun theorem_checkpoint_key {name, safe_name, boundary, deps_key, prefix_hash} =
+fun theorem_checkpoint_key {kind, name, safe_name, boundary, deps_key, prefix_hash} =
   HolbuildToolchain.hash_text
     (String.concatWith "\n"
        ["holbuild-theorem-checkpoint-key-v1",
+        "kind=" ^ kind,
         "name=" ^ name,
         "safe_name=" ^ safe_name,
         "boundary=" ^ Int.toString boundary,
@@ -1071,16 +1072,16 @@ fun failed_prefix_ok deps_key safe_name pre_hash header_hash =
      ("failure_diagnostic_key", "failed_theorem_v1")]
 
 fun theorem_checkpoint_specs project node deps_key source boundaries =
-  map (fn {name, safe_name, theorem_start, theorem_stop, boundary, tactic_start,
+  map (fn {kind, name, safe_name, theorem_start, theorem_stop, boundary, tactic_start,
            tactic_end, tactic_text, has_proof_attrs, prefix_hash} =>
           let
-            val checkpoint_key = theorem_checkpoint_key {name = name, safe_name = safe_name,
+            val checkpoint_key = theorem_checkpoint_key {kind = kind, name = name, safe_name = safe_name,
                                                          boundary = boundary, deps_key = deps_key,
                                                          prefix_hash = prefix_hash}
             val header_hash = theorem_header_hash source theorem_start tactic_start
             val pre_hash = pre_theorem_hash source theorem_start
           in
-            {name = name, safe_name = safe_name, theorem_start = theorem_start,
+            {kind = kind, name = name, safe_name = safe_name, theorem_start = theorem_start,
              theorem_stop = theorem_stop, boundary = boundary,
              tactic_start = tactic_start, tactic_end = tactic_end,
              tactic_text = tactic_text, has_proof_attrs = has_proof_attrs,

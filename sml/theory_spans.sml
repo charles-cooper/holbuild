@@ -4,10 +4,28 @@ struct
 fun bool_digit true = "1"
   | bool_digit false = "0"
 
-fun theorem_report_line name theorem_start theorem_stop tactic_start tactic_end has_attrs =
+fun proof_unit_report_line kind name theorem_start theorem_stop tactic_start tactic_end has_attrs =
   String.concatWith "\t"
-    ["theorem", name, Int.toString theorem_start, Int.toString theorem_stop,
+    [kind, name, Int.toString theorem_start, Int.toString theorem_stop,
      Int.toString tactic_start, Int.toString tactic_end, bool_digit has_attrs]
+
+fun attr_args NONE = []
+  | attr_args (SOME {attrs, ...}) = #args attrs
+
+fun resume_label_and_attrs id attrs =
+  let
+    val args = attr_args attrs
+    val (label, rest) =
+      case args of
+          {key, bind = NONE} :: rest => (#2 key, rest)
+        | _ => ("", args)
+    fun is_smlname {key = (_, "smlname"), ...} = true
+      | is_smlname _ = false
+    val proof_attrs = List.filter (not o is_smlname) rest
+    val suffix = if label = "" then "" else "[" ^ label ^ "]"
+  in
+    {name = id ^ suffix, has_attrs = not (null proof_attrs)}
+  end
 
 fun theorem_report_lines result =
   let
@@ -18,7 +36,15 @@ fun theorem_report_lines result =
             let
               val (tactic_start, tactic_end) = HOLSourceAST.expSpan tac
               val has_attrs = case proof_ of SOME {attrs = SOME _, ...} => true | _ => false
-              val line = theorem_report_line name theorem_ stop tactic_start tactic_end has_attrs
+              val line = proof_unit_report_line "theorem" name theorem_ stop tactic_start tactic_end has_attrs
+            in
+              loop (line :: acc)
+            end
+        | SOME (HOLSourceAST.HOLResume {resume_, id = (_, id_name), attrs, tac, stop, ...}) =>
+            let
+              val (tactic_start, tactic_end) = HOLSourceAST.expSpan tac
+              val {name, has_attrs} = resume_label_and_attrs id_name attrs
+              val line = proof_unit_report_line "resume" name resume_ stop tactic_start tactic_end has_attrs
             in
               loop (line :: acc)
             end

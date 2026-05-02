@@ -19,7 +19,7 @@ val plan_only_marker_ref = ref (NONE : string option)
 val plan_active_ref = ref false
 val trace_active_ref = ref false
 val trace_current_theorem_ref = ref ""
-val theorem_info_ref = ref NONE : (string * string * string * string * string * string * string * string * bool * int) option ref
+val theorem_info_ref = ref NONE : (string * string * string * string * string * string * string * string * string * bool * int) option ref
 val context_info_ref = ref NONE : (string * string * int) option ref
 val proving_with_goalfrag_ref = ref false
 val active_tactic_text_ref = ref ""
@@ -134,8 +134,8 @@ fun write_text_file path text =
 fun save_failed_prefix_checkpoint () =
   case !theorem_info_ref of
       NONE => ()
-    | SOME (_, _, _, _, _, _, failed_prefix_path, failed_prefix_ok, _, depth) =>
-        if not (!checkpoint_enabled_ref) then ()
+    | SOME (kind, _, _, _, _, _, _, failed_prefix_path, failed_prefix_ok, _, depth) =>
+        if kind <> "theorem" orelse not (!checkpoint_enabled_ref) then ()
         else
           let
             val prefix_end = !successful_prefix_end_ref
@@ -148,11 +148,11 @@ fun save_failed_prefix_checkpoint () =
             val _ = write_text_file (failed_prefix_path ^ ".prefix") prefix_text
           in () end
 
-fun begin_theorem (name, tactic_text, context_path, context_ok,
+fun begin_theorem (kind, name, tactic_text, context_path, context_ok,
                    end_path, end_ok, failed_prefix_path, failed_prefix_ok, has_attrs) =
   let val depth = length (PolyML.SaveState.showHierarchy())
   in
-    theorem_info_ref := SOME (name, tactic_text, context_path, context_ok,
+    theorem_info_ref := SOME (kind, name, tactic_text, context_path, context_ok,
                               end_path, end_ok, failed_prefix_path, failed_prefix_ok, has_attrs, depth);
     context_info_ref := SOME (context_path, context_ok, depth)
   end
@@ -169,7 +169,7 @@ fun top_goal_text [] = "<no open goals>\n"
 
 fun active_theorem_name () =
   case !theorem_info_ref of
-      SOME (name, _, _, _, _, _, _, _, _, _) => SOME name
+      SOME (_, name, _, _, _, _, _, _, _, _, _) => SOME name
     | NONE => NONE
 
 fun failed_theorem_line () =
@@ -806,7 +806,7 @@ fun finish_failed_prefix name old_prefix_text old_step_count tactic_text =
       val _ = proofManagerLib.drop_all()
     in th end)
 
-fun prove_outer_theorem (g, tac) (name, tactic_text, _, _, end_path, end_ok, _, _, has_attrs, checkpoint_depth) =
+fun prove_outer_theorem (g, tac) (_, name, tactic_text, _, _, end_path, end_ok, _, _, has_attrs, checkpoint_depth) =
   let
     val atomic = has_attrs orelse tactic_text = ""
     val _ = proving_with_goalfrag_ref := true

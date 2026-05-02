@@ -214,6 +214,9 @@ fun select_then1_source_probes label =
 
 fun source_location_probes label = label :: select_then1_source_probes label
 
+fun proof_unit_label (checkpoint : HolbuildTheoryCheckpoints.checkpoint) =
+  if #kind checkpoint = "resume" then "resume" else "theorem"
+
 fun checkpoint_source_summary source_path source_text (checkpoint : HolbuildTheoryCheckpoints.checkpoint) label offset =
   let
     val theorem_line = line_number_at source_text (#theorem_start checkpoint)
@@ -221,7 +224,7 @@ fun checkpoint_source_summary source_path source_text (checkpoint : HolbuildTheo
     val fragment_line = line_number_at source_text offset
   in
     String.concat
-      ["theorem: ", #name checkpoint, " (line ", Int.toString theorem_line, ")\n",
+      [proof_unit_label checkpoint, ": ", #name checkpoint, " (line ", Int.toString theorem_line, ")\n",
        "proof: line ", Int.toString proof_line, "\n",
        "fragment: ", label, "\n",
        "source: ", source_path, ":", Int.toString fragment_line, "\n",

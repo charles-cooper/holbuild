@@ -3,11 +3,11 @@ struct
 
 exception Error of string
 
-type boundary = {name : string, safe_name : string, theorem_start : int,
+type boundary = {kind : string, name : string, safe_name : string, theorem_start : int,
                  theorem_stop : int, boundary : int, tactic_start : int,
                  tactic_end : int, tactic_text : string,
                  has_proof_attrs : bool, prefix_hash : string}
-type checkpoint = {name : string, safe_name : string, theorem_start : int,
+type checkpoint = {kind : string, name : string, safe_name : string, theorem_start : int,
                    theorem_stop : int, boundary : int, tactic_start : int,
                    tactic_end : int, tactic_text : string,
                    has_proof_attrs : bool, prefix_hash : string,
@@ -75,16 +75,18 @@ fun slice text start stop =
 
 fun boundary_from_report_line source line =
   case String.tokens (fn c => c = #"\t") line of
-      ["theorem", name, theorem_start_s, theorem_stop_s,
+      [kind, name, theorem_start_s, theorem_stop_s,
        tactic_start_s, tactic_end_s, attrs_s] =>
         let
+          val _ = if kind = "theorem" orelse kind = "resume" then ()
+                  else raise Error ("bad AST proof-unit kind: " ^ kind)
           val theorem_start = parse_int "theorem_start" theorem_start_s
           val theorem_stop = parse_int "theorem_stop" theorem_stop_s
           val tactic_start = parse_int "tactic_start" tactic_start_s
           val tactic_end = parse_int "tactic_end" tactic_end_s
           val boundary = statement_boundary source theorem_stop
         in
-          {name = name, safe_name = safe_name name,
+          {kind = kind, name = name, safe_name = safe_name name,
            theorem_start = theorem_start, theorem_stop = theorem_stop,
            boundary = boundary, tactic_start = tactic_start, tactic_end = tactic_end,
            tactic_text = slice source tactic_start tactic_end,
@@ -99,12 +101,13 @@ fun discover_from_report {source, report} : boundary list =
       (List.filter (fn line => line <> "")
                    (String.tokens (fn c => c = #"\n") report))
 
-fun begin_theorem_line ({name, tactic_text, context_path, context_ok,
+fun begin_theorem_line ({kind, name, tactic_text, context_path, context_ok,
                          end_of_proof_path, end_of_proof_ok,
                          failed_prefix_path, failed_prefix_ok,
                          has_proof_attrs, ...} : checkpoint) =
   String.concat
     ["val _ = holbuild_begin_theorem(",
+     HolbuildToolchain.sml_string kind, ", ",
      HolbuildToolchain.sml_string name, ", ",
      HolbuildToolchain.sml_string tactic_text, ", ",
      HolbuildToolchain.sml_string context_path, ", ",

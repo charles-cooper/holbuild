@@ -265,6 +265,40 @@ plain_replay_log=$tmpdir/plain-replay.log
 require_grep "resuming ATheory from checkpoint a_thm" "$plain_replay_log"
 require_grep "ATheory built" "$plain_replay_log"
 
+resume_replay_project=$tmpdir/resume-replay-project
+mkdir -p "$resume_replay_project/src"
+cp "$project/holproject.toml" "$resume_replay_project/holproject.toml"
+cat > "$resume_replay_project/src/AScript.sml" <<'SML'
+open HolKernel Parse boolLib bossLib markerLib;
+val _ = new_theory "A";
+Theorem partial:
+  T /\ T
+Proof
+  CONJ_TAC >- ACCEPT_TAC TRUTH >- suspend "right"
+QED
+Resume partial[right]:
+  ACCEPT_TAC TRUTH
+QED
+Finalise partial
+val _ = raise Fail "expected resume replay seed failure";
+val _ = export_theory();
+SML
+resume_seed_log=$tmpdir/resume-replay-seed.log
+if (cd "$resume_replay_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$resume_seed_log" 2>&1; then
+  echo "expected resume replay seed proof to fail" >&2
+  exit 1
+fi
+require_file "$(find "$resume_replay_project/.holbuild/checkpoints" -name '*partial_right__context.save' -print -quit)"
+python3 - <<PY
+from pathlib import Path
+path = Path("$resume_replay_project/src/AScript.sml")
+path.write_text(path.read_text().replace('raise Fail "expected resume replay seed failure"', '()'))
+PY
+resume_replay_log=$tmpdir/resume-replay.log
+(cd "$resume_replay_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$resume_replay_log" 2>&1
+require_grep "resuming ATheory from checkpoint partial_right_" "$resume_replay_log"
+require_grep "ATheory built" "$resume_replay_log"
+
 failure_project=$tmpdir/failure-project
 mkdir -p "$failure_project/src"
 cp "$project/holproject.toml" "$failure_project/holproject.toml"
