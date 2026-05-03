@@ -34,13 +34,15 @@ fun step_kind (StepOpen _) = "open"
   | step_kind (StepSelect _) = "select"
   | step_kind (StepSelects _) = "selects"
 
-fun parse_tactic_source source =
+fun ignore_parse_error _ _ _ = ()
+
+fun parse_tactic s =
   let
     val fed = ref false
-    fun read _ = if !fed then "" else (fed := true; source)
+    fun read _ = if !fed then "" else (fed := true; s)
     val result =
       HOLSourceParser.parseSML "<holbuild tactic>" read
-        (fn _ => fn _ => fn msg => raise Fail msg)
+        ignore_parse_error
         HOLSourceParser.initialScope
   in
     case #parseDec result () of
@@ -48,23 +50,6 @@ fun parse_tactic_source source =
       | NONE => TacticParse.parseTacticBlock (HOLSourceAST.ExpEmpty 0)
       | _ => raise Fail "expected tactic expression"
   end
-
-fun close_suffix n = String.concat (List.tabulate(n, fn _ => "\n)"))
-
-fun parse_with_closing_repairs s original_error =
-  let
-    fun loop n =
-      if n > 8 then raise Fail original_error
-      else parse_tactic_source (s ^ close_suffix n) handle Fail _ => loop (n + 1)
-  in
-    loop 1
-  end
-
-fun parse_tactic s =
-  parse_tactic_source s
-  handle Fail msg =>
-    if msg = "expected closing parenthesis" then parse_with_closing_repairs s msg
-    else raise Fail msg
 
 fun flatten_frags frags =
   let
