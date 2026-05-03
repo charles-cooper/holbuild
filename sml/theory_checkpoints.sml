@@ -139,8 +139,12 @@ fun runtime_helper_path () =
       SOME path => path
     | NONE => OS.Path.concat(HolbuildRuntimePaths.source_root, "sml/goalfrag_runtime.sml")
 
+fun goalfrag_plan_helper_path () =
+  OS.Path.concat(HolbuildRuntimePaths.source_root, "sml/goalfrag_plan.sml")
+
 fun runtime_install_lines {checkpoint_enabled, tactic_timeout, timeout_marker, plan_theorem, trace_all, plan_only_marker} =
-  ["use " ^ HolbuildToolchain.sml_string (runtime_helper_path ()) ^ ";",
+  ["use " ^ HolbuildToolchain.sml_string (goalfrag_plan_helper_path ()) ^ ";",
+   "use " ^ HolbuildToolchain.sml_string (runtime_helper_path ()) ^ ";",
    "val _ = HolbuildGoalfragRuntime.install {checkpoint_enabled = " ^
      (if checkpoint_enabled then "true" else "false") ^
      ", tactic_timeout = " ^ option_real_sml tactic_timeout ^
