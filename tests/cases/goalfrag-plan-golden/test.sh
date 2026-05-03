@@ -72,17 +72,19 @@ Proof
 QED
 SML
 check_plan reverse_branch <<'EXPECTED'
-holbuild goalfrag plan ATheory:reverse_branch source=src/AScript.sml (10 steps)
+holbuild goalfrag plan ATheory:reverse_branch source=src/AScript.sml (12 steps)
   00 simp[step_create_def]
   01 >> strip_tac
   02 >> rewrite_tac[Ntimes CONJ_ASSOC 3]
   03 >> conj_tac
   04 >> list_tac Tactical.REVERSE_LT
-  05   >- qpat_x_assum `proceed_create _ _ _ _ _ se = _` mp_tac
-  06   >> rewrite_tac[proceed_create_def]
-  07   >> strip_tac
-  08   >> gvs[]
-  09 >> strip_tac
+  05   >- {
+  06     qpat_x_assum `proceed_create _ _ _ _ _ se = _` mp_tac
+  07     >> rewrite_tac[proceed_create_def]
+  08     >> strip_tac
+  09     >> gvs[]
+  10   }
+  11 >> strip_tac
 EXPECTED
 
 cat >> "$project/src/AScript.sml" <<'SML'
@@ -203,13 +205,15 @@ Proof
 QED
 SML
 check_plan branch_and_by <<'EXPECTED'
-holbuild goalfrag plan ATheory:branch_and_by source=src/AScript.sml (6 steps)
+holbuild goalfrag plan ATheory:branch_and_by source=src/AScript.sml (8 steps)
   00 CONJ_TAC
-  01   >- sg `T`
-  02     >- ACCEPT_TAC TRUTH
-  03   >> ACCEPT_TAC TRUTH
-  04 >> `T` suffices_by simp[]
-  05 >> ACCEPT_TAC TRUTH
+  01   >- {
+  02     sg `T`
+  03       >- ACCEPT_TAC TRUTH
+  04     >> ACCEPT_TAC TRUTH
+  05   }
+  06 >> `T` suffices_by simp[]
+  07 >> ACCEPT_TAC TRUTH
 EXPECTED
 
 cat >> "$project/src/AScript.sml" <<'SML'
@@ -225,17 +229,21 @@ Proof
 QED
 SML
 check_plan nested_combinators <<'EXPECTED'
-holbuild goalfrag plan ATheory:nested_combinators source=src/AScript.sml (10 steps)
+holbuild goalfrag plan ATheory:nested_combinators source=src/AScript.sml (14 steps)
   00 rpt strip_tac
   01 >> CONJ_TAC
-  02   >- TRY CONJ_TAC
-  03   >> ACCEPT_TAC TRUTH
-  04 >> CONJ_TAC
-  05 >> list_tac Tactical.REVERSE_LT
-  06   >- sg `T`
-  07     >- ACCEPT_TAC TRUTH
-  08   >> ACCEPT_TAC TRUTH
-  09 >> ACCEPT_TAC TRUTH
+  02   >- {
+  03     TRY CONJ_TAC
+  04     >> ACCEPT_TAC TRUTH
+  05   }
+  06 >> CONJ_TAC
+  07 >> list_tac Tactical.REVERSE_LT
+  08   >- {
+  09     sg `T`
+  10       >- ACCEPT_TAC TRUTH
+  11     >> ACCEPT_TAC TRUTH
+  12   }
+  13 >> ACCEPT_TAC TRUTH
 EXPECTED
 
 cat >> "$project/src/AScript.sml" <<'SML'

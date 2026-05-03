@@ -682,56 +682,150 @@ fun display_step (StepOpen {label = "open_paren", ...}) = false
   | display_step (StepClose {label = "close_first_lt", ...}) = false
   | display_step _ = true
 
-fun pop_visible stack =
-  case stack of
-      [] => (true, [])
-    | visible :: rest => (visible, rest)
+datatype pp_frame = HiddenFrame | VisibleFrame | Then1Frame of {close_depth : int, after_depth : int}
 
-fun format_steps index depth visible_stack seen_stack pending_stack steps =
+fun pop_frame stack =
+  case stack of
+      [] => (VisibleFrame, [])
+    | frame :: rest => (frame, rest)
+
+fun frame_is_visible HiddenFrame = false
+  | frame_is_visible _ = true
+
+fun pop_context frame seen_stack pending_stack =
+  if frame_is_visible frame then
+    (case seen_stack of [] => [] | _ :: rest => rest,
+     case pending_stack of [] => [] | _ :: rest => rest)
+  else (seen_stack, pending_stack)
+
+fun format_steps index depth frame_stack seen_stack pending_stack steps =
   case steps of
       [] => (index, "")
     | (StepOpen {label = "open_then1", ...}) :: rest =>
         let
           val seen_stack' = mark_current_seen seen_stack
           val pending_stack' = clear_current_pending pending_stack
-          val (count, rest_text) = format_steps index (depth + 1) (true :: visible_stack) (false :: seen_stack') (">- " :: pending_stack') rest
-        in (count, rest_text) end
+          val open_depth = depth + 1
+          val (count, rest_text) = format_steps (index + 1) (open_depth + 1) (Then1Frame {close_depth = open_depth, after_depth = depth} :: frame_stack) (false :: seen_stack') ("" :: pending_stack') rest
+        in (count, line open_depth index "" ">- {" ^ rest_text) end
     | (step as StepOpen {label, ...}) :: rest =>
         if display_step step then
           let
             val prefix = step_prefix seen_stack pending_stack
             val seen_stack' = mark_current_seen seen_stack
             val pending_stack' = clear_current_pending pending_stack
-            val (count, rest_text) = format_steps (index + 1) (depth + 1) (true :: visible_stack) (false :: seen_stack') ("" :: pending_stack') rest
+            val (count, rest_text) = format_steps (index + 1) (depth + 1) (VisibleFrame :: frame_stack) (false :: seen_stack') ("" :: pending_stack') rest
           in (count, format_step index depth prefix step ^ rest_text) end
-        else format_steps index depth (false :: visible_stack) seen_stack pending_stack rest
+        else format_steps index depth (HiddenFrame :: frame_stack) seen_stack pending_stack rest
     | (step as StepClose _) :: rest =>
         let
-          val (visible_open, visible_stack') = pop_visible visible_stack
-          val seen_stack' = if visible_open then (case seen_stack of [] => [] | _ :: rest => rest) else seen_stack
-          val pending_stack' = if visible_open then (case pending_stack of [] => [] | _ :: rest => rest) else pending_stack
-          val depth' = if visible_open then Int.max(0, depth - 1) else depth
+          val (frame, frame_stack') = pop_frame frame_stack
+          val (seen_stack', pending_stack') = pop_context frame seen_stack pending_stack
+          val depth' = if frame_is_visible frame then Int.max(0, depth - 1) else depth
         in
-          if display_step step then
-            let val (count, rest_text) = format_steps (index + 1) depth' visible_stack' (mark_current_seen seen_stack') (clear_current_pending pending_stack') rest
-            in (count, format_step index depth "" step ^ rest_text) end
-          else format_steps index depth' visible_stack' seen_stack' pending_stack' rest
+          case frame of
+              Then1Frame {close_depth, after_depth} =>
+                (case rest of
+                     StepOpen {label = "open_then1", ...} :: rest' =>
+                       let
+                         val (count, rest_text) = format_steps (index + 1) (close_depth + 1) (Then1Frame {close_depth = close_depth, after_depth = after_depth} :: frame_stack') (false :: seen_stack') ("" :: pending_stack') rest'
+                       in (count, line close_depth index "" "} >- {" ^ rest_text) end
+                   | _ =>
+                       let val (count, rest_text) = format_steps (index + 1) after_depth frame_stack' seen_stack' pending_stack' rest
+                       in (count, line close_depth index "" "}" ^ rest_text) end)
+            | _ =>
+                if display_step step then
+                  let val (count, rest_text) = format_steps (index + 1) depth' frame_stack' (mark_current_seen seen_stack') (clear_current_pending pending_stack') rest
+                  in (count, format_step index depth "" step ^ rest_text) end
+                else format_steps index depth' frame_stack' seen_stack' pending_stack' rest
         end
     | (step as StepMid _) :: rest =>
-        let val (count, rest_text) = format_steps (index + 1) depth visible_stack (reset_current_seen seen_stack) (clear_current_pending pending_stack) rest
+        let val (count, rest_text) = format_steps (index + 1) depth frame_stack (reset_current_seen seen_stack) (clear_current_pending pending_stack) rest
         in (count, format_step index depth "" step ^ rest_text) end
     | step :: rest =>
         let
           val prefix = step_prefix seen_stack pending_stack
           val seen_stack' = mark_current_seen seen_stack
           val pending_stack' = clear_current_pending pending_stack
-          val (count, rest_text) = format_steps (index + 1) depth visible_stack seen_stack' pending_stack' rest
+          val (count, rest_text) = format_steps (index + 1) depth frame_stack seen_stack' pending_stack' rest
         in (count, format_step index depth prefix step ^ rest_text) end
 
 fun steps body = steps_from_tree body (parse_tactic body)
 
+fun split_plan_line text =
+  let
+    val n = size text
+    fun digits i =
+      i + 1 < n andalso Char.isDigit (String.sub(text, i)) andalso Char.isDigit (String.sub(text, i + 1))
+    fun find i =
+      if i + 2 >= n then NONE
+      else if digits i andalso String.sub(text, i + 2) = #" " then SOME (String.extract(text, i + 3, NONE))
+      else find (i + 1)
+  in find 0 end
+
+fun leading_spaces text =
+  let
+    val n = size text
+    fun loop i = if i < n andalso String.sub(text, i) = #" " then loop (i + 1) else i
+  in String.substring(text, 0, loop 0) end
+
+datatype rendered_line = NumberedLine of string | ContinuationLine of string
+
+fun classify_line text =
+  case split_plan_line text of
+      SOME rest => NumberedLine rest
+    | NONE => ContinuationLine text
+
+fun drop_spaces n text =
+  if size text >= n then String.extract(text, n, NONE) else text
+
+fun collapse_single_then1 rendered =
+  let
+    fun go (NumberedLine open_line :: NumberedLine body_line :: NumberedLine close_line :: rest) acc =
+          let val ind = leading_spaces open_line
+              val body_ind = leading_spaces body_line
+          in
+            if open_line = ind ^ ">- {" andalso close_line = ind ^ "}" andalso
+               String.isPrefix (ind ^ "  ") body_ind then
+              go rest (NumberedLine (ind ^ ">- " ^ drop_spaces (size ind + 2) body_line) :: acc)
+            else go (NumberedLine body_line :: NumberedLine close_line :: rest) (NumberedLine open_line :: acc)
+          end
+      | go (x :: rest) acc = go rest (x :: acc)
+      | go [] acc = rev acc
+  in go rendered [] end
+
+fun combine_then1_lines rendered =
+  let
+    fun go (NumberedLine ra :: NumberedLine rb :: rest) acc =
+          let val ia = leading_spaces ra
+              val ib = leading_spaces rb
+          in
+            if ia = ib andalso ra = ia ^ "}" andalso rb = ib ^ ">- {" then
+              go rest (NumberedLine (ia ^ "} >- {") :: acc)
+            else go (NumberedLine rb :: rest) (NumberedLine ra :: acc)
+          end
+      | go (a :: rest) acc = go rest (a :: acc)
+      | go [] acc = rev acc
+  in go rendered [] end
+
+fun renumber_body rendered =
+  let
+    fun go [] _ acc = (0, String.concat (rev acc))
+      | go (NumberedLine raw :: rest) i acc =
+          let val (count, text) = go rest (i + 1) (line 0 i "" raw :: acc)
+          in (count + 1, text) end
+      | go (ContinuationLine raw :: rest) i acc =
+          go rest i (raw ^ "\n" :: acc)
+  in go rendered 0 [] end
+
 fun format {theory, theorem, source} plan =
-  let val (count, body) = format_steps 0 0 [] [false] [""] plan
+  let
+    val (_, body0) = format_steps 0 0 [] [false] [""] plan
+    val raw_lines = List.filter (fn s => size s > 0) (String.fields (fn c => c = #"\n") body0)
+    val rendered = map classify_line raw_lines
+    val compact = collapse_single_then1 rendered
+    val combined = combine_then1_lines compact
+    val (count, body) = renumber_body combined
   in
     String.concat
       ["holbuild goalfrag plan ", theory, ":", theorem,
