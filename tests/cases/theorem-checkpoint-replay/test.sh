@@ -542,6 +542,58 @@ second_dep_count=$(wc -c < "$failed_root_counter" | tr -d ' ')
 require_grep "ATheory is up to date" "$failed_root_again_log"
 require_grep "resuming BTheory from checkpoint b_thm failed_prefix" "$failed_root_again_log"
 
+changed_prefix_project=$tmpdir/changed-prefix-project
+mkdir -p "$changed_prefix_project/src"
+cat > "$changed_prefix_project/holproject.toml" <<'TOML'
+[project]
+name = "changed-prefix"
+
+[build]
+members = ["src"]
+TOML
+cat > "$changed_prefix_project/src/AScript.sml" <<'SML'
+open HolKernel Parse boolLib bossLib;
+val _ = new_theory "A";
+
+Datatype:
+  foo = A | B | C | D
+End
+
+Theorem changed_prefix:
+  !x:foo P Q. (!y. P y ==> Q y) ==> P x ==> Q x
+Proof
+  Induct >> rpt gen_tac >> strip_tac >> TRY NO_TAC
+  >- (FAIL_TAC "intentional")
+  >- (rpt strip_tac >> simp[])
+  >- (rpt strip_tac >> simp[])
+  >- (rpt strip_tac >> simp[])
+QED
+
+val _ = export_theory();
+SML
+changed_prefix_fail_log=$tmpdir/changed-prefix-fail.log
+if (cd "$changed_prefix_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --force --no-cache --tactic-timeout 0 ATheory) > "$changed_prefix_fail_log" 2>&1; then
+  echo "expected changed-prefix seed proof to fail" >&2
+  exit 1
+fi
+require_grep "intentional" "$changed_prefix_fail_log"
+require_file "$(find "$changed_prefix_project/.holbuild/checkpoints" -name '*changed_prefix_failed_prefix.save' -print -quit)"
+python3 - <<PY
+from pathlib import Path
+path = Path("$changed_prefix_project/src/AScript.sml")
+s = path.read_text()
+s = s.replace('TRY NO_TAC\n', 'TRY (NO_TAC ORELSE ALL_TAC)\n')
+s = s.replace('>- (FAIL_TAC "intentional")', '>- (rpt strip_tac >> simp[])')
+path.write_text(s)
+PY
+changed_prefix_fixed_log=$tmpdir/changed-prefix-fixed.log
+(cd "$changed_prefix_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --force --no-cache --tactic-timeout 0 --goalfrag-trace ATheory) > "$changed_prefix_fixed_log" 2>&1
+require_grep "ATheory built" "$changed_prefix_fixed_log"
+if grep -q "resuming ATheory from checkpoint changed_prefix failed_prefix" "$changed_prefix_fixed_log"; then
+  echo "changed failed-prefix checkpoint was reused after proof text changed before the saved prefix" >&2
+  exit 1
+fi
+
 branch_failure_project=$tmpdir/branch-failure-project
 mkdir -p "$branch_failure_project/src"
 cp "$project/holproject.toml" "$branch_failure_project/holproject.toml"
