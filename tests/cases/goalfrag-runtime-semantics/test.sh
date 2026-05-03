@@ -97,6 +97,15 @@ Proof
   \\ FIRST [ACCEPT_TAC TRUTH, DISCH_TAC \\ FIRST_ASSUM ACCEPT_TAC]
 QED
 
+Theorem qed_closes_branch:
+  T /\ T
+Proof
+  CONJ_TAC
+  >- ACCEPT_TAC TRUTH
+  >> (
+    ACCEPT_TAC TRUTH
+QED
+
 val _ = export_theory();
 SML
   (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --skip-checkpoints --tactic-timeout 60) > "$tmpdir/success.goalfrag.out" 2>&1

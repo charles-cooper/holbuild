@@ -372,9 +372,8 @@ fun step_of_frag end_pos label (TacticParse.FAtom (TacticParse.LSelectGoal _)) =
       SOME (StepClose {end_pos = end_pos, label = label})
   | step_of_frag _ _ _ = NONE
 
-fun steps body =
+fun steps_from_tree body tree =
   let
-    val tree = parse_tactic body
     fun full_span () = (0, size body)
     fun span_of default e =
       case TacticParse.topSpan e of
@@ -727,6 +726,13 @@ fun format_steps index depth visible_stack seen_stack pending_stack steps =
           val (count, rest_text) = format_steps (index + 1) depth visible_stack seen_stack' pending_stack' rest
         in (count, format_step index depth prefix step ^ rest_text) end
 
+fun steps body = steps_from_tree body (parse_tactic body)
+
+fun parse_plan body =
+  case SOME (parse_tactic body) handle Fail _ => NONE of
+      SOME tree => SOME (steps_from_tree body tree)
+    | NONE => NONE
+
 fun format {theory, theorem, source} plan =
   let val (count, body) = format_steps 0 0 [] [false] [""] plan
   in
@@ -737,6 +743,13 @@ fun format {theory, theorem, source} plan =
        body]
   end
 
-fun format_tactic selector tactic_text = format selector (steps tactic_text)
+fun atomic_plan body = [StepExpand {end_pos = size body, label = trim_space body}]
+
+fun steps_or_atomic body =
+  case parse_plan body of
+      SOME plan => plan
+    | NONE => atomic_plan body
+
+fun format_tactic selector tactic_text = format selector (steps_or_atomic tactic_text)
 
 end

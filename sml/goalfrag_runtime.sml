@@ -569,9 +569,8 @@ fun step_of_frag end_pos label (TacticParse.FAtom (TacticParse.LSelectGoal _)) =
       SOME (StepClose {end_pos = end_pos, label = label})
   | step_of_frag _ _ _ = NONE
 
-fun steps body =
+fun steps_from_tree body tree =
   let
-    val tree = parse_tactic body
     fun full_span () = (0, size body)
     fun span_of default e =
       case TacticParse.topSpan e of
@@ -701,6 +700,13 @@ fun steps body =
   in
     plan_tac (full_span ()) tree
   end
+
+fun steps body = steps_from_tree body (parse_tactic body)
+
+fun parse_plan body =
+  case SOME (parse_tactic body) handle Fail _ => NONE of
+      SOME tree => SOME (steps_from_tree body tree)
+    | NONE => NONE
 
 fun report_step_failure label e = (save_failed_prefix_checkpoint (); print_goal_state label; raise e)
 
@@ -894,19 +900,40 @@ fun with_theorem_trace name f =
     case result of TraceOk value => value | TraceError e => raise e
   end
 
+fun atomic_plan body = [StepExpand {end_pos = size body, label = trim_space body}]
+
+fun plain_prove_and_checkpoint name end_path end_ok checkpoint_depth g tac =
+  let
+    val th = Tactical.TAC_PROOF(g, tac)
+             handle e => (proofManagerLib.set_goal g; print_goal_state (name ^ " atomic"); raise e)
+    val _ = save_checkpoint "end_of_proof" false end_path end_ok checkpoint_depth
+  in th end
+
 fun goalfrag_prove name end_path end_ok checkpoint_depth g tac tactic_text =
   let
     val _ = active_tactic_text_ref := tactic_text
-    val _ = proofManagerLib.set_goalfrag g
-    val plan = steps tactic_text
-    val _ = trace_goalfrag_plan name plan
-    val _ = stop_after_plan_if_requested ()
-    val _ = run_steps plan
-    val th = proofManagerLib.top_thm()
-             handle e => (print_goal_state (name ^ " finish"); raise e)
-    val _ = save_checkpoint "end_of_proof" false end_path end_ok checkpoint_depth
-    val _ = proofManagerLib.drop_all()
-  in th end
+  in
+    case parse_plan tactic_text of
+        NONE =>
+          let
+            val plan = atomic_plan tactic_text
+            val _ = trace_goalfrag_plan name plan
+            val _ = stop_after_plan_if_requested ()
+          in
+            plain_prove_and_checkpoint name end_path end_ok checkpoint_depth g tac
+          end
+      | SOME plan =>
+          let
+            val _ = proofManagerLib.set_goalfrag g
+            val _ = trace_goalfrag_plan name plan
+            val _ = stop_after_plan_if_requested ()
+            val _ = run_steps plan
+            val th = proofManagerLib.top_thm()
+                     handle e => (print_goal_state (name ^ " finish"); raise e)
+            val _ = save_checkpoint "end_of_proof" false end_path end_ok checkpoint_depth
+            val _ = proofManagerLib.drop_all()
+          in th end
+  end
 
 fun common_prefix_size old_text new_text =
   let
