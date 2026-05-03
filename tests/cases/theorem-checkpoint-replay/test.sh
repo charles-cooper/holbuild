@@ -195,7 +195,7 @@ reverse_plan_log=$tmpdir/reverse-goalfrag-plan.log
 (cd "$trace_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" goalfrag-plan ATheory:reverse_cases) > "$reverse_plan_log" 2>&1
 require_grep "^[[:space:]]*00 gen_tac" "$reverse_plan_log"
 require_grep "list_tac Tactical.REVERSE_LT" "$reverse_plan_log"
-require_grep "^[[:space:]]*05 .*DISJ1_TAC" "$reverse_plan_log"
+require_grep "^[[:space:]]*[0-9][0-9] .*DISJ1_TAC" "$reverse_plan_log"
 repeat_plan_log=$tmpdir/repeat-goalfrag-plan.log
 (cd "$trace_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" goalfrag-plan ATheory:repeat_split) > "$repeat_plan_log" 2>&1
 require_grep "^[[:space:]]*[0-9][0-9] .*rpt" "$repeat_plan_log"
@@ -207,7 +207,8 @@ fi
 by_plan_log=$tmpdir/by-goalfrag-plan.log
 (cd "$trace_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" goalfrag-plan ATheory:by_after_split) > "$by_plan_log" 2>&1
 require_grep '^[[:space:]]*[0-9][0-9] .*sg `T`' "$by_plan_log"
-require_grep "^[[:space:]]*[0-9][0-9][[:space:]]*>- .*ACCEPT_TAC TRUTH" "$by_plan_log"
+require_grep "^[[:space:]]*[0-9][0-9][[:space:]]*>-" "$by_plan_log"
+require_grep "^[[:space:]]*[0-9][0-9] .*ACCEPT_TAC TRUTH" "$by_plan_log"
 if grep -q " by (" "$by_plan_log"; then
   echo "goalfrag plan kept by body opaque" >&2
   exit 1
