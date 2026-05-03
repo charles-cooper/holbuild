@@ -106,9 +106,20 @@ Proof
     ACCEPT_TAC TRUTH
 QED
 
+Theorem chained_then1_plain:
+  T /\ T /\ T
+Proof
+  rpt CONJ_TAC
+  >- ACCEPT_TAC TRUTH
+  >- ACCEPT_TAC TRUTH
+  >- ACCEPT_TAC TRUTH
+QED
+
 val _ = export_theory();
 SML
   (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --skip-checkpoints --tactic-timeout 60) > "$tmpdir/success.goalfrag.out" 2>&1
+  (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" goalfrag-plan ATheory:chained_then1_plain) > "$tmpdir/chained_then1.plan.out" 2>&1
+  require_grep 'plain rpt CONJ_TAC' "$tmpdir/chained_then1.plan.out"
   (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --force --skip-goalfrag --skip-checkpoints) > "$tmpdir/success.plain.out" 2>&1
 }
 

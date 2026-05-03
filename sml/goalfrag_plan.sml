@@ -6,6 +6,7 @@ datatype step =
   | StepMid of {end_pos : int, label : string}
   | StepClose of {end_pos : int, label : string}
   | StepExpand of {end_pos : int, label : string}
+  | StepPlain of {end_pos : int, label : string}
   | StepExpandList of {end_pos : int, label : string}
   | StepSelect of {end_pos : int, label : string}
   | StepSelects of {end_pos : int, label : string}
@@ -14,6 +15,7 @@ fun step_end (StepOpen {end_pos, ...}) = end_pos
   | step_end (StepMid {end_pos, ...}) = end_pos
   | step_end (StepClose {end_pos, ...}) = end_pos
   | step_end (StepExpand {end_pos, ...}) = end_pos
+  | step_end (StepPlain {end_pos, ...}) = end_pos
   | step_end (StepExpandList {end_pos, ...}) = end_pos
   | step_end (StepSelect {end_pos, ...}) = end_pos
   | step_end (StepSelects {end_pos, ...}) = end_pos
@@ -22,6 +24,7 @@ fun step_label (StepOpen {label, ...}) = label
   | step_label (StepMid {label, ...}) = label
   | step_label (StepClose {label, ...}) = label
   | step_label (StepExpand {label, ...}) = label
+  | step_label (StepPlain {label, ...}) = label
   | step_label (StepExpandList {label, ...}) = label
   | step_label (StepSelect {label, ...}) = label
   | step_label (StepSelects {label, ...}) = label
@@ -30,6 +33,7 @@ fun step_kind (StepOpen _) = "open"
   | step_kind (StepMid _) = "mid"
   | step_kind (StepClose _) = "close"
   | step_kind (StepExpand _) = "expand"
+  | step_kind (StepPlain _) = "plain"
   | step_kind (StepExpandList _) = "expand_list"
   | step_kind (StepSelect _) = "select"
   | step_kind (StepSelects _) = "selects"
@@ -196,6 +200,36 @@ fun expr_contains_then1 e =
     | TacticParse.LNullOk e => expr_contains_then1 e
     | TacticParse.LThen1 _ => true
     | _ => false
+
+fun is_lthen1_branch e =
+  case e of
+      TacticParse.LThen1 _ => true
+    | TacticParse.Group (_, _, x) => is_lthen1_branch x
+    | TacticParse.RepairGroup (_, _, x, _) => is_lthen1_branch x
+    | _ => false
+
+fun then1_chain_count e =
+  case e of
+      TacticParse.ThenLT (lhs, lts) =>
+        (if List.exists is_lthen1_branch lts then 1 else 0) + then1_chain_count lhs
+    | TacticParse.Group (_, _, x) => then1_chain_count x
+    | TacticParse.RepairGroup (_, _, x, _) => then1_chain_count x
+    | _ => 0
+
+fun chained_then1_expr e = then1_chain_count e >= 3
+
+fun expr_contains_impl_tac body e =
+  case TacticParse.topSpan e of
+      SOME sp => String.isSubstring "impl_tac" (span_text body sp)
+    | NONE =>
+        (case e of
+             TacticParse.Then es => List.exists (expr_contains_impl_tac body) es
+           | TacticParse.ThenLT (lhs, es) => expr_contains_impl_tac body lhs orelse List.exists (expr_contains_impl_tac body) es
+           | TacticParse.Group (_, _, x) => expr_contains_impl_tac body x
+           | TacticParse.RepairGroup (_, _, x, _) => expr_contains_impl_tac body x
+           | TacticParse.LThen1 x => expr_contains_impl_tac body x
+           | TacticParse.LNullOk x => expr_contains_impl_tac body x
+           | _ => false)
 
 fun scope_per_goal_if_needed e frags =
   if expr_contains_then1 e then
@@ -516,6 +550,7 @@ fun escape_inline label =
 fun pad2 n = if n < 10 then "0" ^ Int.toString n else Int.toString n
 
 fun display_kind (StepExpand _) = "tactic"
+  | display_kind (StepPlain _) = "plain_tactic"
   | display_kind (StepExpandList _) = "list_tac"
   | display_kind (StepOpen _) = "open"
   | display_kind (StepMid _) = "next"
@@ -667,6 +702,7 @@ fun format_step index depth prefix step =
   in
     case step of
         StepExpand {label, ...} => format_expand index d prefix label
+      | StepPlain {label, ...} => block_line d index (prefix ^ "plain ") label
       | StepExpandList {label, ...} => format_expand_list index d prefix label
       | StepOpen {label, ...} => line d index prefix (display_open_label label)
       | StepMid {label, ...} => line d index prefix (display_mid_label label)
@@ -750,7 +786,23 @@ fun format_steps index depth frame_stack seen_stack pending_stack steps =
           val (count, rest_text) = format_steps (index + 1) depth frame_stack seen_stack' pending_stack' rest
         in (count, format_step index depth prefix step ^ rest_text) end
 
-fun steps body = steps_from_tree body (parse_tactic body)
+fun steps body =
+  let
+    val tree = parse_tactic body
+  in
+    (* HOL GoalFrag's validation is not faithful for some chained THEN1
+       proof shapes: real Vyper memSSA proofs are accepted by plain HOL but
+       decomposed GoalFrag can leave later theorems unusable.  Keep these
+       whole-theorem tactics plain rather than displaying/executing a finer
+       boundary than GoalFrag can currently represent.  TRY-containing chains
+       stay decomposed because failed-prefix tests rely on their real failure
+       boundary and the known repros do not need this fallback. *)
+    if not (expr_contains_try tree) andalso
+       (chained_then1_expr tree orelse
+        (then1_chain_count tree >= 2 andalso expr_contains_impl_tac body tree)) then
+      [StepPlain {end_pos = size body, label = trim_space body}]
+    else steps_from_tree body tree
+  end
 
 fun split_plan_line text =
   let

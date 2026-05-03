@@ -274,6 +274,7 @@ fun step (StepOpen {label, ...}) =
       eval_step label
         ("proofManagerLib.ef(goalFrag.expand_list((" ^ label ^ ")));")
         ("list tactic fragment failed: " ^ label)
+  | step (StepPlain {label, ...}) = raise Fail ("plain tactic fragment must cover the whole proof: " ^ label)
   | step (StepSelect {label, ...}) = raise Fail ("unmerged select fragment: " ^ label)
   | step (StepSelects {label, ...}) = raise Fail ("unmerged select fragments: " ^ label)
 
@@ -377,6 +378,54 @@ fun run_steps steps =
    successful_prefix_end_ref := 0;
    run_steps_from 0 steps)
 
+fun runs_whole_tactic tactic_text [StepPlain {end_pos, ...}] = end_pos = size tactic_text
+  | runs_whole_tactic _ _ = false
+
+datatype 'a traced_result = TraceOk of 'a | TraceError of exn
+
+fun trace_goalfrag_before_with_goals index step' goals =
+  trace_line ["holbuild goalfrag before theorem=", !trace_current_theorem_ref,
+              " step=", Int.toString index,
+              " kind=", step_kind step',
+              " goals=", Int.toString goals,
+              " label=", display_label (step_label step'), "\n"]
+
+fun trace_goalfrag_after_with_goals status elapsed index step' goals =
+  trace_line ["holbuild goalfrag after theorem=", !trace_current_theorem_ref,
+              " step=", Int.toString index,
+              " kind=", step_kind step',
+              " status=", status,
+              " elapsed_ms=", fmt_ms elapsed,
+              " goals=", Int.toString goals,
+              " label=", display_label (step_label step'), "\n"]
+
+fun run_whole_tactic g step' tac =
+  let
+    val label = step_label step'
+    fun apply () =
+      with_tactic_timeout label (fn () => Tactical.TAC_PROOF(g, tac)) ()
+      handle e => (proofManagerLib.set_goal g; print_goal_state label; raise e)
+    val _ = successful_step_count_ref := 0
+    val _ = successful_prefix_end_ref := 0
+    val result =
+      if trace_enabled () then
+        let
+          val _ = trace_goalfrag_before_with_goals 0 step' 1
+          val t0 = Time.now()
+          val result = TraceOk (apply ()) handle e => TraceError e
+          val elapsed = seconds (t0, Time.now())
+        in
+          case result of
+              TraceOk th => (trace_goalfrag_after_with_goals "ok" elapsed 0 step' 0; TraceOk th)
+            | TraceError e => (trace_goalfrag_after_with_goals "failed" elapsed 0 step' (current_goal_count()); TraceError e)
+        end
+      else TraceOk (apply ()) handle e => TraceError e
+    val _ = successful_step_count_ref := 1
+    val _ = successful_prefix_end_ref := size (!active_tactic_text_ref)
+  in
+    case result of TraceOk th => th | TraceError e => raise e
+  end
+
 fun backup_n 0 = ()
   | backup_n n = (proofManagerLib.b(); backup_n (n - 1))
 
@@ -385,8 +434,6 @@ fun drop_all () = (proofManagerLib.drop_all (); ()) handle _ => ()
 fun atomic_prove label g tac =
   with_tactic_timeout label (fn () => Tactical.TAC_PROOF(g, tac)) ()
   handle e => (proofManagerLib.set_goal g; report_step_failure label e)
-
-datatype 'a traced_result = TraceOk of 'a | TraceError of exn
 
 fun with_theorem_trace name f =
   let
@@ -407,13 +454,17 @@ fun with_theorem_trace name f =
 fun goalfrag_prove name end_path end_ok checkpoint_depth g tac tactic_text =
   let
     val _ = active_tactic_text_ref := tactic_text
-    val _ = proofManagerLib.set_goalfrag g
     val plan = steps tactic_text
+    val runs_plain = runs_whole_tactic tactic_text plan
+    val _ = if runs_plain then () else (proofManagerLib.set_goalfrag g; ())
     val _ = trace_goalfrag_plan name plan
     val _ = stop_after_plan_if_requested ()
-    val _ = run_steps plan
-    val th = proofManagerLib.top_thm()
-             handle e => (print_goal_state (name ^ " finish"); raise e)
+    val th =
+      if runs_plain then run_whole_tactic g (hd plan) tac
+      else
+        (run_steps plan;
+         proofManagerLib.top_thm()
+         handle e => (print_goal_state (name ^ " finish"); raise e))
     val _ = save_checkpoint "end_of_proof" false end_path end_ok checkpoint_depth
     val _ = proofManagerLib.drop_all()
   in th end
