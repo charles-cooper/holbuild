@@ -64,8 +64,14 @@ exception Error of string
 fun die msg = raise Error msg
 
 val holdir_ref : string option ref = ref NONE
+val source_dir_ref : string option ref = ref NONE
 
 fun set_holdir path = holdir_ref := SOME path
+
+fun absolute_from_cwd path =
+  Path.mkAbsolute {path = path, relativeTo = FS.getDir ()}
+
+fun set_source_dir path = source_dir_ref := SOME (absolute_from_cwd path)
 
 fun builtin_holdir_dependency name = name = "HOLDIR"
 
@@ -76,6 +82,14 @@ fun original_dir () =
   case OS.Process.getEnv "HOLBUILD_ORIG_CWD" of
       SOME d => d
     | NONE => FS.getDir ()
+
+fun source_dir () =
+  case !source_dir_ref of
+      SOME d => d
+    | NONE =>
+      case OS.Process.getEnv "HOLBUILD_SOURCE_DIR" of
+          SOME d => absolute_from_cwd d
+        | NONE => original_dir ()
 
 fun readable path = FS.access(path, [FS.A_READ]) handle OS.SysErr _ => false
 
@@ -403,9 +417,9 @@ fun parse manifest =
   end
 
 fun discover () =
-  case find_manifest_from (original_dir ()) of
+  case find_manifest_from (source_dir ()) of
       SOME manifest => parse manifest
-    | NONE => die "no holproject.toml found in current directory or parents"
+    | NONE => die "no holproject.toml found in --source-dir/current directory or parents"
 
 fun abs_under root path =
   if Path.isAbsolute path then path else Path.concat(root, path)

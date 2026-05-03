@@ -94,6 +94,7 @@ export HOLBUILD_HOLDIR=/path/to/HOL
 bin/holbuild build MyTheory
 bin/holbuild -j4 build MyTheory
 bin/holbuild --maxheap 4096 build MyTheory
+bin/holbuild --source-dir /path/to/project build MyTheory
 bin/holbuild build --skip-checkpoints MyTheory
 bin/holbuild build --tactic-timeout 5 MyTheory
 bin/holbuild goalfrag-plan MyTheory:my_theorem
@@ -119,7 +120,9 @@ bin/holbuild heap main
 ```
 
 `--holdir PATH` can be used instead of `HOLBUILD_HOLDIR` at runtime for HOL
-commands. `-jN`, `-j N`, or `--jobs N` controls build parallelism for `build`
+commands. `--source-dir PATH` or `HOLBUILD_SOURCE_DIR` selects the project source
+root for manifest discovery and `.holbuild` artifacts without changing the shell's
+current directory. `-jN`, `-j N`, or `--jobs N` controls build parallelism for `build`
 and for the build phase of `heap` targets; the default comes from local
 `.holconfig.toml` `[build].jobs` when set, otherwise from CPU detection as
 `max(1, nproc / 2)`. `--force` ignores local up-to-date state and global cache

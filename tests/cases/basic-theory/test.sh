@@ -61,6 +61,14 @@ second_log=$tmpdir/second.log
 (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$second_log"
 require_grep "ATheory is up to date" "$second_log"
 
+source_dir_context_log=$tmpdir/source-dir-context.log
+(cd "$tmpdir" && "$HOLBUILD_BIN" --source-dir "$project" --holdir "$HOLDIR" context) > "$source_dir_context_log"
+require_grep "root: $project" "$source_dir_context_log"
+
+source_dir_env_log=$tmpdir/source-dir-env.log
+(cd "$tmpdir" && HOLBUILD_SOURCE_DIR="$project" "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$source_dir_env_log"
+require_grep "ATheory is up to date" "$source_dir_env_log"
+
 : > "$project/.holbuild/gen/src/ATheory.sml"
 : > "$project/.holbuild/gen/src/ATheory.sig"
 zero_output_log=$tmpdir/zero-output.log
