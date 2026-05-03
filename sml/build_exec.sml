@@ -795,6 +795,30 @@ fun cache_entry_usable root input_key text =
   end
   handle _ => false
 
+fun cache_manifest_output_summary {sig_hash, sml_hash, dat_hash, mldeps} =
+  String.concat
+    ["sig=", sig_hash,
+     " sml-template=", sml_hash,
+     " dat=", dat_hash,
+     " mldeps=", Int.toString (length mldeps)]
+
+fun cache_conflict_warning cache_key manifest_path subject old_manifest new_manifest =
+  let
+    val old_outputs =
+      cache_manifest_blobs_from_lines cache_key (cache_manifest_lines old_manifest)
+    val new_outputs =
+      cache_manifest_blobs_from_lines cache_key (cache_manifest_lines new_manifest)
+  in
+    warn (String.concat
+      ["cache entry already exists with different outputs for ", subject, ": ", cache_key,
+       "\n  existing cache entry: ", manifest_path,
+       "\n  existing outputs: ", cache_manifest_output_summary old_outputs,
+       "\n  new outputs: ", cache_manifest_output_summary new_outputs])
+  end
+  handle _ =>
+    warn ("cache entry already exists with different outputs for " ^ subject ^ ": " ^ cache_key ^
+          "\n  existing cache entry: " ^ manifest_path)
+
 fun copy_blob root hash dst =
   let val blob = HolbuildCache.blob_path root hash
   in
@@ -853,7 +877,7 @@ fun publish_cache_manifest root cache_key subject cache_replacements staged_sig 
         SOME old =>
           if old = manifest then HolbuildCache.touch manifest_path
           else if cache_entry_usable root cache_key old then
-            warn ("cache entry already exists with different outputs for " ^ subject ^ ": " ^ cache_key)
+            cache_conflict_warning cache_key manifest_path subject old manifest
           else
             write_text manifest_path manifest
       | NONE => write_text manifest_path manifest
@@ -1189,10 +1213,13 @@ fun failed_prefix_checkpoint checkpoint =
       | _ => NONE
   else NONE
 
-fun first_failed_prefix_checkpoint checkpoints =
+fun later_failed_prefix_candidate (a, b) =
+  if #boundary (#checkpoint a) >= #boundary (#checkpoint b) then a else b
+
+fun best_failed_prefix_checkpoint checkpoints =
   case List.mapPartial failed_prefix_checkpoint checkpoints of
       [] => NONE
-    | first :: _ => SOME first
+    | first :: rest => SOME (List.foldl later_failed_prefix_candidate first rest)
 
 type build_options = {use_cache : bool, force : bool, skip_checkpoints : bool, goalfrag : bool, tactic_timeout : real option, goalfrag_plan : string option, goalfrag_trace : bool}
 
@@ -1251,17 +1278,16 @@ fun checkpoint_resume_message node label =
   HolbuildStatus.message_stdout
     (String.concat ["resuming ", logical_name node, " from checkpoint ", label, "\n"])
 
-fun failed_prefix_resume_source policy timeout_marker plan_only_marker source checkpoint step_count prefix_text =
+fun failed_prefix_resume_source policy timeout_marker plan_only_marker source checkpoints checkpoint step_count prefix_text =
   let
-    val prelude =
-      HolbuildTheoryCheckpoints.runtime_prelude
-        {checkpoint_enabled = checkpoint_enabled policy,
-         tactic_timeout = tactic_timeout policy,
-         timeout_marker = SOME timeout_marker,
-         plan_theorem = goalfrag_plan policy,
-         trace_all = goalfrag_trace policy,
-         plan_only_marker = plan_only_marker}
-        [checkpoint]
+    val runtime_config =
+      {checkpoint_enabled = checkpoint_enabled policy,
+       tactic_timeout = tactic_timeout policy,
+       timeout_marker = SOME timeout_marker,
+       plan_theorem = goalfrag_plan policy,
+       trace_all = goalfrag_trace policy,
+       plan_only_marker = plan_only_marker}
+    val prelude = HolbuildTheoryCheckpoints.runtime_prelude runtime_config [checkpoint]
     val theorem_binding = #safe_name checkpoint
     val save_line =
       String.concat
@@ -1272,8 +1298,19 @@ fun failed_prefix_resume_source policy timeout_marker plan_only_marker source ch
          HolbuildToolchain.sml_string prefix_text, " ",
          Int.toString step_count, " ",
          HolbuildToolchain.sml_string (#tactic_text checkpoint), ");\n"]
+    val suffix =
+      HolbuildTheoryCheckpoints.instrument
+        {source = source,
+         start_offset = #boundary checkpoint,
+         checkpoints = checkpoints,
+         save_checkpoints = checkpoint_enabled policy,
+         tactic_timeout = tactic_timeout policy,
+         timeout_marker = SOME timeout_marker,
+         plan_theorem = goalfrag_plan policy,
+         trace_all = goalfrag_trace policy,
+         plan_only_marker = plan_only_marker}
   in
-    prelude ^ save_line ^ String.extract(source, #boundary checkpoint, NONE)
+    prelude ^ save_line ^ suffix
   end
 
 fun write_theory_script policy project base_context plan keys input_key toolchain_key node source_text checkpoints staged_script preload timeout_marker plan_only_marker =
@@ -1295,11 +1332,11 @@ fun write_theory_script policy project base_context plan keys input_key toolchai
          write_text staged_script (instrumented_source policy (SOME timeout_marker) plan_only_marker source_text 0 checkpoints);
          {context = base_context, files = [preload, staged_script], failure_checkpoints = []})
     in
-      case if goalfrag_enabled policy then first_failed_prefix_checkpoint checkpoints else NONE of
+      case if goalfrag_enabled policy then best_failed_prefix_checkpoint checkpoints else NONE of
           SOME {checkpoint, step_count, prefix_text} =>
             let
               val path = #failed_prefix_path checkpoint
-              val _ = write_text staged_script (failed_prefix_resume_source policy timeout_marker plan_only_marker source_text checkpoint step_count prefix_text)
+              val _ = write_text staged_script (failed_prefix_resume_source policy timeout_marker plan_only_marker source_text checkpoints checkpoint step_count prefix_text)
               val _ = checkpoint_resume_message node (#safe_name checkpoint ^ " failed_prefix")
             in
               {context = HolState path, files = [staged_script], failure_checkpoints = [path, deps_loaded]}
@@ -1365,13 +1402,28 @@ fun build_theory cache_allowed policy tc project base_context plan keys toolchai
       let
         val words = String.tokens Char.isSpace (read_text timeout_marker)
         val failure_log = preserve_checkpoint_failure_log project node input_key stage
-        val log_line = case failure_log of NONE => "" | SOME path => "\ninstrumented log: " ^ path
+        val source_context =
+          Option.mapPartial
+            (HolbuildTheoryDiagnostics.summarize_failed_fragment_source
+               (source_file node) source_text theorem_checkpoints)
+            failure_log
+        val goal_state = Option.mapPartial HolbuildTheoryDiagnostics.summarize_goal_state failure_log
+        val child_failure =
+          if Option.isSome source_context orelse Option.isSome goal_state then NONE
+          else Option.mapPartial HolbuildTheoryDiagnostics.child_failure_summary failure_log
+        val detail =
+          String.concat
+            [case source_context of NONE => "" | SOME text => text,
+             case goal_state of NONE => "" | SOME text => text,
+             case child_failure of NONE => "" | SOME text => text,
+             case failure_log of NONE => "" | SOME path => "instrumented log: " ^ path ^ "\n"]
+        fun with_detail heading = heading ^ (if detail = "" then "" else "\n" ^ detail)
       in
         case rev words of
             seconds :: rev_label_words =>
-              Error ("tactic timed out after " ^ seconds ^ "s while building " ^
-                     logical_name node ^ ": " ^ String.concatWith " " (rev rev_label_words) ^ log_line)
-          | [] => Error ("tactic timed out while building " ^ logical_name node ^ log_line)
+              Error (with_detail ("tactic timed out after " ^ seconds ^ "s while building " ^
+                                  logical_name node ^ ": " ^ String.concatWith " " (rev rev_label_words)))
+          | [] => Error (with_detail ("tactic timed out while building " ^ logical_name node))
       end
     fun discard_failure_checkpoints () =
       List.app remove_checkpoint (#failure_checkpoints run_spec)

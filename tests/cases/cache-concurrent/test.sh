@@ -88,3 +88,20 @@ for project in "${projects[@]}"; do
   require_grep "ATheory restored from cache" "$tmpdir/restore-$name.log"
   require_file "$project/.holbuild/obj/src/ATheory.dat"
 done
+
+manifest=$(find "$HOLBUILD_CACHE/actions" -mindepth 2 -maxdepth 2 -name manifest -print -quit)
+sig_hash=$(awk '/^blob sig / { print $3 }' "$manifest")
+dat_hash=$(awk '/^blob dat / { print $3 }' "$manifest")
+python3 - <<PY
+from pathlib import Path
+path = Path("$manifest")
+text = path.read_text()
+path.write_text(text.replace("blob sig $sig_hash", "blob sig $dat_hash"))
+PY
+
+conflict_log="$tmpdir/cache-conflict.log"
+(cd "${projects[0]}" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --force ATheory) > "$conflict_log" 2>&1
+require_grep "cache entry already exists with different outputs for ATheory" "$conflict_log"
+require_grep "existing cache entry: .*manifest" "$conflict_log"
+require_grep "existing outputs: sig=$dat_hash" "$conflict_log"
+require_grep "new outputs: sig=$sig_hash" "$conflict_log"

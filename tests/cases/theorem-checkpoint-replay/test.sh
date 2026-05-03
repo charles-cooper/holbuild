@@ -404,6 +404,144 @@ if [[ -e "$failure_project/.holbuild/checkpoints/replay/src/AScript.sml.b_thm_co
   exit 1
 fi
 
+stale_prefix_project=$tmpdir/stale-prefix-project
+mkdir -p "$stale_prefix_project/src"
+cp "$project/holproject.toml" "$stale_prefix_project/holproject.toml"
+cat > "$stale_prefix_project/src/AScript.sml" <<'SML'
+open HolKernel Parse boolLib bossLib;
+val _ = new_theory "A";
+Theorem first_failure:
+  T
+Proof
+  ALL_TAC >> FAIL_TAC "first stale failure"
+QED
+Theorem second_failure:
+  T
+Proof
+  FAIL_TAC "second current failure"
+QED
+val _ = export_theory();
+SML
+stale_first_log=$tmpdir/stale-prefix-first.log
+if (cd "$stale_prefix_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$stale_first_log" 2>&1; then
+  echo "expected first stale-prefix build to fail" >&2
+  exit 1
+fi
+require_file "$(find "$stale_prefix_project/.holbuild/checkpoints" -name '*first_failure_failed_prefix.save' -print -quit)"
+python3 - <<PY
+from pathlib import Path
+path = Path("$stale_prefix_project/src/AScript.sml")
+path.write_text(path.read_text().replace('FAIL_TAC "first stale failure"', 'ACCEPT_TAC TRUTH'))
+PY
+stale_second_log=$tmpdir/stale-prefix-second.log
+if (cd "$stale_prefix_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$stale_second_log" 2>&1; then
+  echo "expected second stale-prefix build to fail" >&2
+  exit 1
+fi
+require_grep "resuming ATheory from checkpoint first_failure failed_prefix" "$stale_second_log"
+require_grep "theorem: second_failure (line " "$stale_second_log"
+require_grep "top goal at failed fragment:" "$stale_second_log"
+require_file "$(find "$stale_prefix_project/.holbuild/checkpoints" -name '*second_failure_failed_prefix.save' -print -quit)"
+stale_third_log=$tmpdir/stale-prefix-third.log
+if (cd "$stale_prefix_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$stale_third_log" 2>&1; then
+  echo "expected third stale-prefix build to fail" >&2
+  exit 1
+fi
+require_grep "resuming ATheory from checkpoint second_failure failed_prefix" "$stale_third_log"
+if grep -q "resuming ATheory from checkpoint first_failure failed_prefix" "$stale_third_log"; then
+  echo "stale earlier failed_prefix was selected over later failure" >&2
+  exit 1
+fi
+
+slow_prefix_project=$tmpdir/slow-prefix-project
+slow_prefix_counter=$tmpdir/slow-prefix-count.txt
+mkdir -p "$slow_prefix_project/src"
+touch "$slow_prefix_counter"
+cp "$project/holproject.toml" "$slow_prefix_project/holproject.toml"
+cat > "$slow_prefix_project/src/AScript.sml" <<SML
+open HolKernel Parse boolLib bossLib;
+val _ = new_theory "A";
+val slow_prefix_counter = "$slow_prefix_counter";
+fun bump_counter () =
+  let val out = TextIO.openAppend slow_prefix_counter
+  in TextIO.output(out, "x"); TextIO.closeOut out end;
+fun slow_tac g = (bump_counter(); OS.Process.sleep (Time.fromReal 0.35); ALL_TAC g);
+Theorem slow_prefix_failure:
+  T
+Proof
+  slow_tac >> slow_tac >> FAIL_TAC "after slow prefix"
+QED
+val _ = export_theory();
+SML
+slow_prefix_first_log=$tmpdir/slow-prefix-first.log
+if (cd "$slow_prefix_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$slow_prefix_first_log" 2>&1; then
+  echo "expected slow-prefix proof to fail build" >&2
+  exit 1
+fi
+first_slow_count=$(wc -c < "$slow_prefix_counter" | tr -d ' ')
+[[ "$first_slow_count" = "2" ]] || { echo "expected first run to execute slow prefix twice, got $first_slow_count" >&2; exit 1; }
+require_grep "slow_tac >> slow_tac >> FAIL_TAC" "$slow_prefix_first_log"
+require_grep "top goal at failed fragment:" "$slow_prefix_first_log"
+slow_prefix_again_log=$tmpdir/slow-prefix-again.log
+if (cd "$slow_prefix_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$slow_prefix_again_log" 2>&1; then
+  echo "expected repeated slow-prefix proof to fail build" >&2
+  exit 1
+fi
+second_slow_count=$(wc -c < "$slow_prefix_counter" | tr -d ' ')
+[[ "$second_slow_count" = "2" ]] || { echo "failed-prefix replay reran slow prefix; count $second_slow_count" >&2; exit 1; }
+require_grep "resuming ATheory from checkpoint slow_prefix_failure failed_prefix" "$slow_prefix_again_log"
+require_grep "top goal at failed fragment:" "$slow_prefix_again_log"
+
+failed_root_project=$tmpdir/failed-root-project
+failed_root_counter=$tmpdir/failed-root-dep-count.txt
+mkdir -p "$failed_root_project/src"
+touch "$failed_root_counter"
+cat > "$failed_root_project/holproject.toml" <<'TOML'
+[project]
+name = "failed-root"
+[build]
+members = ["src"]
+TOML
+cat > "$failed_root_project/src/AScript.sml" <<SML
+open HolKernel Parse boolLib bossLib;
+val _ = new_theory "A";
+val out = TextIO.openAppend "$failed_root_counter";
+val _ = (TextIO.output(out, "x"); TextIO.closeOut out);
+Theorem a_thm:
+  T
+Proof
+  ACCEPT_TAC TRUTH
+QED
+val _ = export_theory();
+SML
+cat > "$failed_root_project/src/BScript.sml" <<'SML'
+open HolKernel Parse boolLib bossLib;
+open ATheory;
+val _ = new_theory "B";
+Theorem b_thm:
+  T
+Proof
+  FAIL_TAC "bad root proof"
+QED
+val _ = export_theory();
+SML
+failed_root_first_log=$tmpdir/failed-root-first.log
+if (cd "$failed_root_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build BTheory) > "$failed_root_first_log" 2>&1; then
+  echo "expected failed root project to fail build" >&2
+  exit 1
+fi
+first_dep_count=$(wc -c < "$failed_root_counter" | tr -d ' ')
+[[ "$first_dep_count" = "1" ]] || { echo "expected dependency to build once, got $first_dep_count" >&2; exit 1; }
+failed_root_again_log=$tmpdir/failed-root-again.log
+if (cd "$failed_root_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build BTheory) > "$failed_root_again_log" 2>&1; then
+  echo "expected repeated failed root project to fail build" >&2
+  exit 1
+fi
+second_dep_count=$(wc -c < "$failed_root_counter" | tr -d ' ')
+[[ "$second_dep_count" = "1" ]] || { echo "no-change rebuild reran completed dependency; count $second_dep_count" >&2; exit 1; }
+require_grep "ATheory is up to date" "$failed_root_again_log"
+require_grep "resuming BTheory from checkpoint b_thm failed_prefix" "$failed_root_again_log"
+
 branch_failure_project=$tmpdir/branch-failure-project
 mkdir -p "$branch_failure_project/src"
 cp "$project/holproject.toml" "$branch_failure_project/holproject.toml"
