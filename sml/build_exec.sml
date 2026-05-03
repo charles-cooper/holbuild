@@ -1571,18 +1571,27 @@ fun theory_name_from_logical logical =
   if has_suffix "Theory" logical then drop_suffix "Theory" logical else logical
 
 fun theory_dat_parent_hash dat_text parent_name =
-  let val marker = "(\"" ^ parent_name ^ "\" . \""
+  let
+    val marker = "(\"" ^ parent_name ^ "\""
+    val n = size dat_text
+    fun whitespace c = c = #" " orelse c = #"\n" orelse c = #"\t" orelse c = #"\r"
+    fun skip_ws i = if i < n andalso whitespace (String.sub(dat_text, i)) then skip_ws (i + 1) else i
+    fun parse_hash start =
+      let
+        val dot = skip_ws (start + size marker)
+        val quote = skip_ws (dot + 1)
+      in
+        if dot < n andalso String.sub(dat_text, dot) = #"." andalso
+           quote < n andalso String.sub(dat_text, quote) = #"\"" andalso
+           quote + 41 <= n then
+          let val hash = String.substring(dat_text, quote + 1, 40)
+          in if valid_sha1_text hash then SOME hash else NONE end
+        else NONE
+      end
   in
     case find_substring marker dat_text of
         NONE => NONE
-      | SOME start =>
-          let val hash_start = start + size marker
-          in
-            if hash_start + 40 <= size dat_text then
-              let val hash = String.substring(dat_text, hash_start, 40)
-              in if valid_sha1_text hash then SOME hash else NONE end
-            else NONE
-          end
+      | SOME start => parse_hash start
   end
 
 fun project_theory_deps plan node =
