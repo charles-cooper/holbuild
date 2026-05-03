@@ -42,7 +42,7 @@ fun remove_tree path =
   ignore (OS.Process.system ("rm -rf " ^ HolbuildToolchain.quote path))
 
 fun project_lock_path (project : HolbuildProject.t) =
-  Path.concat(Path.concat(#root project, ".holbuild/locks"), "project.lock")
+  Path.concat(Path.concat(HolbuildProject.artifact_root project, ".holbuild/locks"), "project.lock")
 
 fun project_lock_owner_path lock = lock ^ ".owner"
 

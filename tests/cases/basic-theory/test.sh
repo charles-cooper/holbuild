@@ -64,10 +64,16 @@ require_grep "ATheory is up to date" "$second_log"
 source_dir_context_log=$tmpdir/source-dir-context.log
 (cd "$tmpdir" && "$HOLBUILD_BIN" --source-dir "$project" --holdir "$HOLDIR" context) > "$source_dir_context_log"
 require_grep "root: $project" "$source_dir_context_log"
+require_grep "artifact-root: $tmpdir" "$source_dir_context_log"
 
 source_dir_env_log=$tmpdir/source-dir-env.log
+rm -rf "$tmpdir/.holbuild"
 (cd "$tmpdir" && HOLBUILD_SOURCE_DIR="$project" "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$source_dir_env_log"
-require_grep "ATheory is up to date" "$source_dir_env_log"
+if ! grep -q "ATheory restored from cache\|ATheory built" "$source_dir_env_log"; then
+  echo "source-dir build did not create cwd artifact tree" >&2
+  exit 1
+fi
+require_file "$tmpdir/.holbuild/obj/src/ATheory.dat"
 
 : > "$project/.holbuild/gen/src/ATheory.sml"
 : > "$project/.holbuild/gen/src/ATheory.sig"

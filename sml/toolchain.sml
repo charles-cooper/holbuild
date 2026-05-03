@@ -221,7 +221,7 @@ fun sml_string s =
 
 fun write_run_context (project : HolbuildProject.t) =
   let
-    val root = #root project
+    val root = HolbuildProject.artifact_root project
     val hol_dir = Path.concat(root, ".holbuild")
     val context = Path.concat(hol_dir, "holbuild-run-context.sml")
     val _ = ensure_dir hol_dir

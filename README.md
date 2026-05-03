@@ -121,7 +121,7 @@ bin/holbuild heap main
 
 `--holdir PATH` can be used instead of `HOLBUILD_HOLDIR` at runtime for HOL
 commands. `--source-dir PATH` or `HOLBUILD_SOURCE_DIR` selects the project source
-root for manifest discovery and `.holbuild` artifacts without changing the shell's
+root for manifest discovery while `.holbuild` artifacts are written under the shell's
 current directory. `-jN`, `-j N`, or `--jobs N` controls build parallelism for `build`
 and for the build phase of `heap` targets; the default comes from local
 `.holconfig.toml` `[build].jobs` when set, otherwise from CPU detection as

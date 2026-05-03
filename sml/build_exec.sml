@@ -309,10 +309,12 @@ fun theory_outputs node =
      theory_uo = one_with_suffix (logical_name node ^ ".uo") objects}
   end
 
-fun stage_dir (project : HolbuildProject.t) input_key =
-  Path.concat(Path.concat(#root project, ".holbuild/stage"), input_key)
+fun project_artifact_root project = HolbuildProject.artifact_root project
 
-fun log_dir (project : HolbuildProject.t) = Path.concat(#root project, ".holbuild/logs")
+fun stage_dir (project : HolbuildProject.t) input_key =
+  Path.concat(Path.concat(project_artifact_root project, ".holbuild/stage"), input_key)
+
+fun log_dir (project : HolbuildProject.t) = Path.concat(project_artifact_root project, ".holbuild/logs")
 
 fun retained_checkpoint_failure_log project node input_key =
   Path.concat(log_dir project, input_key ^ "-" ^ logical_name node ^ "-instrumented-failure.log")
@@ -384,7 +386,7 @@ fun stage_dat_replacements stage node final_dat =
   map (fn path_ref => (path_ref, final_dat)) (stage_dat_references stage node)
 
 fun checkpoint_base (project : HolbuildProject.t) node =
-  Path.concat(Path.concat(Path.concat(#root project, ".holbuild/checkpoints"),
+  Path.concat(Path.concat(Path.concat(project_artifact_root project, ".holbuild/checkpoints"),
                           HolbuildBuildPlan.package node),
               HolbuildBuildPlan.relative_path node)
 
@@ -486,7 +488,7 @@ fun with_project_lock project command f =
   handle HolbuildProjectLock.Error msg => raise Error msg
 
 fun project_state_dir (project : HolbuildProject.t) name =
-  Path.concat(Path.concat(#root project, ".holbuild"), name)
+  Path.concat(Path.concat(project_artifact_root project, ".holbuild"), name)
 
 fun checkpoint_clean_artifact path =
   has_suffix ".save" path orelse has_suffix ".save.ok" path orelse
@@ -856,7 +858,7 @@ fun path_dependent_cache_key project input_key =
     (String.concatWith "\n"
        ["holbuild-path-dependent-cache-v1",
         "input_key=" ^ input_key,
-        "root=" ^ canonical_path (#root project)] ^ "\n")
+        "root=" ^ canonical_path (project_artifact_root project)] ^ "\n")
 
 fun cache_warning_subject node =
   String.concat [logical_name node, " (", source_file node, ")"]
@@ -1041,7 +1043,7 @@ fun materialize_theory_cache _ project plan input_key node =
 fun metadata_path (project : HolbuildProject.t) node =
   let
     val source = HolbuildBuildPlan.source_of node
-    val base = Path.concat(Path.concat(#root project, ".holbuild/dep"), #package source)
+    val base = Path.concat(Path.concat(project_artifact_root project, ".holbuild/dep"), #package source)
   in
     Path.concat(base, #relative_path source ^ ".key")
   end
@@ -2085,7 +2087,7 @@ fun write_heap_loader plan output path =
 fun export_heap tc (project : HolbuildProject.t) plan output =
   let
     val base_context = toolchain_base_context tc
-    val stage = Path.concat(Path.concat(#root project, ".holbuild/stage"), "heap")
+    val stage = Path.concat(Path.concat(project_artifact_root project, ".holbuild/stage"), "heap")
     val loader = Path.concat(stage, "holbuild-save-heap.sml")
   in
     ensure_dir stage;

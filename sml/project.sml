@@ -43,6 +43,7 @@ datatype package =
 
 type t =
   { root : string,
+    artifact_root : string,
     manifest : string,
     name : string option,
     version : string option,
@@ -83,13 +84,15 @@ fun original_dir () =
       SOME d => d
     | NONE => FS.getDir ()
 
-fun source_dir () =
+fun source_dir_selection () =
   case !source_dir_ref of
-      SOME d => d
+      SOME d => {search_root = d, artifact_root = original_dir ()}
     | NONE =>
       case OS.Process.getEnv "HOLBUILD_SOURCE_DIR" of
-          SOME d => absolute_from_cwd d
-        | NONE => original_dir ()
+          SOME d => {search_root = absolute_from_cwd d, artifact_root = original_dir ()}
+        | NONE => {search_root = original_dir (), artifact_root = ""}
+
+fun source_dir () = #search_root (source_dir_selection ())
 
 fun readable path = FS.access(path, [FS.A_READ]) handle OS.SysErr _ => false
 
@@ -372,7 +375,7 @@ fun parse_local_config root =
     else LocalConfig {overrides = [], build_excludes = [], build_jobs = NONE, build_tactic_timeout = NONE}
   end
 
-fun parse_at {manifest, root, local_config} =
+fun parse_at {manifest, root, artifact_root, local_config} =
   let
     val table = TOML.fromFile manifest
     val _ = validate_manifest_table table
@@ -391,6 +394,7 @@ fun parse_at {manifest, root, local_config} =
     val manifest_timeout = build_tactic_timeout_from_manifest build
   in
     { root = root,
+      artifact_root = artifact_root,
       manifest = manifest,
       name = Option.mapPartial (fn t => string_field t "name") project,
       version = Option.mapPartial (fn t => string_field t "version") project,
@@ -413,13 +417,23 @@ fun parse manifest =
     val root = manifest_root manifest
     val local_config = parse_local_config root
   in
-    parse_at {manifest = manifest, root = root, local_config = local_config}
+    parse_at {manifest = manifest, root = root, artifact_root = root, local_config = local_config}
   end
 
 fun discover () =
-  case find_manifest_from (source_dir ()) of
-      SOME manifest => parse manifest
-    | NONE => die "no holproject.toml found in --source-dir/current directory or parents"
+  let val {search_root, artifact_root} = source_dir_selection ()
+  in
+    case find_manifest_from search_root of
+        SOME manifest =>
+          let
+            val root = manifest_root manifest
+            val artifact_root' = if artifact_root = "" then root else artifact_root
+            val local_config = parse_local_config root
+          in
+            parse_at {manifest = manifest, root = root, artifact_root = artifact_root', local_config = local_config}
+          end
+      | NONE => die "no holproject.toml found in --source-dir/current directory or parents"
+  end
 
 fun abs_under root path =
   if Path.isAbsolute path then path else Path.concat(root, path)
@@ -444,6 +458,7 @@ fun package_members (Package {members, ...}) = members
 fun package_excludes (Package {excludes, ...}) = excludes
 fun package_roots (Package {roots, ...}) = roots
 fun package_artifact_root (Package {artifact_root, ...}) = artifact_root
+fun artifact_root ({artifact_root, ...} : t) = artifact_root
 fun build_roots ({roots, ...} : t) = roots
 fun package_action_policies (Package {action_policies, ...}) = action_policies
 
@@ -505,10 +520,10 @@ fun dependency_to_string project (dep as Dependency {name, path, manifest, git, 
 
 fun override_to_string (Override {name, path}) = name ^ " -> " ^ path
 
-fun project_package ({root, manifest, name, members, excludes, roots, action_policies, ...} : t) =
+fun project_package ({root, artifact_root, manifest, name, members, excludes, roots, action_policies, ...} : t) =
   Package {name = Option.getOpt(name, "root"), root = root, manifest = manifest,
            members = members, excludes = excludes, roots = roots,
-           artifact_root = Path.concat(root, ".holbuild"),
+           artifact_root = Path.concat(artifact_root, ".holbuild"),
            action_policies = action_policies}
 
 fun dependency_project (project : t) (dep as Dependency {name, ...}) =
@@ -524,7 +539,7 @@ fun dependency_project (project : t) (dep as Dependency {name, ...}) =
     val _ =
       if readable dep_manifest then ()
       else die ("dependency " ^ name ^ " manifest not found: " ^ dep_manifest)
-    val dep_project = parse_at {manifest = dep_manifest, root = dep_root,
+    val dep_project = parse_at {manifest = dep_manifest, root = dep_root, artifact_root = dep_root,
                                 local_config = LocalConfig {overrides = #overrides project,
                                                             build_excludes = #local_build_excludes project,
                                                             build_jobs = #local_build_jobs project,
@@ -556,7 +571,7 @@ fun dependency_package artifact_parent project (dep as Dependency {name, ...}) =
 
 fun packages (project : t) =
   let
-    val artifact_parent = #root project
+    val artifact_parent = artifact_root project
     fun seen name names = List.exists (fn n => n = name) names
     fun add_dependency parent_project (dep, (names, packages)) =
       let val name = dependency_name dep
@@ -580,13 +595,14 @@ fun packages (project : t) =
 
 fun describe (project : t) =
   let
-    val {root, manifest, name, version, members, excludes, roots, dependencies,
+    val {root, artifact_root, manifest, name, version, members, excludes, roots, dependencies,
          overrides, local_build_excludes, local_build_jobs, build_tactic_timeout, run_heap, run_loads, heaps, action_policies} = project
     fun opt label value =
       case value of NONE => () | SOME s => print (label ^ s ^ "\n")
   in
     print ("manifest: " ^ manifest ^ "\n");
     print ("root: " ^ root ^ "\n");
+    print ("artifact-root: " ^ artifact_root ^ "\n");
     opt "name: " name;
     opt "version: " version;
     print ("members: " ^ String.concatWith ", " members ^ "\n");
