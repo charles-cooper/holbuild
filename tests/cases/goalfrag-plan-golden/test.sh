@@ -421,10 +421,9 @@ Proof
 QED
 SML
 check_plan qed_closes_branch <<'EXPECTED'
-holbuild goalfrag plan ATheory:qed_closes_branch source=src/AScript.sml (1 steps)
+holbuild goalfrag plan ATheory:qed_closes_branch source=src/AScript.sml (3 steps)
   00 CONJ_TAC
-       >- ACCEPT_TAC TRUTH
-       >> (
-         ACCEPT_TAC TRUTH
+  01   >- ACCEPT_TAC TRUTH
+  02 >> ACCEPT_TAC TRUTH
 EXPECTED
 

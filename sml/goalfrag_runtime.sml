@@ -193,10 +193,10 @@ fun print_goal_state label =
     TextIO.output(TextIO.stdErr,
       String.concat ["holbuild failed to print goal state: ", General.exnMessage e, "\n"])
 
-fun parse_tactic s =
+fun parse_tactic_source source =
   let
     val fed = ref false
-    fun read _ = if !fed then "" else (fed := true; s)
+    fun read _ = if !fed then "" else (fed := true; source)
     val result =
       HOLSourceParser.parseSML "<holbuild tactic>" read
         (fn _ => fn _ => fn msg => raise Fail msg)
@@ -207,6 +207,23 @@ fun parse_tactic s =
       | NONE => TacticParse.parseTacticBlock (HOLSourceAST.ExpEmpty 0)
       | _ => raise Fail "expected tactic expression"
   end
+
+fun close_suffix n = String.concat (List.tabulate(n, fn _ => "\n)"))
+
+fun parse_with_closing_repairs s original_error =
+  let
+    fun loop n =
+      if n > 8 then raise Fail original_error
+      else parse_tactic_source (s ^ close_suffix n) handle Fail _ => loop (n + 1)
+  in
+    loop 1
+  end
+
+fun parse_tactic s =
+  parse_tactic_source s
+  handle Fail msg =>
+    if msg = "expected closing parenthesis" then parse_with_closing_repairs s msg
+    else raise Fail msg
 
 fun flatten_frags frags =
   let
@@ -703,11 +720,6 @@ fun steps_from_tree body tree =
 
 fun steps body = steps_from_tree body (parse_tactic body)
 
-fun parse_plan body =
-  case SOME (parse_tactic body) handle Fail _ => NONE of
-      SOME tree => SOME (steps_from_tree body tree)
-    | NONE => NONE
-
 fun report_step_failure label e = (save_failed_prefix_checkpoint (); print_goal_state label; raise e)
 
 fun apply_ftac label ftac =
@@ -900,40 +912,19 @@ fun with_theorem_trace name f =
     case result of TraceOk value => value | TraceError e => raise e
   end
 
-fun atomic_plan body = [StepExpand {end_pos = size body, label = trim_space body}]
-
-fun plain_prove_and_checkpoint name end_path end_ok checkpoint_depth g tac =
-  let
-    val th = Tactical.TAC_PROOF(g, tac)
-             handle e => (proofManagerLib.set_goal g; print_goal_state (name ^ " atomic"); raise e)
-    val _ = save_checkpoint "end_of_proof" false end_path end_ok checkpoint_depth
-  in th end
-
 fun goalfrag_prove name end_path end_ok checkpoint_depth g tac tactic_text =
   let
     val _ = active_tactic_text_ref := tactic_text
-  in
-    case parse_plan tactic_text of
-        NONE =>
-          let
-            val plan = atomic_plan tactic_text
-            val _ = trace_goalfrag_plan name plan
-            val _ = stop_after_plan_if_requested ()
-          in
-            plain_prove_and_checkpoint name end_path end_ok checkpoint_depth g tac
-          end
-      | SOME plan =>
-          let
-            val _ = proofManagerLib.set_goalfrag g
-            val _ = trace_goalfrag_plan name plan
-            val _ = stop_after_plan_if_requested ()
-            val _ = run_steps plan
-            val th = proofManagerLib.top_thm()
-                     handle e => (print_goal_state (name ^ " finish"); raise e)
-            val _ = save_checkpoint "end_of_proof" false end_path end_ok checkpoint_depth
-            val _ = proofManagerLib.drop_all()
-          in th end
-  end
+    val _ = proofManagerLib.set_goalfrag g
+    val plan = steps tactic_text
+    val _ = trace_goalfrag_plan name plan
+    val _ = stop_after_plan_if_requested ()
+    val _ = run_steps plan
+    val th = proofManagerLib.top_thm()
+             handle e => (print_goal_state (name ^ " finish"); raise e)
+    val _ = save_checkpoint "end_of_proof" false end_path end_ok checkpoint_depth
+    val _ = proofManagerLib.drop_all()
+  in th end
 
 fun common_prefix_size old_text new_text =
   let

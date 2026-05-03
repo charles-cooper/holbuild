@@ -34,10 +34,10 @@ fun step_kind (StepOpen _) = "open"
   | step_kind (StepSelect _) = "select"
   | step_kind (StepSelects _) = "selects"
 
-fun parse_tactic s =
+fun parse_tactic_source source =
   let
     val fed = ref false
-    fun read _ = if !fed then "" else (fed := true; s)
+    fun read _ = if !fed then "" else (fed := true; source)
     val result =
       HOLSourceParser.parseSML "<holbuild tactic>" read
         (fn _ => fn _ => fn msg => raise Fail msg)
@@ -48,6 +48,23 @@ fun parse_tactic s =
       | NONE => TacticParse.parseTacticBlock (HOLSourceAST.ExpEmpty 0)
       | _ => raise Fail "expected tactic expression"
   end
+
+fun close_suffix n = String.concat (List.tabulate(n, fn _ => "\n)"))
+
+fun parse_with_closing_repairs s original_error =
+  let
+    fun loop n =
+      if n > 8 then raise Fail original_error
+      else parse_tactic_source (s ^ close_suffix n) handle Fail _ => loop (n + 1)
+  in
+    loop 1
+  end
+
+fun parse_tactic s =
+  parse_tactic_source s
+  handle Fail msg =>
+    if msg = "expected closing parenthesis" then parse_with_closing_repairs s msg
+    else raise Fail msg
 
 fun flatten_frags frags =
   let
@@ -728,11 +745,6 @@ fun format_steps index depth visible_stack seen_stack pending_stack steps =
 
 fun steps body = steps_from_tree body (parse_tactic body)
 
-fun parse_plan body =
-  case SOME (parse_tactic body) handle Fail _ => NONE of
-      SOME tree => SOME (steps_from_tree body tree)
-    | NONE => NONE
-
 fun format {theory, theorem, source} plan =
   let val (count, body) = format_steps 0 0 [] [false] [""] plan
   in
@@ -743,13 +755,6 @@ fun format {theory, theorem, source} plan =
        body]
   end
 
-fun atomic_plan body = [StepExpand {end_pos = size body, label = trim_space body}]
-
-fun steps_or_atomic body =
-  case parse_plan body of
-      SOME plan => plan
-    | NONE => atomic_plan body
-
-fun format_tactic selector tactic_text = format selector (steps_or_atomic tactic_text)
+fun format_tactic selector tactic_text = format selector (steps tactic_text)
 
 end
