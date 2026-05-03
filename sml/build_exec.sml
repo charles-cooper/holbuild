@@ -460,6 +460,17 @@ fun children dir =
       result
     end
 
+fun failed_prefix_ok_artifact path = has_suffix "_failed_prefix.save.ok" path
+
+fun contains_failed_prefix_ok path =
+  if not (path_exists path) then false
+  else if FS.isDir path handle OS.SysErr _ => false then
+    List.exists contains_failed_prefix_ok (children path)
+  else failed_prefix_ok_artifact path
+
+fun node_has_failed_prefix_checkpoint project node =
+  contains_failed_prefix_ok (theorem_checkpoint_root project node)
+
 fun stale cutoff path = Time.<(FS.modTime path, cutoff) handle OS.SysErr _ => false
 
 fun retention_cutoff days =
@@ -1882,10 +1893,12 @@ fun build_parallel status options tc project base_context plan keys toolchain_ke
     val mutex = Mutex.mutex ()
     val cv = ConditionVar.conditionVar ()
     val running = ref 0
+    val priority_running = ref 0
     val completed = ref 0
     val active = ref jobs
     val stopped = ref false
     val failure = ref (NONE : string option)
+    val failed_prefix_priority = Array.array (node_count, NONE : bool option)
 
     fun node_id node = HolbuildBuildPlan.indexed_key_id key_index (HolbuildBuildPlan.key node)
 
@@ -1909,14 +1922,71 @@ fun build_parallel status options tc project base_context plan keys toolchain_ke
 
     val _ = register_nodes 0
 
+    val priority_focus = Array.array (node_count, false)
+    val priority_focus_remaining = ref 0
+    val priority_mode = ref false
+
+    fun mark_priority_focus id =
+      if Array.sub (priority_focus, id) then ()
+      else
+        let
+          val node = Vector.sub (nodes, id)
+          val deps = HolbuildBuildPlan.direct_project_deps_with lookup plan node
+          val _ = Array.update (priority_focus, id, true)
+          val _ = priority_focus_remaining := !priority_focus_remaining + 1
+        in
+          List.app (mark_priority_focus o node_id) deps
+        end
+
+    fun mark_priority_root id =
+      if node_has_failed_prefix_checkpoint project (Vector.sub (nodes, id)) then
+        (priority_mode := true; mark_priority_focus id)
+      else ()
+      handle _ => ()
+
+    fun mark_priority_roots id =
+      if id >= node_count then ()
+      else (mark_priority_root id; mark_priority_roots (id + 1))
+
+    val _ = mark_priority_roots 0
+
     fun signal () = ConditionVar.broadcast cv
     fun lock () = Mutex.lock mutex
     fun unlock () = Mutex.unlock mutex
 
+    fun failed_prefix_priority_node id =
+      case Array.sub (failed_prefix_priority, id) of
+          SOME value => value
+        | NONE =>
+            let val value = node_has_failed_prefix_checkpoint project (Vector.sub (nodes, id))
+                            handle _ => false
+            in Array.update (failed_prefix_priority, id, SOME value); value end
+
+    fun pop_matching_ready matches prefix rest =
+      case rest of
+          [] => NONE
+        | id :: suffix =>
+            if matches id then SOME (id, rev prefix @ suffix)
+            else pop_matching_ready matches (id :: prefix) suffix
+
+    fun priority_focus_node id = Array.sub (priority_focus, id)
+
     fun pop_ready () =
       case !ready of
           [] => NONE
-        | id :: rest => (ready := rest; SOME id)
+        | id :: rest =>
+            if !priority_mode andalso !priority_focus_remaining > 0 then
+              (case pop_matching_ready priority_focus_node [] (id :: rest) of
+                   SOME (focus_id, remaining) =>
+                     (ready := remaining; SOME (focus_id, failed_prefix_priority_node focus_id))
+                 | NONE => NONE)
+            else
+              (priority_mode := false;
+               case pop_matching_ready failed_prefix_priority_node [] (id :: rest) of
+                   SOME (priority_id, remaining) => (ready := remaining; SOME (priority_id, true))
+                 | NONE =>
+                     if !priority_running > 0 then NONE
+                     else (ready := rest; SOME (id, false)))
 
     fun next_work_locked () =
       case !failure of
@@ -1925,7 +1995,10 @@ fun build_parallel status options tc project base_context plan keys toolchain_ke
             if !stopped then NONE
             else
               case pop_ready () of
-                  SOME id => (running := !running + 1; SOME id)
+                  SOME (id, priority) =>
+                    (running := !running + 1;
+                     if priority then priority_running := !priority_running + 1 else ();
+                     SOME id)
                 | NONE =>
                     if !completed = node_count andalso !running = 0 then NONE
                     else (ConditionVar.wait (cv, mutex); next_work_locked ())
@@ -1945,21 +2018,30 @@ fun build_parallel status options tc project base_context plan keys toolchain_ke
 
     fun stop_requested () = with_lock (fn () => !stopped)
 
+    fun finish_priority_focus id =
+      if priority_focus_node id then priority_focus_remaining := !priority_focus_remaining - 1 else ()
+
+    fun finish_priority id =
+      (finish_priority_focus id;
+       if failed_prefix_priority_node id then priority_running := !priority_running - 1 else ())
+
     fun finish_success id =
       with_lock
         (fn () =>
             (running := !running - 1;
+             finish_priority id;
              completed := !completed + 1;
              if !stopped then () else List.app release_dependent (Array.sub (dependents, id));
              signal ()))
 
-    fun finish_inspected () =
+    fun finish_inspected id =
       let
         val first_stop =
           with_lock
             (fn () =>
                 let
                   val _ = running := !running - 1
+                  val _ = finish_priority id
                   val _ = completed := !completed + 1
                   val first = not (!stopped)
                   val _ = stopped := true
@@ -1971,16 +2053,17 @@ fun build_parallel status options tc project base_context plan keys toolchain_ke
         if first_stop then HolbuildToolchain.cleanup_active_children () else ()
       end
 
-    fun finish_cancelled_after_stop () =
-      with_lock (fn () => (running := !running - 1; signal ()))
+    fun finish_cancelled_after_stop id =
+      with_lock (fn () => (running := !running - 1; finish_priority id; signal ()))
 
-    fun finish_failure msg =
+    fun finish_failure id msg =
       let
         val first_failure =
           with_lock
             (fn () =>
                 let
                   val _ = running := !running - 1
+                  val _ = finish_priority id
                   val first =
                     if !stopped then false
                     else
@@ -2007,19 +2090,19 @@ fun build_parallel status options tc project base_context plan keys toolchain_ke
                 let val node = Vector.sub (nodes, id)
                 in
                   ((case build_one status options tc project base_context plan keys toolchain_key node of
-                        HolbuildStatus.Inspected => finish_inspected ()
+                        HolbuildStatus.Inspected => finish_inspected id
                       | _ => finish_success id;
                     loop ())
                    handle e =>
                      if stop_requested () then
-                       (finish_cancelled_after_stop (); worker_exit ())
+                       (finish_cancelled_after_stop id; worker_exit ())
                      else
                        let
                          val msg = build_error_message e
                        in
                          HolbuildStatus.fail status (HolbuildBuildPlan.key node)
                                                (HolbuildBuildPlan.logical_name node) msg;
-                         finish_failure msg;
+                         finish_failure id msg;
                          worker_exit ()
                        end)
                 end

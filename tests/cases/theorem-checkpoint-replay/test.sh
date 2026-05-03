@@ -594,6 +594,56 @@ if grep -q "resuming ATheory from checkpoint changed_prefix failed_prefix" "$cha
   exit 1
 fi
 
+priority_project=$tmpdir/priority-project
+priority_counter=$tmpdir/priority-counter.txt
+mkdir -p "$priority_project/src"
+touch "$priority_counter"
+cat > "$priority_project/holproject.toml" <<'TOML'
+[project]
+name = "priority"
+[build]
+members = ["src"]
+[actions.CTheory]
+always_reexecute = true
+TOML
+cat > "$priority_project/src/BScript.sml" <<'SML'
+open HolKernel Parse boolLib bossLib;
+val _ = new_theory "B";
+Theorem b_fail:
+  T
+Proof
+  ALL_TAC >> FAIL_TAC "priority failure"
+QED
+val _ = export_theory();
+SML
+cat > "$priority_project/src/CScript.sml" <<SML
+open HolKernel Parse boolLib bossLib;
+val _ = new_theory "C";
+val out = TextIO.openAppend "$priority_counter";
+val _ = (TextIO.output(out, "x"); TextIO.closeOut out);
+Theorem c_thm:
+  T
+Proof
+  ACCEPT_TAC TRUTH
+QED
+val _ = export_theory();
+SML
+priority_first_log=$tmpdir/priority-first.log
+if (cd "$priority_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" -j2 build BTheory CTheory) > "$priority_first_log" 2>&1; then
+  echo "expected priority project first build to fail" >&2
+  exit 1
+fi
+require_file "$(find "$priority_project/.holbuild/checkpoints" -name '*b_fail_failed_prefix.save' -print -quit)"
+: > "$priority_counter"
+priority_again_log=$tmpdir/priority-again.log
+if (cd "$priority_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" -j2 build BTheory CTheory) > "$priority_again_log" 2>&1; then
+  echo "expected priority project repeated build to fail" >&2
+  exit 1
+fi
+priority_count=$(wc -c < "$priority_counter" | tr -d ' ')
+[[ "$priority_count" = "0" ]] || { echo "scheduler ran unrelated always-reexecute target before failed_prefix; count $priority_count" >&2; exit 1; }
+require_grep "resuming BTheory from checkpoint b_fail failed_prefix" "$priority_again_log"
+
 branch_failure_project=$tmpdir/branch-failure-project
 mkdir -p "$branch_failure_project/src"
 cp "$project/holproject.toml" "$branch_failure_project/holproject.toml"
