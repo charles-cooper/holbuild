@@ -110,6 +110,69 @@ holbuild proof-ir plan ATheory:split_first_lt_plan source=src/AScript.sml (2 ste
 EXPECTED
 
 cat >> "$project/src/AScript.sml" <<'SML'
+Theorem try_plan:
+  T
+Proof
+  TRY NO_TAC >> ACCEPT_TAC TRUTH
+QED
+SML
+check_plan try_plan <<'EXPECTED'
+holbuild proof-ir plan ATheory:try_plan source=src/AScript.sml (5 steps)
+  00 TRY
+  01   NO_TAC
+  02   |
+  03   ALL_TAC
+  04 >> ACCEPT_TAC TRUTH
+EXPECTED
+
+cat >> "$project/src/AScript.sml" <<'SML'
+Theorem repeat_plan:
+  T
+Proof
+  REPEAT NO_TAC >> ACCEPT_TAC TRUTH
+QED
+SML
+check_plan repeat_plan <<'EXPECTED'
+holbuild proof-ir plan ATheory:repeat_plan source=src/AScript.sml (2 steps)
+  00 REPEAT NO_TAC
+  01 >> ACCEPT_TAC TRUTH
+EXPECTED
+
+cat >> "$project/src/AScript.sml" <<'SML'
+Theorem reverse_plan:
+  T /\ T
+Proof
+  REVERSE CONJ_TAC >- ACCEPT_TAC TRUTH >- ACCEPT_TAC TRUTH
+QED
+SML
+check_plan reverse_plan <<'EXPECTED'
+holbuild proof-ir plan ATheory:reverse_plan source=src/AScript.sml (3 steps)
+  00 REVERSE CONJ_TAC
+  01 >- ACCEPT_TAC TRUTH
+  02 >- ACCEPT_TAC TRUTH
+EXPECTED
+
+cat >> "$project/src/AScript.sml" <<'SML'
+Theorem try_repeat_reverse_lt_plan:
+  T /\ T
+Proof
+  CONJ_TAC
+  >>> REVERSE_LT
+  >>> TRY_LT NO_LT
+  >>> REPEAT_LT NO_LT
+  >>> TACS_TO_LT [ACCEPT_TAC TRUTH, ACCEPT_TAC TRUTH]
+QED
+SML
+check_plan try_repeat_reverse_lt_plan <<'EXPECTED'
+holbuild proof-ir plan ATheory:try_repeat_reverse_lt_plan source=src/AScript.sml (5 steps)
+  00 CONJ_TAC
+  01 >> list_tac REVERSE_LT
+  02 >> list_tac TRY_LT NO_LT
+  03 >> list_tac REPEAT_LT NO_LT
+  04 >> list_tac TACS_TO_LT [ACCEPT_TAC TRUTH, ACCEPT_TAC TRUTH]
+EXPECTED
+
+cat >> "$project/src/AScript.sml" <<'SML'
 Theorem orelse_plan:
   T
 Proof

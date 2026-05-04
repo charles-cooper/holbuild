@@ -267,6 +267,16 @@ Proof
   >>> ALLGOALS (ACCEPT_TAC TRUTH)
 QED
 
+Theorem list_try_repeat_reverse_success:
+  T ∧ T
+Proof
+  CONJ_TAC
+  >>> REVERSE_LT
+  >>> TRY_LT NO_LT
+  >>> REPEAT_LT NO_LT
+  >>> TACS_TO_LT [ACCEPT_TAC TRUTH, ACCEPT_TAC TRUTH]
+QED
+
 Theorem reverse_then1_success:
   T ∧ T
 Proof

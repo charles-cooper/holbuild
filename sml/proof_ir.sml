@@ -69,9 +69,9 @@ datatype tactic =
   | TacThen1 of tactic * tactic
   | TacThenL of tactic * tactic list
   | TacOrelse of tactic list
-  | TacTry of tactic
-  | TacRepeat of tactic
-  | TacReverse of tactic
+  | TacTry of (int * int) * tactic
+  | TacRepeat of (int * int) * tactic
+  | TacReverse of (int * int) * tactic
   | TacSubgoal of int * int
   | TacMapEvery of (int * int) * (int * int) list
   | TacApply of (int * int) * (int * int)
@@ -90,9 +90,9 @@ and list_tactic =
   | LtLastGoal of tactic
   | LtHeadGoal of tactic
   | LtSplit of (int * int) * list_tactic * list_tactic
-  | LtReverse
-  | LtTry of list_tactic
-  | LtRepeat of list_tactic
+  | LtReverse of int * int
+  | LtTry of (int * int) * list_tactic
+  | LtRepeat of (int * int) * list_tactic
   | LtFirstLT of tactic
   | LtSelectThen of tactic * tactic
   | LtSelectGoal of int * int
@@ -129,9 +129,9 @@ fun tactic_end (TacThen []) = 0
   | tactic_end (TacThenL (_, ts)) = tactic_end (List.last ts)
   | tactic_end (TacOrelse []) = 0
   | tactic_end (TacOrelse xs) = tactic_end (List.last xs)
-  | tactic_end (TacTry t) = tactic_end t
-  | tactic_end (TacRepeat t) = tactic_end t
-  | tactic_end (TacReverse t) = tactic_end t
+  | tactic_end (TacTry (sp, _)) = span_end sp
+  | tactic_end (TacRepeat (sp, _)) = span_end sp
+  | tactic_end (TacReverse (sp, _)) = span_end sp
   | tactic_end (TacSubgoal sp) = span_end sp
   | tactic_end (TacApply (_, arg)) = span_end arg
   | tactic_end (TacMapEvery (_, [])) = 0
@@ -154,9 +154,9 @@ and list_tactic_end (LtThenLT []) = 0
   | list_tactic_end (LtLastGoal t) = tactic_end t
   | list_tactic_end (LtHeadGoal t) = tactic_end t
   | list_tactic_end (LtSplit (sp, _, _)) = span_end sp
-  | list_tactic_end LtReverse = 0
-  | list_tactic_end (LtTry lt) = list_tactic_end lt
-  | list_tactic_end (LtRepeat lt) = list_tactic_end lt
+  | list_tactic_end (LtReverse sp) = span_end sp
+  | list_tactic_end (LtTry (sp, _)) = span_end sp
+  | list_tactic_end (LtRepeat (sp, _)) = span_end sp
   | list_tactic_end (LtFirstLT t) = tactic_end t
   | list_tactic_end (LtSelectThen (_, t)) = tactic_end t
   | list_tactic_end (LtSelectGoal sp) = span_end sp
@@ -184,6 +184,11 @@ and parse_tactic_app e =
     | SOME ("all_tac", []) => TacThen []
     | SOME ("MAP_EVERY", [f, xs]) => parse_map_every e f xs
     | SOME ("MAP_FIRST", [f, xs]) => parse_map_first e f xs
+    | SOME ("TRY", [t]) => TacTry (span e, parse_tactic_ast t)
+    | SOME ("REPEAT", [t]) => TacRepeat (span e, parse_tactic_ast t)
+    | SOME ("rpt", [t]) => TacRepeat (span e, parse_tactic_ast t)
+    | SOME ("REVERSE", [t]) => TacReverse (span e, parse_tactic_ast t)
+    | SOME ("reverse", [t]) => TacReverse (span e, parse_tactic_ast t)
     | _ => atomic e
 and parse_map_every whole f xs =
   (case list_elems xs of
@@ -252,6 +257,9 @@ and parse_list_tactic_app e =
     | SOME ("LASTGOAL", [t]) => LtLastGoal (parse_tactic_ast t)
     | SOME ("HEADGOAL", [t]) => LtHeadGoal (parse_tactic_ast t)
     | SOME ("SPLIT_LT", [n, branches]) => parse_split_lt e n branches
+    | SOME ("REVERSE_LT", []) => LtReverse (span e)
+    | SOME ("TRY_LT", [lt]) => LtTry (span e, parse_list_tactic_ast lt)
+    | SOME ("REPEAT_LT", [lt]) => LtRepeat (span e, parse_list_tactic_ast lt)
     | SOME ("FIRST_LT", [t]) => LtFirstLT (parse_tactic_ast t)
     | _ => list_atomic e
 and parse_split_lt whole n branches =
@@ -265,6 +273,7 @@ and parse_list_tactic_infix left opn right whole =
     | ">>" => LtThen (parse_list_tactic_ast left, flatten_then right)
     | "\\\\" => LtThen (parse_list_tactic_ast left, flatten_then right)
     | "THEN" => LtThen (parse_list_tactic_ast left, flatten_then right)
+    | "ORELSE_LT" => LtOrelse (flatten_orelse_lt left @ flatten_orelse_lt right)
     | _ => list_atomic whole
 and flatten_thenlt e =
   case strip_closed_parens e of
@@ -311,9 +320,9 @@ fun tactic_program source tactic =
     | TacThen1 (a, b) => "Tactical.THEN1(" ^ tactic_program source a ^ ", " ^ tactic_program source b ^ ")"
     | TacThenL (a, bs) => "Tactical.THENL(" ^ tactic_program source a ^ ", [" ^ String.concatWith ", " (map (tactic_program source) bs) ^ "])"
     | TacOrelse xs => join_program "Tactical.ORELSE" (map (tactic_program source) xs) "Tactical.NO_TAC"
-    | TacTry t => "Tactical.TRY(" ^ tactic_program source t ^ ")"
-    | TacRepeat t => "Tactical.REPEAT(" ^ tactic_program source t ^ ")"
-    | TacReverse t => "Tactical.REVERSE(" ^ tactic_program source t ^ ")"
+    | TacTry (_, t) => "Tactical.TRY(" ^ tactic_program source t ^ ")"
+    | TacRepeat (_, t) => "Tactical.REPEAT(" ^ tactic_program source t ^ ")"
+    | TacReverse (_, t) => "Tactical.REVERSE(" ^ tactic_program source t ^ ")"
     | TacSubgoal sp => "sg " ^ source_text source sp
     | TacApply (f, arg) => parenthesize (source_text source f) ^ " " ^ source_text source arg
     | TacMapEvery _ => parenthesize (source_text source (tactic_span tactic))
@@ -334,9 +343,9 @@ and list_tactic_program source lt =
     | LtLastGoal t => "Tactical.LASTGOAL(" ^ tactic_program source t ^ ")"
     | LtHeadGoal t => "Tactical.HEADGOAL(" ^ tactic_program source t ^ ")"
     | LtSplit (n, a, b) => "Tactical.SPLIT_LT (" ^ source_text source n ^ ") (" ^ list_tactic_program source a ^ ", " ^ list_tactic_program source b ^ ")"
-    | LtReverse => "Tactical.REVERSE_LT"
-    | LtTry lt => "Tactical.TRY_LT(" ^ list_tactic_program source lt ^ ")"
-    | LtRepeat lt => "Tactical.REPEAT_LT(" ^ list_tactic_program source lt ^ ")"
+    | LtReverse _ => "Tactical.REVERSE_LT"
+    | LtTry (_, lt) => "Tactical.TRY_LT(" ^ list_tactic_program source lt ^ ")"
+    | LtRepeat (_, lt) => "Tactical.REPEAT_LT(" ^ list_tactic_program source lt ^ ")"
     | LtFirstLT t => "Tactical.FIRST_LT(" ^ tactic_program source t ^ ")"
     | LtSelectThen (selector, body) => "Tactical.SELECT_LT_THEN (" ^ tactic_program source selector ^ ") (" ^ tactic_program source body ^ ")"
     | LtSelectGoal sp => "Q.SELECT_GOAL_LT " ^ source_text source sp
@@ -353,9 +362,9 @@ and tactic_span tactic =
     | TacThenL (a, bs) => (#1 (tactic_span a), #2 (tactic_span (List.last bs)))
     | TacOrelse [] => (0, 0)
     | TacOrelse xs => (#1 (tactic_span (hd xs)), #2 (tactic_span (List.last xs)))
-    | TacTry t => tactic_span t
-    | TacRepeat t => tactic_span t
-    | TacReverse t => tactic_span t
+    | TacTry (sp, _) => sp
+    | TacRepeat (sp, _) => sp
+    | TacReverse (sp, _) => sp
     | TacSubgoal sp => sp
     | TacApply (f, arg) => (#1 f, #2 arg)
     | TacMapEvery (f, []) => f
@@ -380,9 +389,9 @@ and list_tactic_span lt =
     | LtLastGoal t => tactic_span t
     | LtHeadGoal t => tactic_span t
     | LtSplit (n, _, _) => n
-    | LtReverse => (0, 0)
-    | LtTry lt => list_tactic_span lt
-    | LtRepeat lt => list_tactic_span lt
+    | LtReverse sp => sp
+    | LtTry (sp, _) => sp
+    | LtRepeat (sp, _) => sp
     | LtFirstLT t => tactic_span t
     | LtSelectThen (a, b) => (#1 (tactic_span a), #2 (tactic_span b))
     | LtSelectGoal sp => sp
@@ -436,6 +445,7 @@ fun plan_tactic source tactic =
            ("Tactical.NULL_OK_LT (Tactical.TACS_TO_LT [" ^ String.concatWith ", " (map (tactic_program source) branches) ^ "])")]
     | TacThenLT (lhs, lt) => plan_tactic source lhs @ plan_list_tactic source ">>>" lt
     | TacOrelse xs => [choice_step (tactic_end tactic) "ORELSE" (tactic_program source tactic) (map (tactic_label source) xs)]
+    | TacTry (_, t) => [choice_step (tactic_end tactic) "TRY" (tactic_program source tactic) [tactic_label source t, "ALL_TAC"]]
     | TacMapFirst (_, xs) => [choice_step (tactic_end tactic) "FIRST" (tactic_program source tactic) (map (tactic_label source) xs)]
     | TacSufficesBy (q, rhs) =>
         [StepTactic {end_pos = span_end q, label = suffices_tactic_program source q, program = suffices_tactic_program source q},
@@ -472,6 +482,14 @@ and plan_list_tactic source prefix lt =
         [list_step source (list_tactic_end lt)
            (">> list_tac FIRST_LT " ^ tactic_label source t)
            (list_tactic_program source lt)]
+    | LtReverse _ =>
+        [list_step source (list_tactic_end lt) (">> list_tac REVERSE_LT") (list_tactic_program source lt)]
+    | LtTry _ =>
+        [list_step source (list_tactic_end lt) (">> list_tac " ^ list_tactic_label source lt) (list_tactic_program source lt)]
+    | LtRepeat _ =>
+        [list_step source (list_tactic_end lt) (">> list_tac " ^ list_tactic_label source lt) (list_tactic_program source lt)]
+    | LtOrelse xs =>
+        [choice_step (list_tactic_end lt) (">> list_tac ORELSE_LT") (list_tactic_program source lt) (map (list_tactic_label source) xs)]
     | LtSelectGoal sp => [list_step source (list_tactic_end lt) (">> list_tac Q.SELECT_GOAL_LT " ^ source_text source sp) (list_tactic_program source lt)]
     | LtSelectGoals sp => [list_step source (list_tactic_end lt) (">> list_tac Q.SELECT_GOALS_LT " ^ source_text source sp) (list_tactic_program source lt)]
     | LtSelectThen (TacAtomic (_, pats), body) =>
@@ -487,6 +505,9 @@ and list_tactic_label source lt =
     | LtLastGoal t => "LASTGOAL (" ^ tactic_label source t ^ ")"
     | LtHeadGoal t => "HEADGOAL (" ^ tactic_label source t ^ ")"
     | LtSplit (n, a, b) => "SPLIT_LT " ^ source_text source n ^ " (" ^ list_tactic_label source a ^ ", " ^ list_tactic_label source b ^ ")"
+    | LtReverse _ => "REVERSE_LT"
+    | LtTry _ => source_text source (list_tactic_span lt)
+    | LtRepeat _ => source_text source (list_tactic_span lt)
     | LtFirstLT t => "FIRST_LT " ^ tactic_label source t
     | _ => source_text source (list_tactic_span lt)
 
