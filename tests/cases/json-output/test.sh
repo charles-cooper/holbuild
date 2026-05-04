@@ -53,10 +53,20 @@ for line in lines:
     events.append(json.loads(line))
 if not any(e.get('event') == 'node_finished' and e.get('target') == 'JTheory' and e.get('outcome') == 'built' for e in events):
     raise SystemExit('missing JTheory built node_finished event')
+started = [e for e in events if e.get('event') == 'node_started' and e.get('target') == 'JTheory']
+finished = [e for e in events if e.get('event') == 'node_finished' and e.get('target') == 'JTheory']
+if not started or not finished or started[-1].get('key') != finished[-1].get('key'):
+    raise SystemExit('node start/finish keys do not correlate')
+for event in started + finished:
+    key = event.get('key', '')
+    if '\x00' in key or '\\u0000' in key:
+        raise SystemExit(f'node key exposes internal NUL-delimited action key: {key!r}')
+    if not key.startswith(event.get('target', '') + '#'):
+        raise SystemExit(f'node key does not include display target: {key!r}')
 if not any(e.get('event') == 'build_finished' and isinstance(e.get('elapsed_ms'), int) for e in events):
     raise SystemExit('missing build_finished elapsed event')
-if any('\x1b' in line or '\r' in line for line in lines):
-    raise SystemExit('status redraw escaped into json output')
+if any('\\u0000' in line or '\x1b' in line or '\r' in line for line in lines):
+    raise SystemExit('internal keys or status redraw escaped into json output')
 PY
 
 if grep -q "JTheory built" "$json_log"; then

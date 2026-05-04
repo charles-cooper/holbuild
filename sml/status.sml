@@ -54,6 +54,10 @@ fun json_string_field name value =
 fun json_int_field name value =
   "\"" ^ name ^ "\":" ^ Int.toString value
 
+fun short_hash text = String.substring(HolbuildHash.string_sha1 text, 0, 12)
+
+fun json_node_key key label = label ^ "#" ^ short_hash key
+
 fun json_fields fields = "{" ^ String.concatWith "," fields ^ "}\n"
 
 fun emit_json stream event fields =
@@ -242,7 +246,7 @@ fun start_node status key label =
             (active := {key = key, label = label} :: remove_active key (!active);
              if json_mode () then
                emit_json TextIO.stdOut "node_started"
-                 [json_string_field "key" key,
+                 [json_string_field "key" (json_node_key key label),
                   json_string_field "target" label]
              else if enabled then redraw status
              else ())
@@ -260,7 +264,7 @@ fun finish_node status key label outcome =
              active := remove_active key (!active);
              if json_mode () then
                emit_json TextIO.stdOut "node_finished"
-                 [json_string_field "key" key,
+                 [json_string_field "key" (json_node_key key label),
                   json_string_field "target" label,
                   json_string_field "outcome" (outcome_text outcome),
                   json_int_field "finished" (!finished),
