@@ -1423,9 +1423,7 @@ fun build_theory cache_allowed policy tc project base_context plan keys toolchai
                (source_file node) source_text theorem_checkpoints)
             failure_log
         val goal_state = Option.mapPartial HolbuildTheoryDiagnostics.summarize_goal_state failure_log
-        val child_failure =
-          if Option.isSome source_context orelse Option.isSome goal_state then NONE
-          else Option.mapPartial HolbuildTheoryDiagnostics.child_failure_summary failure_log
+        val child_failure = Option.mapPartial HolbuildTheoryDiagnostics.child_failure_summary failure_log
         val detail =
           String.concat
             [case source_context of NONE => "" | SOME text => text,
@@ -1450,8 +1448,7 @@ fun build_theory cache_allowed policy tc project base_context plan keys toolchai
         val static_error = Option.mapPartial (fn path => HolbuildTheoryDiagnostics.static_error_summary (source_file node) source_text (String.fields (fn c => c = #"\n") (read_text path))) failure_log
         val source_context = Option.mapPartial (HolbuildTheoryDiagnostics.summarize_failed_fragment_source (source_file node) source_text theorem_checkpoints) failure_log
         val child_failure =
-          if Option.isSome trace_context orelse Option.isSome static_error orelse
-             Option.isSome source_context orelse Option.isSome goal_state then NONE
+          if Option.isSome static_error then NONE
           else Option.mapPartial HolbuildTheoryDiagnostics.child_failure_summary failure_log
         val fallback =
           if Option.isSome child_failure then ""
