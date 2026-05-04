@@ -383,6 +383,16 @@ Proof
   >> FIRST_ASSUM ACCEPT_TAC
 QED
 
+Theorem suffices_by_partial_success:
+  F ==> T ∧ T
+Proof
+  strip_tac
+  >> `F` suffices_by simp[]
+  >> CONJ_TAC
+  >> FIRST_ASSUM ACCEPT_TAC
+  >> FIRST_ASSUM ACCEPT_TAC
+QED
+
 Theorem nested_suffices_by_success:
   T
 Proof
@@ -423,6 +433,16 @@ Theorem select_then1_success:
 Proof
   CONJ_TAC >>~- ([`T`], ACCEPT_TAC TRUTH)
   >> ACCEPT_TAC TRUTH
+QED
+
+Theorem unsafe_then1_chain_success:
+  T ∧ T ∧ T ∧ T
+Proof
+  rpt CONJ_TAC
+  >- ACCEPT_TAC TRUTH
+  >- ACCEPT_TAC TRUTH
+  >- ACCEPT_TAC TRUTH
+  >- ACCEPT_TAC TRUTH
 QED
 
 Theorem invalid_intermediate:

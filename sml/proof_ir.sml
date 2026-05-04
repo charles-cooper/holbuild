@@ -117,26 +117,39 @@ datatype step =
   | StepList of {end_pos : int, label : string, program : string}
   | StepChoice of {end_pos : int, label : string, program : string, alternatives : string list}
   | StepListChoice of {end_pos : int, label : string, program : string, alternatives : string list}
+  | StepGentleThen1 of {end_pos : int, label : string, list_suffix : bool, first_program : string, second_program : string}
+  | StepPlain of {end_pos : int, label : string, program : string}
 
 fun step_end (StepTactic {end_pos, ...}) = end_pos
   | step_end (StepList {end_pos, ...}) = end_pos
   | step_end (StepChoice {end_pos, ...}) = end_pos
   | step_end (StepListChoice {end_pos, ...}) = end_pos
+  | step_end (StepGentleThen1 {end_pos, ...}) = end_pos
+  | step_end (StepPlain {end_pos, ...}) = end_pos
 
 fun step_label (StepTactic {label, ...}) = label
   | step_label (StepList {label, ...}) = label
   | step_label (StepChoice {label, ...}) = label
   | step_label (StepListChoice {label, ...}) = label
+  | step_label (StepGentleThen1 {label, ...}) = label
+  | step_label (StepPlain {label, ...}) = label
 
 fun step_program (StepTactic {program, ...}) = program
   | step_program (StepList {program, ...}) = program
   | step_program (StepChoice {program, ...}) = program
   | step_program (StepListChoice {program, ...}) = program
+  | step_program (StepGentleThen1 {list_suffix, first_program, second_program, ...}) =
+      let val tactic = "HolbuildProofRuntime.gentle_then1 (" ^ first_program ^ ") (" ^ second_program ^ ")"
+      in if list_suffix then "Tactical.ALLGOALS (" ^ tactic ^ ")" else tactic end
+  | step_program (StepPlain {program, ...}) = program
 
 fun step_kind (StepTactic _) = "tactic"
   | step_kind (StepList _) = "list_tactic"
   | step_kind (StepChoice _) = "choice"
   | step_kind (StepListChoice _) = "list_choice"
+  | step_kind (StepGentleThen1 {list_suffix = true, ...}) = "list_gentle_then1"
+  | step_kind (StepGentleThen1 _) = "gentle_then1"
+  | step_kind (StepPlain _) = "plain"
 
 fun tactic_end (TacThen []) = 0
   | tactic_end (TacThen xs) = tactic_end (List.last xs)
@@ -348,20 +361,20 @@ and flatten_orelse_lt e =
              Infix {left, id = (_, "ORELSE_LT"), right} => flatten_orelse_lt left @ flatten_orelse_lt right
            | _ => [parse_list_tactic_ast e])
 
-fun parse_tactic source =
+fun parse_tactic_expr source =
   let
     val fed = ref false
     fun read _ = if !fed then "" else (fed := true; source)
     fun ignore_parse_error _ _ _ = ()
     val result = HOLSourceParser.parseSML "<holbuild proof ir tactic>" read ignore_parse_error HOLSourceParser.initialScope
-    val exp =
-      case #parseDec result () of
-          SOME (DecExp e) => e
-        | NONE => ExpEmpty 0
-        | _ => raise Fail "expected tactic expression"
   in
-    parse_tactic_ast exp
+    case #parseDec result () of
+        SOME (DecExp e) => e
+      | NONE => ExpEmpty 0
+      | _ => raise Fail "expected tactic expression"
   end
+
+fun parse_tactic source = parse_tactic_ast (parse_tactic_expr source)
 
 fun join_program combinator [] identity = identity
   | join_program _ [x] _ = x
@@ -390,8 +403,8 @@ fun tactic_program source tactic =
     | TacMapEvery _ => parenthesize (source_text source (tactic_span tactic))
     | TacMapFirst (_, ts) => "Tactical.FIRST [" ^ String.concatWith ", " (map (tactic_program source) ts) ^ "]"
     | TacSufficesBy (q, rhs) =>
-        "Tactical.THEN1(Q_TAC SUFF_TAC " ^ source_text source q ^
-        ", Tactical.THEN(" ^ tactic_program source rhs ^ ", Tactical.NO_TAC))"
+        "HolbuildProofRuntime.gentle_then1 (Q_TAC SUFF_TAC " ^ source_text source q ^
+        ") (Tactical.THEN(" ^ tactic_program source rhs ^ ", Tactical.NO_TAC))"
     | TacRepairGroup (_, t) => tactic_program source t
     | TacAtomic (_, sp) => parenthesize (source_text source sp)
 and list_tactic_program source lt =
@@ -499,6 +512,10 @@ fun choice_step end_pos label program alternatives =
 fun list_choice_step end_pos label program alternatives =
   StepListChoice {end_pos = end_pos, label = label, program = program, alternatives = alternatives}
 
+fun gentle_then1_step end_pos label list_suffix first_program second_program =
+  StepGentleThen1 {end_pos = end_pos, label = label, list_suffix = list_suffix,
+                   first_program = first_program, second_program = second_program}
+
 fun allgoals_step source tactic =
   let val label = ">> " ^ tactic_label source tactic
   in list_step source (tactic_end tactic) label ("Tactical.ALLGOALS(" ^ tactic_program source tactic ^ ")") end
@@ -508,16 +525,15 @@ fun allgoals_choice_step source label tactic alternatives =
 
 fun suffices_tactic_program source q = "Q_TAC SUFF_TAC " ^ source_text source q
 
-fun suffices_branch_step source rhs =
-  list_step source (tactic_end rhs) ("  >- " ^ tactic_label source rhs)
-    ("Tactical.NTH_GOAL (Tactical.THEN(" ^ tactic_program source rhs ^ ", Tactical.NO_TAC)) 1")
+fun suffices_branch_step source q rhs list_suffix =
+  gentle_then1_step (tactic_end rhs) ("  >- " ^ tactic_label source rhs) list_suffix
+    (suffices_tactic_program source q)
+    ("Tactical.THEN(" ^ tactic_program source rhs ^ ", Tactical.NO_TAC)")
 
 fun suffix_steps source tactic =
   case tactic of
       TacSufficesBy (q, rhs) =>
-        [list_step source (span_end q) (">> " ^ suffices_tactic_program source q)
-           ("Tactical.ALLGOALS(" ^ suffices_tactic_program source q ^ ")"),
-         suffices_branch_step source rhs]
+        [suffices_branch_step source q rhs true]
     | TacOrelse xs => [allgoals_choice_step source ">> ORELSE" tactic (map (tactic_label source) xs)]
     | TacTry (_, t) => [allgoals_choice_step source ">> TRY" tactic [tactic_label source t, "ALL_TAC"]]
     | TacFirst (_, xs) => [allgoals_choice_step source ">> FIRST" tactic (map (tactic_label source) xs)]
@@ -544,8 +560,7 @@ fun plan_tactic source tactic =
     | TacFirstProve (_, xs) => [choice_step (tactic_end tactic) "FIRST_PROVE" (tactic_program source tactic) (map (tactic_label source) xs)]
     | TacMapFirst (_, xs) => [choice_step (tactic_end tactic) "FIRST" (tactic_program source tactic) (map (tactic_label source) xs)]
     | TacSufficesBy (q, rhs) =>
-        [StepTactic {end_pos = span_end q, label = suffices_tactic_program source q, program = suffices_tactic_program source q},
-         suffices_branch_step source rhs]
+        [suffices_branch_step source q rhs false]
     | TacRepairGroup (_, inner) => plan_tactic source inner
     | _ => [tactic_step source tactic]
 and plan_list_tactic source prefix lt =
@@ -631,10 +646,49 @@ and list_tactic_label source lt =
     | LtFirstLT t => "FIRST_LT " ^ tactic_label source t
     | _ => source_text source (list_tactic_span lt)
 
-fun steps source = plan_tactic source (parse_tactic source)
+fun span_text source (start, stop) = String.substring(source, start, stop - start)
+
+fun expr_contains_try e =
+  case e of
+      Infix {left, right, ...} => expr_contains_try left orelse expr_contains_try right
+    | App _ =>
+        (case app_name e of
+             SOME ("TRY", [_]) => true
+           | SOME ("TRY_LT", [_]) => true
+           | SOME (_, args) => List.exists expr_contains_try args
+           | NONE => false)
+    | Parens {exp, ...} => expr_contains_try exp
+    | Tuple {elems = {args, ...}, ...} => List.exists expr_contains_try args
+    | List {elems = {args, ...}, ...} => List.exists expr_contains_try args
+    | _ => false
+
+fun branch_expr (Infix {id = (_, ">-"), ...}) = true
+  | branch_expr (Infix {id = (_, "THEN1"), ...}) = true
+  | branch_expr (Parens {exp, ...}) = branch_expr exp
+  | branch_expr _ = false
+
+fun then1_chain_count (Infix {left, id = (_, opn), right}) =
+      then1_chain_count left + then1_chain_count right +
+      (if opn = ">-" orelse opn = "THEN1" then 1 else 0)
+  | then1_chain_count (Parens {exp, ...}) = then1_chain_count exp
+  | then1_chain_count _ = 0
+
+fun unsafe_then1_chain source exp =
+  not (expr_contains_try exp) andalso
+  (then1_chain_count exp >= 3 orelse
+   (then1_chain_count exp >= 2 andalso String.isSubstring "impl_tac" source))
+
+fun steps source =
+  let val exp = parse_tactic_expr source
+  in
+    if unsafe_then1_chain source exp then
+      [StepPlain {end_pos = size source, label = source, program = tactic_program source (parse_tactic_ast exp)}]
+    else plan_tactic source (parse_tactic_ast exp)
+  end
 
 fun display_line_count (StepChoice {alternatives, ...}) = 1 + Int.max(0, 2 * length alternatives - 1)
   | display_line_count (StepListChoice {alternatives, ...}) = 1 + Int.max(0, 2 * length alternatives - 1)
+  | display_line_count (StepGentleThen1 _) = 2
   | display_line_count _ = 1
 
 fun format_index i = if i < 10 then "0" ^ Int.toString i else Int.toString i
@@ -655,6 +709,10 @@ fun format_step (i, step) =
   case step of
       StepChoice {label, alternatives, ...} => format_choice_lines i label alternatives
     | StepListChoice {label, alternatives, ...} => format_choice_lines i label alternatives
+    | StepGentleThen1 {first_program, label, ...} =>
+        "  " ^ format_index i ^ " >> " ^ first_program ^ "\n" ^
+        "  " ^ format_index (i + 1) ^ " " ^ label ^ "\n"
+    | StepPlain {label, ...} => "  " ^ format_index i ^ " plain " ^ label ^ "\n"
     | _ => "  " ^ format_index i ^ " " ^ step_label step ^ "\n"
 
 fun format_plan_lines steps =

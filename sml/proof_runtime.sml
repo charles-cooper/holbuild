@@ -247,12 +247,53 @@ fun apply_list_tactic_step label program =
       handle e => report_step_failure label e
     end
 
+fun gentle_then1 tac1 tac2 goal =
+  let
+    fun chop 0 front rest = (List.rev front, rest)
+      | chop n front (x :: xs) = chop (n - 1) (x :: front) xs
+      | chop _ _ [] = raise Fail "gentle_then1 validation underflow"
+    val (subgoals, validation) = tac1 goal
+  in
+    case subgoals of
+        [] => ([], validation)
+      | head :: tail =>
+          let val (head_goals, head_validation) = tac2 head
+          in
+            (head_goals @ tail,
+             fn thms =>
+               let val (head_thms, tail_thms) = chop (length head_goals) [] thms
+               in validation (head_validation head_thms :: tail_thms) end)
+          end
+  end
+
+fun apply_gentle_then1_step label false first_program second_program =
+      let
+        val first_tactic = compile_tactic label first_program
+        val second_tactic = compile_tactic label second_program
+      in
+        with_tactic_timeout label
+          (fn () => append_history (goalStack.expandf (gentle_then1 first_tactic second_tactic))) ()
+        handle e => report_step_failure label e
+      end
+  | apply_gentle_then1_step label true first_program second_program =
+      let
+        val first_tactic = compile_tactic label first_program
+        val second_tactic = compile_tactic label second_program
+      in
+        with_tactic_timeout label
+          (fn () => append_history (goalStack.expand_listf (Tactical.ALLGOALS (gentle_then1 first_tactic second_tactic)))) ()
+        handle e => report_step_failure label e
+      end
+
 fun step proof_step =
   case proof_step of
       HolbuildProofIr.StepTactic {label, program, ...} => apply_tactic_step label program
     | HolbuildProofIr.StepList {label, program, ...} => apply_list_tactic_step label program
     | HolbuildProofIr.StepChoice {label, program, ...} => apply_tactic_step label program
     | HolbuildProofIr.StepListChoice {label, program, ...} => apply_list_tactic_step label program
+    | HolbuildProofIr.StepGentleThen1 {label, list_suffix, first_program, second_program, ...} =>
+        apply_gentle_then1_step label list_suffix first_program second_program
+    | HolbuildProofIr.StepPlain _ => raise Fail "plain proof step must cover the whole theorem"
 
 fun inspection_matches wanted name =
   case wanted of NONE => false | SOME selected => selected = name
@@ -383,15 +424,25 @@ fun proof_ir_prove name end_path end_ok checkpoint_depth g tactic_text =
   let
     val _ = active_tactic_text_ref := tactic_text
     val plan = HolbuildProofIr.steps tactic_text
-    val _ = init_history g (length plan + 1)
     val _ = trace_plan name plan
     val _ = stop_after_plan_if_requested ()
-    val _ = run_steps plan
-    val th = history_top_thm()
-             handle e => (print_goal_state (name ^ " finish"); raise e)
-    val _ = save_checkpoint "end_of_proof" false end_path end_ok checkpoint_depth
-    val _ = drop_all()
-  in th end
+  in
+    case plan of
+        [HolbuildProofIr.StepPlain {label, ...}] =>
+          let
+            val th = atomic_prove label g (compile_tactic label (HolbuildProofIr.step_program (hd plan)))
+            val _ = save_checkpoint "end_of_proof" false end_path end_ok checkpoint_depth
+          in th end
+      | _ =>
+          let
+            val _ = init_history g (length plan + 1)
+            val _ = run_steps plan
+            val th = history_top_thm()
+                     handle e => (print_goal_state (name ^ " finish"); raise e)
+            val _ = save_checkpoint "end_of_proof" false end_path end_ok checkpoint_depth
+            val _ = drop_all()
+          in th end
+  end
 
 fun common_prefix_size old_text new_text =
   let
