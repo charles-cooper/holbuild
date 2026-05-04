@@ -616,13 +616,15 @@ new runtime boundaries are stabilized. The CLI default is 2.5 seconds per tactic
 `--tactic-timeout SECONDS` changes that root-package timeout, and
 `--tactic-timeout 0` disables it. Dependency package builds use no tactic timeout,
 so a consumer's proof-debug timeout does not make dependency builds fail.
-`goalfrag-plan THEORY:THEOREM` and `--goalfrag-trace` are debugging/inspection paths.
-`holbuild goalfrag-plan THEORY:THEOREM` is static inspection: it discovers sources,
-finds the named theorem in the named theory script, pretty-prints the final
-executable GoalFrag step IR (or `goalfrag-plan --new-ir THEORY:THEOREM` for the
-experimental proof IR), and exits without acquiring the project build lock,
-planning dependencies, consulting cache/up-to-date state, or executing the proof.
-The pretty form must remain faithful to the IR: each
+`execution-plan THEORY:THEOREM`, `goalfrag-plan THEORY:THEOREM`, and
+`--goalfrag-trace` are debugging/inspection paths. `holbuild execution-plan
+THEORY:THEOREM` is static inspection for the proof IR: it discovers sources,
+finds the named theorem in the named theory script, pretty-prints the executable
+proof-IR step plan, and exits without acquiring the project build lock, planning
+dependencies, consulting cache/up-to-date state, or executing the proof.
+`holbuild goalfrag-plan THEORY:THEOREM` remains the legacy GoalFrag equivalent;
+`goalfrag-plan --new-ir THEORY:THEOREM` is a compatibility alias for
+`execution-plan`. The pretty form must remain faithful to the IR: each
 numbered line is one executable tactic/list-tactic/GoalFrag operation; indentation
 and parenthesized body text are formatting only. For example, a `>>~-` source
 fragment may display as one numbered `list_tac Q.SELECT_GOALS_LT_THEN1 ...` step

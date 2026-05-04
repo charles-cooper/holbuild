@@ -97,6 +97,7 @@ bin/holbuild --maxheap 4096 build MyTheory
 bin/holbuild --source-dir /path/to/project build MyTheory
 bin/holbuild build --skip-checkpoints MyTheory
 bin/holbuild build --tactic-timeout 5 MyTheory
+bin/holbuild execution-plan MyTheory:my_theorem
 bin/holbuild goalfrag-plan MyTheory:my_theorem
 bin/holbuild build --force --goalfrag-trace MyTheory
 bin/holbuild --json build MyTheory
@@ -141,11 +142,12 @@ syntax from `HOLSourceAST` directly instead of using HOL `goalFrag`; it is hidde
 behind the flag until its runtime boundaries are stabilized.
 `--tactic-timeout SECONDS` sets the root-project per-tactic goalfrag timeout;
 the default is 2.5 seconds, and `0` disables the timeout. Dependency packages
-build with no tactic timeout. `goalfrag-plan THEORY:THEOREM` statically prints a
-faithful, pretty form of the executable GoalFrag step IR for one theorem and exits
-without building; `goalfrag-plan --new-ir THEORY:THEOREM` prints the experimental
-proof-IR plan. Each numbered line is one executable tactic/list-tactic/GoalFrag
-operation; indentation and body text are formatting only. `--goalfrag-trace`
+build with no tactic timeout. `execution-plan THEORY:THEOREM` statically prints
+the experimental proof-IR plan for one theorem and exits without building.
+`goalfrag-plan THEORY:THEOREM` does the same for the legacy GoalFrag step IR;
+`goalfrag-plan --new-ir THEORY:THEOREM` is kept as a compatibility alias for the
+proof-IR plan. Each numbered line is one executable tactic/list-tactic operation;
+indentation and body text are formatting only. `--goalfrag-trace`
 runs a build, records runtime traces for all instrumented proofs in the child log,
 and prints the failed theorem's trace excerpt on failure. Use trace with `--force`
 when you need to force source execution for proof-performance/debug inspection.

@@ -244,7 +244,20 @@ and parse_list_tactic_ast e =
            | Infix {left, id = (_, opn), right} => parse_list_tactic_infix left opn right e
            | _ => parse_list_tactic_app e)
 and parse_list_tactic_app e =
-  list_atomic e
+  case app_name e of
+      SOME ("TACS_TO_LT", [xs]) =>
+        (case list_elems xs of SOME ts => LtTacsToLT (map parse_tactic_ast ts) | NONE => list_atomic e)
+    | SOME ("ALLGOALS", [t]) => LtAllGoals (parse_tactic_ast t)
+    | SOME ("NTH_GOAL", [t, n]) => LtNthGoal (parse_tactic_ast t, span n)
+    | SOME ("LASTGOAL", [t]) => LtLastGoal (parse_tactic_ast t)
+    | SOME ("HEADGOAL", [t]) => LtHeadGoal (parse_tactic_ast t)
+    | SOME ("SPLIT_LT", [n, branches]) => parse_split_lt e n branches
+    | SOME ("FIRST_LT", [t]) => LtFirstLT (parse_tactic_ast t)
+    | _ => list_atomic e
+and parse_split_lt whole n branches =
+  case tuple_elems branches of
+      SOME [left, right] => LtSplit (span n, parse_list_tactic_ast left, parse_list_tactic_ast right)
+    | _ => list_atomic whole
 and parse_list_tactic_infix left opn right whole =
   case opn of
       ">>>" => LtThenLT (flatten_thenlt left @ flatten_thenlt right)
@@ -431,13 +444,51 @@ fun plan_tactic source tactic =
     | _ => [tactic_step source tactic]
 and plan_list_tactic source prefix lt =
   case lt of
-      LtSelectGoal sp => [list_step source (list_tactic_end lt) (">> list_tac Q.SELECT_GOAL_LT " ^ source_text source sp) (list_tactic_program source lt)]
+      LtTacsToLT ts =>
+        [list_step source (list_tactic_end lt)
+           (">> list_tac TACS_TO_LT [" ^ String.concatWith ", " (map (tactic_label source) ts) ^ "]")
+           (list_tactic_program source lt)]
+    | LtAllGoals t =>
+        [list_step source (list_tactic_end lt)
+           (">> list_tac ALLGOALS (" ^ tactic_label source t ^ ")")
+           (list_tactic_program source lt)]
+    | LtNthGoal (t, n) =>
+        [list_step source (list_tactic_end lt)
+           (">> list_tac NTH_GOAL (" ^ tactic_label source t ^ ") " ^ source_text source n)
+           (list_tactic_program source lt)]
+    | LtLastGoal t =>
+        [list_step source (list_tactic_end lt)
+           (">> list_tac LASTGOAL (" ^ tactic_label source t ^ ")")
+           (list_tactic_program source lt)]
+    | LtHeadGoal t =>
+        [list_step source (list_tactic_end lt)
+           (">> list_tac HEADGOAL (" ^ tactic_label source t ^ ")")
+           (list_tactic_program source lt)]
+    | LtSplit (n, a, b) =>
+        [list_step source (list_tactic_end lt)
+           (">> list_tac SPLIT_LT " ^ source_text source n ^ " (" ^ list_tactic_label source a ^ ", " ^ list_tactic_label source b ^ ")")
+           (list_tactic_program source lt)]
+    | LtFirstLT t =>
+        [list_step source (list_tactic_end lt)
+           (">> list_tac FIRST_LT " ^ tactic_label source t)
+           (list_tactic_program source lt)]
+    | LtSelectGoal sp => [list_step source (list_tactic_end lt) (">> list_tac Q.SELECT_GOAL_LT " ^ source_text source sp) (list_tactic_program source lt)]
     | LtSelectGoals sp => [list_step source (list_tactic_end lt) (">> list_tac Q.SELECT_GOALS_LT " ^ source_text source sp) (list_tactic_program source lt)]
     | LtSelectThen (TacAtomic (_, pats), body) =>
         [list_step source (list_tactic_end lt)
            (">> list_tac Q.SELECT_GOALS_LT_THEN1 " ^ source_text source pats ^ " (" ^ tactic_label source body ^ ")")
            ("Q.SELECT_GOALS_LT_THEN1 " ^ source_text source pats ^ " (" ^ tactic_program source body ^ ")")]
     | _ => [list_step source (list_tactic_end lt) (prefix ^ " " ^ source_text source (list_tactic_span lt)) (list_tactic_program source lt)]
+and list_tactic_label source lt =
+  case lt of
+      LtTacsToLT ts => "TACS_TO_LT [" ^ String.concatWith ", " (map (tactic_label source) ts) ^ "]"
+    | LtAllGoals t => "ALLGOALS (" ^ tactic_label source t ^ ")"
+    | LtNthGoal (t, n) => "NTH_GOAL (" ^ tactic_label source t ^ ") " ^ source_text source n
+    | LtLastGoal t => "LASTGOAL (" ^ tactic_label source t ^ ")"
+    | LtHeadGoal t => "HEADGOAL (" ^ tactic_label source t ^ ")"
+    | LtSplit (n, a, b) => "SPLIT_LT " ^ source_text source n ^ " (" ^ list_tactic_label source a ^ ", " ^ list_tactic_label source b ^ ")"
+    | LtFirstLT t => "FIRST_LT " ^ tactic_label source t
+    | _ => source_text source (list_tactic_span lt)
 
 fun steps source = plan_tactic source (parse_tactic source)
 

@@ -14,6 +14,7 @@ fun usage () = print
   "holbuild: experimental project-aware build frontend for HOL4\n\n\
   \Usage:\n\
   \  holbuild [--json] [--source-dir PATH] [--holdir PATH] [--maxheap MB] [-jN] context\n\
+  \  holbuild [--json] [--source-dir PATH] [--holdir PATH] [--maxheap MB] [-jN] execution-plan THEORY:THEOREM\n\
   \  holbuild [--json] [--source-dir PATH] [--holdir PATH] [--maxheap MB] [-jN] goalfrag-plan [--new-ir] THEORY:THEOREM\n\
   \  holbuild [--json] [--source-dir PATH] [--holdir PATH] [--maxheap MB] [-jN] build [--dry-run] [--force] [--no-cache] [--skip-checkpoints] [--skip-goalfrag] [--new-ir] [--tactic-timeout SECONDS] [--goalfrag-plan THEORY:THEOREM] [--goalfrag-trace] [TARGET ...]\n\
   \  holbuild [--json] [--source-dir PATH] [--holdir PATH] [--maxheap MB] [-jN] heap NAME\n\
@@ -414,6 +415,11 @@ fun goalfrag_plan_command args =
     | ["--new-ir", selector] => print_goalfrag_plan_selector true (load_project ()) selector
     | _ => raise Error "usage: holbuild goalfrag-plan [--new-ir] THEORY:THEOREM"
 
+fun execution_plan_command args =
+  case args of
+      [selector] => print_goalfrag_plan_selector true (load_project ()) selector
+    | _ => raise Error "usage: holbuild execution-plan THEORY:THEOREM"
+
 fun reject_json command =
   if HolbuildStatus.json_mode () then
     raise Error ("--json does not support " ^ command ^ " yet")
@@ -423,6 +429,7 @@ fun dispatch tc jobs args =
   case args of
       [] => (reject_json "context"; context ())
     | "context" :: [] => (reject_json "context"; context ())
+    | "execution-plan" :: rest => (reject_json "execution-plan"; execution_plan_command rest)
     | "goalfrag-plan" :: rest => (reject_json "goalfrag-plan"; goalfrag_plan_command rest)
     | "build" :: rest => build tc jobs rest
     | "heap" :: [target] => (reject_json "heap"; build_heap tc jobs target)

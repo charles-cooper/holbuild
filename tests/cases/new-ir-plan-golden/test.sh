@@ -31,7 +31,7 @@ check_plan() {
   local expected=$tmpdir/$theorem.expected
   local actual=$tmpdir/$theorem.actual
   cat > "$expected"
-  (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" goalfrag-plan --new-ir ATheory:"$theorem") > "$actual" 2>&1
+  (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" execution-plan ATheory:"$theorem") > "$actual" 2>&1
   if ! diff -u "$expected" "$actual"; then
     echo "new-ir plan mismatch for $theorem" >&2
     exit 1
@@ -49,6 +49,64 @@ check_plan thenl_literal_plan <<'EXPECTED'
 holbuild proof-ir plan ATheory:thenl_literal_plan source=src/AScript.sml (2 steps)
   00 CONJ_TAC
   01 >| [...]
+EXPECTED
+
+cat >> "$project/src/AScript.sml" <<'SML'
+Theorem allgoals_plan:
+  T /\ T
+Proof
+  CONJ_TAC >>> ALLGOALS (ACCEPT_TAC TRUTH)
+QED
+SML
+check_plan allgoals_plan <<'EXPECTED'
+holbuild proof-ir plan ATheory:allgoals_plan source=src/AScript.sml (2 steps)
+  00 CONJ_TAC
+  01 >> list_tac ALLGOALS (ACCEPT_TAC TRUTH)
+EXPECTED
+
+cat >> "$project/src/AScript.sml" <<'SML'
+Theorem tacs_to_lt_plan:
+  T /\ T
+Proof
+  CONJ_TAC >>> TACS_TO_LT [ACCEPT_TAC TRUTH, ACCEPT_TAC TRUTH]
+QED
+SML
+check_plan tacs_to_lt_plan <<'EXPECTED'
+holbuild proof-ir plan ATheory:tacs_to_lt_plan source=src/AScript.sml (2 steps)
+  00 CONJ_TAC
+  01 >> list_tac TACS_TO_LT [ACCEPT_TAC TRUTH, ACCEPT_TAC TRUTH]
+EXPECTED
+
+cat >> "$project/src/AScript.sml" <<'SML'
+Theorem selectors_plan:
+  T /\ T /\ T
+Proof
+  rpt CONJ_TAC
+  >>> NTH_GOAL (ACCEPT_TAC TRUTH) 2
+  >>> LASTGOAL (ACCEPT_TAC TRUTH)
+  >>> HEADGOAL (ACCEPT_TAC TRUTH)
+QED
+SML
+check_plan selectors_plan <<'EXPECTED'
+holbuild proof-ir plan ATheory:selectors_plan source=src/AScript.sml (4 steps)
+  00 rpt CONJ_TAC
+  01 >> list_tac NTH_GOAL (ACCEPT_TAC TRUTH) 2
+  02 >> list_tac LASTGOAL (ACCEPT_TAC TRUTH)
+  03 >> list_tac HEADGOAL (ACCEPT_TAC TRUTH)
+EXPECTED
+
+cat >> "$project/src/AScript.sml" <<'SML'
+Theorem split_first_lt_plan:
+  T /\ T
+Proof
+  CONJ_TAC
+  >>> SPLIT_LT 1 (TACS_TO_LT [ACCEPT_TAC TRUTH], FIRST_LT ACCEPT_TAC TRUTH)
+QED
+SML
+check_plan split_first_lt_plan <<'EXPECTED'
+holbuild proof-ir plan ATheory:split_first_lt_plan source=src/AScript.sml (2 steps)
+  00 CONJ_TAC
+  01 >> list_tac SPLIT_LT 1 (TACS_TO_LT [ACCEPT_TAC TRUTH], FIRST_LT ACCEPT_TAC TRUTH)
 EXPECTED
 
 cat >> "$project/src/AScript.sml" <<'SML'
