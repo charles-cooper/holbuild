@@ -106,6 +106,12 @@ Proof
     ACCEPT_TAC TRUTH
 QED
 
+Theorem minimal_parser_recovery:
+  T
+Proof
+  ( ACCEPT_TAC TRUTH
+QED
+
 Theorem chained_then1_plain:
   T /\ T /\ T
 Proof
@@ -117,7 +123,13 @@ QED
 
 val _ = export_theory();
 SML
-  (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --skip-checkpoints --tactic-timeout 60) > "$tmpdir/success.goalfrag.out" 2>&1
+  (cd "$project" && HOLBUILD_ECHO_CHILD_LOGS=1 "$HOLBUILD_BIN" --holdir "$HOLDIR" build --skip-checkpoints --tactic-timeout 60) > "$tmpdir/success.goalfrag.out" 2>&1
+  require_grep "parse error: expected closing parenthesis" "$tmpdir/success.goalfrag.out"
+  require_file "$project/.holbuild/gen/src/ATheory.sig"
+  require_file "$project/.holbuild/gen/src/ATheory.sml"
+  require_file "$project/.holbuild/obj/src/ATheory.dat"
+  require_file "$project/.holbuild/obj/src/ATheory.ui"
+  require_file "$project/.holbuild/obj/src/ATheory.uo"
   (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" goalfrag-plan ATheory:chained_then1_plain) > "$tmpdir/chained_then1.plan.out" 2>&1
   require_grep 'plain rpt CONJ_TAC' "$tmpdir/chained_then1.plan.out"
   (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --force --skip-goalfrag --skip-checkpoints) > "$tmpdir/success.plain.out" 2>&1
