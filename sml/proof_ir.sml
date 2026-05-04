@@ -389,7 +389,9 @@ fun tactic_program source tactic =
     | TacApply (f, arg) => parenthesize (source_text source f) ^ " " ^ source_text source arg
     | TacMapEvery _ => parenthesize (source_text source (tactic_span tactic))
     | TacMapFirst (_, ts) => "Tactical.FIRST [" ^ String.concatWith ", " (map (tactic_program source) ts) ^ "]"
-    | TacSufficesBy _ => parenthesize (source_text source (tactic_span tactic))
+    | TacSufficesBy (q, rhs) =>
+        "Tactical.THEN1(Q_TAC SUFF_TAC " ^ source_text source q ^
+        ", Tactical.THEN(" ^ tactic_program source rhs ^ ", Tactical.NO_TAC))"
     | TacRepairGroup (_, t) => tactic_program source t
     | TacAtomic (_, sp) => parenthesize (source_text source sp)
 and list_tactic_program source lt =

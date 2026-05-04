@@ -383,6 +383,13 @@ Proof
   >> FIRST_ASSUM ACCEPT_TAC
 QED
 
+Theorem nested_suffices_by_success:
+  T
+Proof
+  `T` by (`T` suffices_by (ACCEPT_TAC TRUTH) >> ACCEPT_TAC TRUTH)
+  >> ACCEPT_TAC TRUTH
+QED
+
 Theorem map_every_success:
   T
 Proof
