@@ -1,4 +1,4 @@
-structure HolbuildProofIrRuntime =
+structure HolbuildProofRuntime =
 struct
 
 type config = {checkpoint_enabled : bool,
@@ -193,13 +193,13 @@ fun print_goal_state label =
 fun report_step_failure label e = (save_failed_prefix_checkpoint (); print_goal_state label; raise e)
 
 fun compile_tactic label program =
-  if smlExecute.quse_string ("HolbuildProofIrRuntime.compiled_tactic_ref := (" ^ program ^ ");") then
+  if smlExecute.quse_string ("HolbuildProofRuntime.compiled_tactic_ref := (" ^ program ^ ");") then
     !compiled_tactic_ref
   else
     raise Fail ("tactic fragment did not compile: " ^ label)
 
 fun compile_list_tactic label program =
-  if smlExecute.quse_string ("HolbuildProofIrRuntime.compiled_list_tactic_ref := (" ^ program ^ ");") then
+  if smlExecute.quse_string ("HolbuildProofRuntime.compiled_list_tactic_ref := (" ^ program ^ ");") then
     !compiled_list_tactic_ref
   else
     raise Fail ("list tactic fragment did not compile: " ^ label)
@@ -207,7 +207,7 @@ fun compile_list_tactic label program =
 fun apply_tactic_step label program =
   let val tactic = compile_tactic label program
   in
-    with_tactic_timeout label (fn () => (proofManagerLib.expand tactic; ())) ()
+    with_tactic_timeout label (fn () => (proofManagerLib.expandf tactic; ())) ()
     handle e => report_step_failure label e
   end
 
@@ -222,7 +222,7 @@ fun apply_list_tactic_step label program =
   else
     let val list_tactic = compile_list_tactic label program
     in
-      with_tactic_timeout label (fn () => (proofManagerLib.expand_list list_tactic; ())) ()
+      with_tactic_timeout label (fn () => (proofManagerLib.expand_listf list_tactic; ())) ()
       handle e => report_step_failure label e
     end
 

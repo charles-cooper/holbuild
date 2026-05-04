@@ -1315,7 +1315,7 @@ fun failed_prefix_resume_source policy timeout_marker plan_only_marker source ch
       String.concat
         ["val ", theorem_binding, " = Theory.save_thm(",
          HolbuildToolchain.sml_string (#name checkpoint), ", ",
-         (if proof_ir_enabled policy then "HolbuildProofIrRuntime.finish_failed_prefix " else "HolbuildGoalfragRuntime.finish_failed_prefix "),
+         (if proof_ir_enabled policy then "HolbuildProofRuntime.finish_failed_prefix " else "HolbuildGoalfragRuntime.finish_failed_prefix "),
          HolbuildToolchain.sml_string (#name checkpoint), " ",
          HolbuildToolchain.sml_string prefix_text, " ",
          Int.toString step_count, " ",

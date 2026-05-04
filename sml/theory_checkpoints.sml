@@ -142,7 +142,7 @@ fun runtime_helper_path () =
 fun proof_ir_runtime_helper_path () =
   case OS.Process.getEnv "HOLBUILD_PROOF_IR_RUNTIME" of
       SOME path => path
-    | NONE => OS.Path.concat(HolbuildRuntimePaths.source_root, "sml/proof_ir_runtime.sml")
+    | NONE => OS.Path.concat(HolbuildRuntimePaths.source_root, "sml/proof_runtime.sml")
 
 fun goalfrag_plan_helper_path () =
   OS.Path.concat(HolbuildRuntimePaths.source_root, "sml/goalfrag_plan.sml")
@@ -154,15 +154,15 @@ fun runtime_install_lines {checkpoint_enabled, tactic_timeout, timeout_marker, p
   if new_ir then
     ["use " ^ HolbuildToolchain.sml_string (proof_ir_helper_path ()) ^ ";",
      "use " ^ HolbuildToolchain.sml_string (proof_ir_runtime_helper_path ()) ^ ";",
-     "val _ = HolbuildProofIrRuntime.install {checkpoint_enabled = " ^
+     "val _ = HolbuildProofRuntime.install {checkpoint_enabled = " ^
        (if checkpoint_enabled then "true" else "false") ^
        ", tactic_timeout = " ^ option_real_sml tactic_timeout ^
        ", timeout_marker = " ^ option_string_sml timeout_marker ^
        ", plan_theorem = " ^ option_string_sml plan_theorem ^
        ", trace_all = " ^ (if trace_all then "true" else "false") ^
        ", plan_only_marker = " ^ option_string_sml plan_only_marker ^ "};",
-     "val holbuild_begin_theorem = HolbuildProofIrRuntime.begin_theorem;",
-     "val holbuild_save_theorem_context = HolbuildProofIrRuntime.save_theorem_context;"]
+     "val holbuild_begin_theorem = HolbuildProofRuntime.begin_theorem;",
+     "val holbuild_save_theorem_context = HolbuildProofRuntime.save_theorem_context;"]
   else
     ["use " ^ HolbuildToolchain.sml_string (goalfrag_plan_helper_path ()) ^ ";",
      "use " ^ HolbuildToolchain.sml_string (runtime_helper_path ()) ^ ";",
