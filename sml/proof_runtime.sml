@@ -19,6 +19,7 @@ val trace_active_ref = ref false
 val trace_current_theorem_ref = ref ""
 val theorem_info_ref = ref NONE : (string * string * string * string * string * string * string * string * string * bool * int) option ref
 val context_info_ref = ref NONE : (string * string * int) option ref
+val failed_prefix_resume_active_ref = ref false
 val proving_with_proof_ir_ref = ref false
 val active_tactic_text_ref = ref ""
 val successful_step_count_ref = ref 0
@@ -128,7 +129,7 @@ fun save_failed_prefix_checkpoint () =
   case !theorem_info_ref of
       NONE => ()
     | SOME (kind, _, _, _, _, _, _, failed_prefix_path, failed_prefix_ok, _, depth) =>
-        if kind <> "theorem" orelse not (!checkpoint_enabled_ref) then ()
+        if kind <> "theorem" orelse not (!checkpoint_enabled_ref) orelse !failed_prefix_resume_active_ref then ()
         else
           let
             val prefix_end = !successful_prefix_end_ref
@@ -140,6 +141,13 @@ fun save_failed_prefix_checkpoint () =
             val _ = write_text_file (failed_prefix_path ^ ".meta") meta_text
             val _ = write_text_file (failed_prefix_path ^ ".prefix") prefix_text
           in () end
+
+fun restore_failed_prefix_checkpoint_info (name, tactic_text, failed_prefix_path, failed_prefix_ok) =
+  let val depth = length (PolyML.SaveState.showHierarchy())
+  in
+    theorem_info_ref := SOME ("theorem", name, tactic_text, "", "", "", "",
+                              failed_prefix_path, failed_prefix_ok, false, depth)
+  end
 
 fun begin_theorem (kind, name, tactic_text, context_path, context_ok,
                    end_path, end_ok, failed_prefix_path, failed_prefix_ok, has_attrs) =
@@ -466,25 +474,37 @@ fun step_count_at_prefix common_bytes plan =
     loop 0 plan
   end
 
-fun finish_failed_prefix name old_prefix_text old_step_count tactic_text =
-  with_theorem_trace name (fn () =>
-    let
-      val _ = active_tactic_text_ref := tactic_text
-      val plan = HolbuildProofIr.steps tactic_text
-      val _ = ensure_history_limit (length plan + 1)
-      val _ = trace_plan name plan
-      val _ = stop_after_plan_if_requested ()
-      val common_bytes = common_prefix_size old_prefix_text tactic_text
-      val skip_count = step_count_at_prefix common_bytes plan
-      val backup_count = Int.max(0, old_step_count - skip_count)
-      val _ = backup_n backup_count
-      val _ = successful_step_count_ref := skip_count
-      val _ = successful_prefix_end_ref := common_bytes
-      val _ = run_steps_from skip_count (drop_steps skip_count plan)
-      val th = history_top_thm()
-               handle e => (print_goal_state (name ^ " finish"); raise e)
-      val _ = drop_all()
-    in th end)
+fun finish_failed_prefix name old_prefix_text old_step_count tactic_text failed_prefix_path failed_prefix_ok =
+  let
+    val old_resume_active = !failed_prefix_resume_active_ref
+    fun restore_resume_flag () = failed_prefix_resume_active_ref := old_resume_active
+    val _ = failed_prefix_resume_active_ref := true
+    val result =
+      (restore_failed_prefix_checkpoint_info (name, tactic_text, failed_prefix_path, failed_prefix_ok);
+       with_theorem_trace name (fn () =>
+        let
+          val _ = active_tactic_text_ref := tactic_text
+          val plan = HolbuildProofIr.steps tactic_text
+          val _ = ensure_history_limit (length plan + 1)
+          val _ = trace_plan name plan
+          val _ = stop_after_plan_if_requested ()
+          val common_bytes = common_prefix_size old_prefix_text tactic_text
+          val skip_count = step_count_at_prefix common_bytes plan
+          val backup_count = Int.max(0, old_step_count - skip_count)
+          val _ = backup_n backup_count
+          val _ = successful_step_count_ref := skip_count
+          val _ = successful_prefix_end_ref := common_bytes
+          val _ = run_steps_from skip_count (drop_steps skip_count plan)
+          val th = history_top_thm()
+                   handle e => (print_goal_state (name ^ " finish"); raise e)
+          val _ = drop_all()
+          val _ = theorem_info_ref := NONE
+        in th end))
+      handle e => (restore_resume_flag (); raise e)
+    val _ = restore_resume_flag ()
+  in
+    result
+  end
 
 fun prove_outer_theorem (g, tac) (_, name, tactic_text, _, _, end_path, end_ok, _, _, has_attrs, checkpoint_depth) =
   let
@@ -527,6 +547,7 @@ fun install ({checkpoint_enabled, tactic_timeout, timeout_marker, plan_theorem, 
    trace_active_ref := false;
    theorem_info_ref := NONE;
    context_info_ref := NONE;
+   failed_prefix_resume_active_ref := false;
    proving_with_proof_ir_ref := false;
    Tactical.set_prover proof_ir_prover)
 

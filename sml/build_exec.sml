@@ -1309,7 +1309,11 @@ fun failed_prefix_resume_source policy timeout_marker plan_only_marker source ch
        trace_all = goalfrag_trace policy,
        plan_only_marker = plan_only_marker,
        new_ir = proof_ir_enabled policy}
-    val prelude = HolbuildTheoryCheckpoints.runtime_prelude runtime_config [checkpoint]
+    val prelude =
+      if proof_ir_enabled policy then
+        HolbuildTheoryCheckpoints.runtime_reinstall_prelude runtime_config
+      else
+        HolbuildTheoryCheckpoints.runtime_prelude runtime_config [checkpoint]
     val theorem_binding = #safe_name checkpoint
     val save_line =
       String.concat
@@ -1319,7 +1323,12 @@ fun failed_prefix_resume_source policy timeout_marker plan_only_marker source ch
          HolbuildToolchain.sml_string (#name checkpoint), " ",
          HolbuildToolchain.sml_string prefix_text, " ",
          Int.toString step_count, " ",
-         HolbuildToolchain.sml_string (#tactic_text checkpoint), ");\n"]
+         HolbuildToolchain.sml_string (#tactic_text checkpoint),
+         (if proof_ir_enabled policy then
+            " " ^ HolbuildToolchain.sml_string (#failed_prefix_path checkpoint) ^
+            " " ^ HolbuildToolchain.sml_string (#failed_prefix_ok checkpoint)
+          else ""),
+         ");\n"]
     val suffix =
       HolbuildTheoryCheckpoints.instrument
         {source = source,

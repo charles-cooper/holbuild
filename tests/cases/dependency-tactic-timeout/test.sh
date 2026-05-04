@@ -109,6 +109,7 @@ require_grep "tactic timed out after 0.1s while building ATheory: slow_tac" "$ro
 require_grep "theorem: root_slow_thm (line " "$root_timeout_log"
 require_grep "source: .*AScript.sml:" "$root_timeout_log"
 require_grep "top goal at failed fragment:" "$root_timeout_log"
+require_grep "remaining goals at failed fragment: 1" "$root_timeout_log"
 
 root_timeout_again_log=$tmpdir/root-timeout-again.log
 if (cd "$root_timeout_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --tactic-timeout 0.1 ATheory) > "$root_timeout_again_log" 2>&1; then
@@ -117,6 +118,7 @@ if (cd "$root_timeout_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --tac
 fi
 require_grep "resuming ATheory from checkpoint root_slow_thm failed_prefix" "$root_timeout_again_log"
 require_grep "top goal at failed fragment:" "$root_timeout_again_log"
+require_grep "remaining goals at failed fragment: 1" "$root_timeout_again_log"
 
 root_default_project=$tmpdir/root-default
 mkdir -p "$root_default_project/src"

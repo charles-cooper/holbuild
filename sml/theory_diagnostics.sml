@@ -359,6 +359,7 @@ fun failed_theorem_source_summary source_path source_text checkpoints label theo
 val goal_state_limit = 4096
 val goal_state_start_marker = "holbuild top goal:"
 val goal_state_end_marker = "holbuild end top goal"
+val remaining_goals_marker = "holbuild remaining goals: "
 val failed_fragment_prefix = "holbuild goal state at failed fragment: "
 val failed_fragment_end_prefix = "holbuild failed fragment end: "
 
@@ -393,7 +394,15 @@ fun top_goal_state_from_text text =
             | SOME rel_end => SOME (String.substring(text, content_start, rel_end))
         end
 
-fun read_top_goal_state path = top_goal_state_from_text (read_prefix path 65536)
+fun remaining_goals_from_text text = marker_line_after remaining_goals_marker text
+
+fun read_goal_state path =
+  let val text = read_prefix path 65536
+  in
+    case top_goal_state_from_text text of
+        NONE => NONE
+      | SOME top_goal => SOME {remaining_goals = remaining_goals_from_text text, top_goal = top_goal}
+  end
 
 fun find_failed_fragment_label lines =
   first_some
@@ -415,9 +424,12 @@ fun truncate_goal_state text =
   if size text <= goal_state_limit then (false, text)
   else (true, String.substring(text, 0, goal_state_limit))
 
-fun goal_state_summary text =
+fun remaining_goals_summary NONE = ""
+  | remaining_goals_summary (SOME n) = "remaining goals at failed fragment: " ^ Int.toString n ^ "\n"
+
+fun goal_state_summary {remaining_goals, top_goal} =
   let
-    val (truncated, preview) = truncate_goal_state text
+    val (truncated, preview) = truncate_goal_state top_goal
     val truncation_line =
       if truncated then
         String.concat ["top goal exceeded 4 KiB; showing first ",
@@ -426,13 +438,14 @@ fun goal_state_summary text =
   in
     String.concat
       ["top goal at failed fragment:\n",
+       remaining_goals_summary remaining_goals,
        truncation_line,
        preview,
        if size preview = 0 orelse String.sub(preview, size preview - 1) <> #"\n" then "\n" else ""]
   end
 
 fun summarize_goal_state path =
-  Option.map goal_state_summary (read_top_goal_state path)
+  Option.map goal_state_summary (read_goal_state path)
   handle _ => NONE
 
 fun child_failure_line line =

@@ -357,6 +357,7 @@ if (cd "$failure_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) >
 fi
 require_grep "expected failure" "$failure_log"
 require_grep "top goal at failed fragment:" "$failure_log"
+require_grep "remaining goals at failed fragment: 1" "$failure_log"
 require_grep "top goal exceeded 4 KiB" "$failure_log"
 require_grep "full top goal is in the instrumented log above" "$failure_log"
 require_grep "theorem: b_thm (line " "$failure_log"
@@ -381,6 +382,7 @@ if (cd "$failure_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) >
 fi
 require_grep "resuming ATheory from checkpoint b_thm failed_prefix" "$failure_again_log"
 require_grep "top goal at failed fragment:" "$failure_again_log"
+require_grep "remaining goals at failed fragment: 1" "$failure_again_log"
 require_file "$a_thm_context"
 require_file "$b_thm_failed_prefix"
 failed_prefix_plan_log=$tmpdir/failed-prefix-plan.log
@@ -486,6 +488,7 @@ first_slow_count=$(wc -c < "$slow_prefix_counter" | tr -d ' ')
 [[ "$first_slow_count" = "2" ]] || { echo "expected first run to execute slow prefix twice, got $first_slow_count" >&2; exit 1; }
 require_grep "slow_tac >> slow_tac >> FAIL_TAC" "$slow_prefix_first_log"
 require_grep "top goal at failed fragment:" "$slow_prefix_first_log"
+require_grep "remaining goals at failed fragment: 1" "$slow_prefix_first_log"
 slow_prefix_again_log=$tmpdir/slow-prefix-again.log
 if (cd "$slow_prefix_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$slow_prefix_again_log" 2>&1; then
   echo "expected repeated slow-prefix proof to fail build" >&2
@@ -495,6 +498,7 @@ second_slow_count=$(wc -c < "$slow_prefix_counter" | tr -d ' ')
 [[ "$second_slow_count" = "2" ]] || { echo "failed-prefix replay reran slow prefix; count $second_slow_count" >&2; exit 1; }
 require_grep "resuming ATheory from checkpoint slow_prefix_failure failed_prefix" "$slow_prefix_again_log"
 require_grep "top goal at failed fragment:" "$slow_prefix_again_log"
+require_grep "remaining goals at failed fragment: 1" "$slow_prefix_again_log"
 
 failed_root_project=$tmpdir/failed-root-project
 failed_root_counter=$tmpdir/failed-root-dep-count.txt
