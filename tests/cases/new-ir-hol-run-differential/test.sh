@@ -213,10 +213,58 @@ Proof
   CONJ_TAC >| [ACCEPT_TAC TRUTH, ACCEPT_TAC TRUTH]
 QED
 
+Theorem dynamic_thenl_success:
+  T ∧ T
+Proof
+  CONJ_TAC THENL
+  let
+    fun tac () = ACCEPT_TAC TRUTH
+  in
+    [tac (), tac ()]
+  end
+QED
+
 Theorem then_lt_tacs_to_lt_success:
   T ∧ T
 Proof
   CONJ_TAC >>> TACS_TO_LT [ACCEPT_TAC TRUTH, ACCEPT_TAC TRUTH]
+QED
+
+Theorem allgoals_success:
+  T ∧ T
+Proof
+  CONJ_TAC >>> ALLGOALS (ACCEPT_TAC TRUTH)
+QED
+
+Theorem nth_goal_success:
+  T ∧ T ∧ T
+Proof
+  rpt CONJ_TAC
+  >>> NTH_GOAL (ACCEPT_TAC TRUTH) 2
+  >>> TACS_TO_LT [ACCEPT_TAC TRUTH, ACCEPT_TAC TRUTH]
+QED
+
+Theorem head_last_goal_success:
+  T ∧ T
+Proof
+  CONJ_TAC
+  >>> LASTGOAL (ACCEPT_TAC TRUTH)
+  >>> HEADGOAL (ACCEPT_TAC TRUTH)
+QED
+
+Theorem split_lt_success:
+  T ∧ T
+Proof
+  CONJ_TAC
+  >>> SPLIT_LT 1 (TACS_TO_LT [ACCEPT_TAC TRUTH], TACS_TO_LT [ACCEPT_TAC TRUTH])
+QED
+
+Theorem first_lt_success:
+  T ∧ T
+Proof
+  CONJ_TAC
+  >>> FIRST_LT (ACCEPT_TAC TRUTH)
+  >>> ALLGOALS (ACCEPT_TAC TRUTH)
 QED
 
 Theorem reverse_then1_success:
@@ -231,10 +279,61 @@ Proof
   REPEAT CONJ_TAC >> TRY NO_TAC >> FIRST [NO_TAC, ACCEPT_TAC TRUTH]
 QED
 
+Theorem orelse_success:
+  T
+Proof
+  NO_TAC ORELSE ACCEPT_TAC TRUTH
+QED
+
+Theorem by_success:
+  T
+Proof
+  `T` by ACCEPT_TAC TRUTH
+  >> ACCEPT_TAC TRUTH
+QED
+
+Theorem suffices_by_success:
+  F ==> (T ∧ T)
+Proof
+  strip_tac
+  >> CONJ_TAC
+  >> `F` suffices_by simp[]
+  >> FIRST_ASSUM ACCEPT_TAC
+QED
+
+Theorem map_every_success:
+  T
+Proof
+  MAP_EVERY (fn th => ACCEPT_TAC th) [TRUTH]
+QED
+
 Theorem map_first_success:
   T
 Proof
   MAP_FIRST (fn th => ACCEPT_TAC th) [TRUTH]
+QED
+
+Theorem select_goals_success:
+  T ∧ T
+Proof
+  CONJ_TAC >>~ [`T`]
+  >> ACCEPT_TAC TRUTH
+  >> ACCEPT_TAC TRUTH
+QED
+
+Theorem select_single_success:
+  T ∧ T
+Proof
+  CONJ_TAC >~ `T`
+  >> ACCEPT_TAC TRUTH
+  >> ACCEPT_TAC TRUTH
+QED
+
+Theorem select_then1_success:
+  T ∧ T
+Proof
+  CONJ_TAC >>~- ([`T`], ACCEPT_TAC TRUTH)
+  >> ACCEPT_TAC TRUTH
 QED
 
 Theorem invalid_intermediate:
@@ -259,4 +358,36 @@ Theorem parser_recovery:
   T
 Proof
   ( ACCEPT_TAC TRUTH
+QED'
+
+check_case resume_suite 'open markerLib;
+
+Theorem partial:
+  T ∧ T
+Proof
+  CONJ_TAC >- ACCEPT_TAC TRUTH >- suspend "right"
+QED
+
+Resume partial[right]:
+  ACCEPT_TAC TRUTH
+QED
+
+Finalise partial'
+
+check_case first_empty_failure 'Theorem thm:
+  T
+Proof
+  FIRST [] >> ACCEPT_TAC TRUTH
+QED'
+
+check_case map_first_empty_failure 'Theorem thm:
+  T
+Proof
+  MAP_FIRST (fn th => ACCEPT_TAC th) [] >> ACCEPT_TAC TRUTH
+QED'
+
+check_case thenl_length_failure 'Theorem thm:
+  T ∧ T
+Proof
+  CONJ_TAC THENL [ACCEPT_TAC TRUTH]
 QED'
