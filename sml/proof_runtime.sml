@@ -26,6 +26,7 @@ val successful_prefix_end_ref = ref 0
 val failed_step_end_ref = ref NONE : int option ref
 val compiled_tactic_ref = ref Tactical.ALL_TAC
 val compiled_list_tactic_ref = ref Tactical.ALL_LT
+val proof_history_ref = ref (NONE : goalStack.gstk History.history option)
 
 fun env_bool name =
   case OS.Process.getEnv name of
@@ -157,7 +158,7 @@ fun save_theorem_context () =
          save_checkpoint "theorem_context" false context_path context_ok depth)
 
 fun top_goal_text [] = "<no open goals>\n"
-  | top_goal_text (goal :: _) = PP.pp_to_string 100 proofManagerLib.std_goal_pp goal ^ "\n"
+  | top_goal_text (goal :: _) = PP.pp_to_string 100 goalStack.std_pp_goal goal ^ "\n"
 
 fun active_theorem_name () =
   case !theorem_info_ref of
@@ -174,8 +175,28 @@ fun failed_step_end_line () =
       NONE => ""
     | SOME end_pos => "\nholbuild failed fragment end: " ^ Int.toString end_pos
 
+fun current_history () =
+  case !proof_history_ref of
+      SOME history => history
+    | NONE => raise Fail "proof IR goal history is not initialized"
+
+fun set_history history = proof_history_ref := SOME history
+fun clear_history () = proof_history_ref := NONE
+
+fun project_history f = History.project f (current_history())
+
+fun init_history g limit =
+  set_history (History.new_history {obj = goalStack.new_goal g Lib.I,
+                                    limit = Int.max(15, limit)})
+
+fun append_history f = set_history (History.apply f (current_history()))
+fun ensure_history_limit limit = set_history (History.set_limit (current_history()) (Int.max(15, limit)))
+
+fun history_top_goals () = project_history goalStack.top_goals
+fun history_top_thm () = project_history goalStack.extract_thm
+
 fun print_goal_state label =
-  let val goals = proofManagerLib.top_goals()
+  let val goals = history_top_goals()
   in
     TextIO.output(TextIO.stdErr,
       String.concat ["\nholbuild goal state at failed fragment: ", label,
@@ -207,12 +228,12 @@ fun compile_list_tactic label program =
 fun apply_tactic_step label program =
   let val tactic = compile_tactic label program
   in
-    with_tactic_timeout label (fn () => (proofManagerLib.expandf tactic; ())) ()
+    with_tactic_timeout label (fn () => append_history (goalStack.expandf tactic)) ()
     handle e => report_step_failure label e
   end
 
 fun no_open_goals () =
-  ((proofManagerLib.top_goals (); false)
+  ((history_top_goals (); false)
    handle _ => true)
 
 fun allgoals_suffix_label label = String.isPrefix ">> " label
@@ -222,7 +243,7 @@ fun apply_list_tactic_step label program =
   else
     let val list_tactic = compile_list_tactic label program
     in
-      with_tactic_timeout label (fn () => (proofManagerLib.expand_listf list_tactic; ())) ()
+      with_tactic_timeout label (fn () => append_history (goalStack.expand_listf list_tactic)) ()
       handle e => report_step_failure label e
     end
 
@@ -240,7 +261,7 @@ fun trace_enabled () =
 fun plan_enabled () =
   !plan_active_ref orelse trace_enabled ()
 
-fun current_goal_count () = length (proofManagerLib.top_goals()) handle _ => ~1
+fun current_goal_count () = length (history_top_goals()) handle _ => ~1
 
 fun trace_line parts =
   if trace_enabled () then TextIO.output(TextIO.stdErr, String.concat parts) else ()
@@ -329,16 +350,16 @@ datatype 'a traced_result = TraceOk of 'a | TraceError of exn
 
 fun run_whole_tactic g label tac =
   with_tactic_timeout label (fn () => Tactical.TAC_PROOF(g, tac)) ()
-  handle e => (proofManagerLib.set_goal g; print_goal_state label; raise e)
+  handle e => (init_history g 15; print_goal_state label; clear_history (); raise e)
 
 fun backup_n 0 = ()
-  | backup_n n = (proofManagerLib.b(); backup_n (n - 1))
+  | backup_n n = (set_history (History.undo (current_history())); backup_n (n - 1))
 
-fun drop_all () = (proofManagerLib.drop_all (); ()) handle _ => ()
+fun drop_all () = clear_history ()
 
 fun atomic_prove label g tac =
   with_tactic_timeout label (fn () => Tactical.TAC_PROOF(g, tac)) ()
-  handle e => (proofManagerLib.set_goal g; report_step_failure label e)
+  handle e => (init_history g 15; report_step_failure label e)
 
 fun with_theorem_trace name f =
   let
@@ -360,14 +381,14 @@ fun proof_ir_prove name end_path end_ok checkpoint_depth g tactic_text =
   let
     val _ = active_tactic_text_ref := tactic_text
     val plan = HolbuildProofIr.steps tactic_text
-    val _ = proofManagerLib.set_goal g
+    val _ = init_history g (length plan + 1)
     val _ = trace_plan name plan
     val _ = stop_after_plan_if_requested ()
     val _ = run_steps plan
-    val th = proofManagerLib.top_thm()
+    val th = history_top_thm()
              handle e => (print_goal_state (name ^ " finish"); raise e)
     val _ = save_checkpoint "end_of_proof" false end_path end_ok checkpoint_depth
-    val _ = proofManagerLib.drop_all()
+    val _ = drop_all()
   in th end
 
 fun common_prefix_size old_text new_text =
@@ -397,6 +418,7 @@ fun finish_failed_prefix name old_prefix_text old_step_count tactic_text =
     let
       val _ = active_tactic_text_ref := tactic_text
       val plan = HolbuildProofIr.steps tactic_text
+      val _ = ensure_history_limit (length plan + 1)
       val _ = trace_plan name plan
       val _ = stop_after_plan_if_requested ()
       val common_bytes = common_prefix_size old_prefix_text tactic_text
@@ -406,9 +428,9 @@ fun finish_failed_prefix name old_prefix_text old_step_count tactic_text =
       val _ = successful_step_count_ref := skip_count
       val _ = successful_prefix_end_ref := common_bytes
       val _ = run_steps_from skip_count (drop_steps skip_count plan)
-      val th = proofManagerLib.top_thm()
+      val th = history_top_thm()
                handle e => (print_goal_state (name ^ " finish"); raise e)
-      val _ = proofManagerLib.drop_all()
+      val _ = drop_all()
     in th end)
 
 fun prove_outer_theorem (g, tac) (_, name, tactic_text, _, _, end_path, end_ok, _, _, has_attrs, checkpoint_depth) =

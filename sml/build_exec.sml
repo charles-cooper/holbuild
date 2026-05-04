@@ -1718,7 +1718,7 @@ fun checkpoint_policy_for_node ({skip_checkpoints, goalfrag, new_ir, tactic_time
                     goalfrag_trace = goalfrag andalso goalfrag_trace}
 
 fun proof_engine (CheckpointPolicy {goalfrag = false, ...}) = "plain_v1"
-  | proof_engine (CheckpointPolicy {new_ir = true, ...}) = "proof_ir_v1"
+  | proof_engine (CheckpointPolicy {new_ir = true, ...}) = "proof_ir_v2"
   | proof_engine _ = "goalfrag_failed_fragment_span_v6"
 
 fun build_config_lines_for_node options project node =
