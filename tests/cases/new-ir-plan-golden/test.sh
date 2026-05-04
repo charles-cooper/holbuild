@@ -218,6 +218,123 @@ holbuild proof-ir plan ATheory:orelse_lt_plan source=src/AScript.sml (5 steps)
 EXPECTED
 
 cat >> "$project/src/AScript.sml" <<'SML'
+Theorem every_first_plan:
+  T
+Proof
+  EVERY [TRY NO_TAC, FIRST [NO_TAC, ACCEPT_TAC TRUTH]]
+QED
+SML
+check_plan every_first_plan <<'EXPECTED'
+holbuild proof-ir plan ATheory:every_first_plan source=src/AScript.sml (8 steps)
+  00 TRY
+  01   NO_TAC
+  02   |
+  03   ALL_TAC
+  04 >> FIRST
+  05   NO_TAC
+  06   |
+  07   ACCEPT_TAC TRUTH
+EXPECTED
+
+cat >> "$project/src/AScript.sml" <<'SML'
+Theorem first_prove_plan:
+  T
+Proof
+  FIRST_PROVE [NO_TAC, ACCEPT_TAC TRUTH]
+QED
+SML
+check_plan first_prove_plan <<'EXPECTED'
+holbuild proof-ir plan ATheory:first_prove_plan source=src/AScript.sml (4 steps)
+  00 FIRST_PROVE
+  01   NO_TAC
+  02   |
+  03   ACCEPT_TAC TRUTH
+EXPECTED
+
+cat >> "$project/src/AScript.sml" <<'SML'
+Theorem validation_wrappers_plan:
+  T
+Proof
+  VALID (VALIDATE (GEN_VALIDATE true (CONJ_VALIDATE (CHANGED_TAC (ACCEPT_TAC TRUTH)))))
+QED
+SML
+check_plan validation_wrappers_plan <<'EXPECTED'
+holbuild proof-ir plan ATheory:validation_wrappers_plan source=src/AScript.sml (1 steps)
+  00 VALID (VALIDATE (GEN_VALIDATE true (CONJ_VALIDATE (CHANGED_TAC (ACCEPT_TAC TRUTH)))))
+EXPECTED
+
+cat >> "$project/src/AScript.sml" <<'SML'
+Theorem if_add_sgs_plan:
+  T
+Proof
+  ADD_SGS_TAC [`T`] (IF NO_TAC (FAIL_TAC "bad") (ACCEPT_TAC TRUTH))
+  >> ACCEPT_TAC TRUTH
+QED
+SML
+check_plan if_add_sgs_plan <<'EXPECTED'
+holbuild proof-ir plan ATheory:if_add_sgs_plan source=src/AScript.sml (2 steps)
+  00 ADD_SGS_TAC [`T`] (IF NO_TAC (FAIL_TAC "bad") (ACCEPT_TAC TRUTH))
+  01 >> ACCEPT_TAC TRUTH
+EXPECTED
+
+cat >> "$project/src/AScript.sml" <<'SML'
+Theorem every_lt_select_plan:
+  T /\ T /\ T
+Proof
+  rpt CONJ_TAC
+  >>> EVERY_LT [TRY_LT NO_LT, ROTATE_LT 1]
+  >>> SELECT_LT_THEN (ACCEPT_TAC TRUTH) ALL_TAC
+QED
+SML
+check_plan every_lt_select_plan <<'EXPECTED'
+holbuild proof-ir plan ATheory:every_lt_select_plan source=src/AScript.sml (4 steps)
+  00 rpt CONJ_TAC
+  01 >> list_tac TRY_LT NO_LT
+  02 >> list_tac ROTATE_LT 1
+  03 >> list_tac SELECT_LT_THEN (ACCEPT_TAC TRUTH) (ALL_TAC)
+EXPECTED
+
+cat >> "$project/src/AScript.sml" <<'SML'
+Theorem tryall_select_plan:
+  T /\ T
+Proof
+  CONJ_TAC >>> TRYALL (ACCEPT_TAC TRUTH)
+QED
+SML
+check_plan tryall_select_plan <<'EXPECTED'
+holbuild proof-ir plan ATheory:tryall_select_plan source=src/AScript.sml (2 steps)
+  00 CONJ_TAC
+  01 >> list_tac TRYALL (ACCEPT_TAC TRUTH)
+EXPECTED
+
+cat >> "$project/src/AScript.sml" <<'SML'
+Theorem list_validation_plan:
+  T /\ T
+Proof
+  CONJ_TAC
+  >>> VALID_LT (VALIDATE_LT (GEN_VALIDATE_LT true (TACS_TO_LT [ACCEPT_TAC TRUTH, ACCEPT_TAC TRUTH])))
+QED
+SML
+check_plan list_validation_plan <<'EXPECTED'
+holbuild proof-ir plan ATheory:list_validation_plan source=src/AScript.sml (2 steps)
+  00 CONJ_TAC
+  01 >> list_tac VALID_LT (VALIDATE_LT (GEN_VALIDATE_LT true (TACS_TO_LT [ACCEPT_TAC TRUTH, ACCEPT_TAC TRUTH])))
+EXPECTED
+
+cat >> "$project/src/AScript.sml" <<'SML'
+Theorem select_lt_plan:
+  T /\ T
+Proof
+  CONJ_TAC >>> SELECT_LT (ACCEPT_TAC TRUTH)
+QED
+SML
+check_plan select_lt_plan <<'EXPECTED'
+holbuild proof-ir plan ATheory:select_lt_plan source=src/AScript.sml (2 steps)
+  00 CONJ_TAC
+  01 >> list_tac SELECT_LT (ACCEPT_TAC TRUTH)
+EXPECTED
+
+cat >> "$project/src/AScript.sml" <<'SML'
 Theorem orelse_plan:
   T
 Proof

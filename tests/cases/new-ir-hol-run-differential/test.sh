@@ -297,6 +297,58 @@ Proof
   CONJ_TAC >>> (NO_LT ORELSE_LT TACS_TO_LT [ACCEPT_TAC TRUTH, ACCEPT_TAC TRUTH])
 QED
 
+Theorem every_first_success:
+  T
+Proof
+  EVERY [TRY NO_TAC, FIRST [NO_TAC, ACCEPT_TAC TRUTH]]
+QED
+
+Theorem first_prove_success:
+  T
+Proof
+  FIRST_PROVE [NO_TAC, ACCEPT_TAC TRUTH]
+QED
+
+Theorem validation_wrappers_success:
+  T
+Proof
+  VALID (VALIDATE (GEN_VALIDATE true (CONJ_VALIDATE (CHANGED_TAC (ACCEPT_TAC TRUTH)))))
+QED
+
+Theorem if_add_sgs_success:
+  T
+Proof
+  ADD_SGS_TAC [`T`] (IF NO_TAC (FAIL_TAC "bad") (ACCEPT_TAC TRUTH))
+  >> ACCEPT_TAC TRUTH
+QED
+
+Theorem every_lt_select_success:
+  T ∧ T ∧ T
+Proof
+  rpt CONJ_TAC
+  >>> EVERY_LT [TRY_LT NO_LT, ROTATE_LT 1]
+  >>> SELECT_LT_THEN (ACCEPT_TAC TRUTH) ALL_TAC
+QED
+
+Theorem tryall_select_success:
+  T ∧ T
+Proof
+  CONJ_TAC >>> TRYALL (ACCEPT_TAC TRUTH)
+QED
+
+Theorem list_validation_success:
+  T ∧ T
+Proof
+  CONJ_TAC
+  >>> VALID_LT (VALIDATE_LT (GEN_VALIDATE_LT true (TACS_TO_LT [ACCEPT_TAC TRUTH, ACCEPT_TAC TRUTH])))
+QED
+
+Theorem select_lt_success:
+  T ∧ T
+Proof
+  CONJ_TAC >>> SELECT_LT (ACCEPT_TAC TRUTH)
+QED
+
 Theorem reverse_then1_success:
   T ∧ T
 Proof

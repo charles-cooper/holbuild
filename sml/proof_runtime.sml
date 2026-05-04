@@ -252,6 +252,7 @@ fun step proof_step =
       HolbuildProofIr.StepTactic {label, program, ...} => apply_tactic_step label program
     | HolbuildProofIr.StepList {label, program, ...} => apply_list_tactic_step label program
     | HolbuildProofIr.StepChoice {label, program, ...} => apply_tactic_step label program
+    | HolbuildProofIr.StepListChoice {label, program, ...} => apply_list_tactic_step label program
 
 fun inspection_matches wanted name =
   case wanted of NONE => false | SOME selected => selected = name
