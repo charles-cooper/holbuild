@@ -103,10 +103,9 @@ Proof
 QED
 SML
 check_plan map_first_plan <<'EXPECTED'
-holbuild proof-ir plan ATheory:map_first_plan source=src/AScript.sml (3 steps)
+holbuild proof-ir plan ATheory:map_first_plan source=src/AScript.sml (2 steps)
   00 FIRST
   01   ACCEPT_TAC TRUTH
-  02   |
 EXPECTED
 
 cat >> "$project/src/AScript.sml" <<'SML'

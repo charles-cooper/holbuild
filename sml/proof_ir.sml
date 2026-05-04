@@ -74,7 +74,9 @@ datatype tactic =
   | TacReverse of tactic
   | TacSubgoal of int * int
   | TacMapEvery of (int * int) * (int * int) list
-  | TacMapFirst of (int * int) * (int * int) list
+  | TacApply of (int * int) * (int * int)
+  | TacMapFirst of (int * int) * tactic list
+  | TacSufficesBy of (int * int) * tactic
   | TacRepairGroup of (int * int) * tactic
   | TacAtomic of int * (int * int)
 and list_tactic =
@@ -101,18 +103,23 @@ and list_tactic =
 datatype step =
     StepTactic of {end_pos : int, label : string, program : string}
   | StepList of {end_pos : int, label : string, program : string}
+  | StepChoice of {end_pos : int, label : string, program : string, alternatives : string list}
 
 fun step_end (StepTactic {end_pos, ...}) = end_pos
   | step_end (StepList {end_pos, ...}) = end_pos
+  | step_end (StepChoice {end_pos, ...}) = end_pos
 
 fun step_label (StepTactic {label, ...}) = label
   | step_label (StepList {label, ...}) = label
+  | step_label (StepChoice {label, ...}) = label
 
 fun step_program (StepTactic {program, ...}) = program
   | step_program (StepList {program, ...}) = program
+  | step_program (StepChoice {program, ...}) = program
 
 fun step_kind (StepTactic _) = "tactic"
   | step_kind (StepList _) = "list_tactic"
+  | step_kind (StepChoice _) = "choice"
 
 fun tactic_end (TacThen []) = 0
   | tactic_end (TacThen xs) = tactic_end (List.last xs)
@@ -126,10 +133,12 @@ fun tactic_end (TacThen []) = 0
   | tactic_end (TacRepeat t) = tactic_end t
   | tactic_end (TacReverse t) = tactic_end t
   | tactic_end (TacSubgoal sp) = span_end sp
+  | tactic_end (TacApply (_, arg)) = span_end arg
   | tactic_end (TacMapEvery (_, [])) = 0
   | tactic_end (TacMapEvery (_, args)) = span_end (List.last args)
   | tactic_end (TacMapFirst (_, [])) = 0
-  | tactic_end (TacMapFirst (_, args)) = span_end (List.last args)
+  | tactic_end (TacMapFirst (_, ts)) = tactic_end (List.last ts)
+  | tactic_end (TacSufficesBy (_, t)) = tactic_end t
   | tactic_end (TacRepairGroup (sp, _)) = span_end sp
   | tactic_end (TacAtomic (_, sp)) = span_end sp
 and list_tactic_end (LtThenLT []) = 0
@@ -173,7 +182,17 @@ and parse_tactic_app e =
     | SOME ("subgoal", [x]) => TacSubgoal (span x)
     | SOME ("ALL_TAC", []) => TacThen []
     | SOME ("all_tac", []) => TacThen []
+    | SOME ("MAP_EVERY", [f, xs]) => parse_map_every e f xs
+    | SOME ("MAP_FIRST", [f, xs]) => parse_map_first e f xs
     | _ => atomic e
+and parse_map_every whole f xs =
+  (case list_elems xs of
+      SOME args => TacThen (map (fn arg => TacApply (span f, span arg)) args)
+    | NONE => atomic whole)
+and parse_map_first whole f xs =
+  (case list_elems xs of
+      SOME args => TacMapFirst (span f, map (fn arg => TacApply (span f, span arg)) args)
+    | NONE => atomic whole)
 and parse_tactic_infix left opn right whole =
   case opn of
       ">>" => TacThen (flatten_then left @ flatten_then right)
@@ -186,11 +205,20 @@ and parse_tactic_infix left opn right whole =
     | ">-" => TacThen1 (parse_tactic_ast left, parse_tactic_ast right)
     | "THEN1" => TacThen1 (parse_tactic_ast left, parse_tactic_ast right)
     | "by" => TacThen1 (TacSubgoal (span left), parse_tactic_ast right)
+    | "suffices_by" => TacSufficesBy (span left, parse_tactic_ast right)
+    | "ORELSE" => TacOrelse (flatten_orelse left @ flatten_orelse right)
+    | ">~" => TacThenLT (parse_tactic_ast left, LtSelectGoal (span right))
+    | ">>~" => TacThenLT (parse_tactic_ast left, LtSelectGoals (span right))
+    | ">>~-" => parse_select_then1 left right whole
     | _ => atomic whole
 and parse_thenl left right whole =
   case list_elems right of
       SOME branches => TacThenL (parse_tactic_ast left, map parse_tactic_ast branches)
     | NONE => atomic whole
+and parse_select_then1 left right whole =
+  case tuple_elems right of
+      SOME [pats, body] => TacThenLT (parse_tactic_ast left, LtSelectThen (TacAtomic (10, span pats), parse_tactic_ast body))
+    | _ => atomic whole
 and flatten_then e =
   case strip_closed_parens e of
       SOME inner => flatten_then inner
@@ -274,8 +302,10 @@ fun tactic_program source tactic =
     | TacRepeat t => "Tactical.REPEAT(" ^ tactic_program source t ^ ")"
     | TacReverse t => "Tactical.REVERSE(" ^ tactic_program source t ^ ")"
     | TacSubgoal sp => "sg " ^ source_text source sp
+    | TacApply (f, arg) => parenthesize (source_text source f) ^ " " ^ source_text source arg
     | TacMapEvery _ => parenthesize (source_text source (tactic_span tactic))
-    | TacMapFirst _ => parenthesize (source_text source (tactic_span tactic))
+    | TacMapFirst (_, ts) => "Tactical.FIRST [" ^ String.concatWith ", " (map (tactic_program source) ts) ^ "]"
+    | TacSufficesBy _ => parenthesize (source_text source (tactic_span tactic))
     | TacRepairGroup (_, t) => tactic_program source t
     | TacAtomic (_, sp) => parenthesize (source_text source sp)
 and list_tactic_program source lt =
@@ -314,10 +344,12 @@ and tactic_span tactic =
     | TacRepeat t => tactic_span t
     | TacReverse t => tactic_span t
     | TacSubgoal sp => sp
+    | TacApply (f, arg) => (#1 f, #2 arg)
     | TacMapEvery (f, []) => f
     | TacMapEvery (f, xs) => (#1 f, #2 (List.last xs))
     | TacMapFirst (f, []) => f
-    | TacMapFirst (f, xs) => (#1 f, #2 (List.last xs))
+    | TacMapFirst (f, xs) => (#1 f, #2 (tactic_span (List.last xs)))
+    | TacSufficesBy (q, t) => (#1 q, #2 (tactic_span t))
     | TacRepairGroup (sp, _) => sp
     | TacAtomic (_, sp) => sp
 and list_tactic_span lt =
@@ -345,22 +377,42 @@ and list_tactic_span lt =
     | LtRepairGroup (sp, _) => sp
     | LtAtomic (_, sp) => sp
 
+fun tactic_label source (TacApply (f, arg)) = source_text source f ^ " " ^ source_text source arg
+  | tactic_label source tactic = source_text source (tactic_span tactic)
+
 fun tactic_step source tactic =
   StepTactic {end_pos = tactic_end tactic,
-              label = source_text source (tactic_span tactic),
+              label = tactic_label source tactic,
               program = tactic_program source tactic}
 
 fun list_step source label_end label program =
   StepList {end_pos = label_end, label = label, program = program}
 
+fun choice_step end_pos label program alternatives =
+  StepChoice {end_pos = end_pos, label = label, program = program, alternatives = alternatives}
+
 fun allgoals_step source tactic =
-  let val label = ">> " ^ source_text source (tactic_span tactic)
+  let val label = ">> " ^ tactic_label source tactic
   in list_step source (tactic_end tactic) label ("Tactical.ALLGOALS(" ^ tactic_program source tactic ^ ")") end
+
+fun suffices_tactic_program source q = "Q_TAC SUFF_TAC " ^ source_text source q
+
+fun suffices_branch_step source rhs =
+  list_step source (tactic_end rhs) ("  >- " ^ tactic_label source rhs)
+    ("Tactical.NTH_GOAL (Tactical.THEN(" ^ tactic_program source rhs ^ ", Tactical.NO_TAC)) 1")
+
+fun suffix_steps source tactic =
+  case tactic of
+      TacSufficesBy (q, rhs) =>
+        [list_step source (span_end q) (">> " ^ suffices_tactic_program source q)
+           ("Tactical.ALLGOALS(" ^ suffices_tactic_program source q ^ ")"),
+         suffices_branch_step source rhs]
+    | _ => [allgoals_step source tactic]
 
 fun plan_tactic source tactic =
   case tactic of
       TacThen [] => [tactic_step source tactic]
-    | TacThen (first :: rest) => plan_tactic source first @ map (allgoals_step source) rest
+    | TacThen (first :: rest) => plan_tactic source first @ List.concat (map (suffix_steps source) rest)
     | TacThen1 (lhs, rhs) =>
         plan_tactic source lhs @
         [list_step source (tactic_end rhs) (">- " ^ source_text source (tactic_span rhs))
@@ -369,24 +421,60 @@ fun plan_tactic source tactic =
         plan_tactic source lhs @
         [list_step source (tactic_end tactic) ">| [...]"
            ("Tactical.NULL_OK_LT (Tactical.TACS_TO_LT [" ^ String.concatWith ", " (map (tactic_program source) branches) ^ "])")]
-    | TacThenLT (lhs, lt) =>
-        plan_tactic source lhs @
-        [list_step source (list_tactic_end lt) (">>> " ^ source_text source (list_tactic_span lt)) (list_tactic_program source lt)]
+    | TacThenLT (lhs, lt) => plan_tactic source lhs @ plan_list_tactic source ">>>" lt
+    | TacOrelse xs => [choice_step (tactic_end tactic) "ORELSE" (tactic_program source tactic) (map (tactic_label source) xs)]
+    | TacMapFirst (_, xs) => [choice_step (tactic_end tactic) "FIRST" (tactic_program source tactic) (map (tactic_label source) xs)]
+    | TacSufficesBy (q, rhs) =>
+        [StepTactic {end_pos = span_end q, label = suffices_tactic_program source q, program = suffices_tactic_program source q},
+         suffices_branch_step source rhs]
     | TacRepairGroup (_, inner) => plan_tactic source inner
     | _ => [tactic_step source tactic]
+and plan_list_tactic source prefix lt =
+  case lt of
+      LtSelectGoal sp => [list_step source (list_tactic_end lt) (">> list_tac Q.SELECT_GOAL_LT " ^ source_text source sp) (list_tactic_program source lt)]
+    | LtSelectGoals sp => [list_step source (list_tactic_end lt) (">> list_tac Q.SELECT_GOALS_LT " ^ source_text source sp) (list_tactic_program source lt)]
+    | LtSelectThen (TacAtomic (_, pats), body) =>
+        [list_step source (list_tactic_end lt)
+           (">> list_tac Q.SELECT_GOALS_LT_THEN1 " ^ source_text source pats ^ " (" ^ tactic_label source body ^ ")")
+           ("Q.SELECT_GOALS_LT_THEN1 " ^ source_text source pats ^ " (" ^ tactic_program source body ^ ")")]
+    | _ => [list_step source (list_tactic_end lt) (prefix ^ " " ^ source_text source (list_tactic_span lt)) (list_tactic_program source lt)]
 
 fun steps source = plan_tactic source (parse_tactic source)
 
+fun display_line_count (StepChoice {alternatives, ...}) = 1 + Int.max(0, 2 * length alternatives - 1)
+  | display_line_count _ = 1
+
+fun format_index i = if i < 10 then "0" ^ Int.toString i else Int.toString i
+
 fun format_step (i, step) =
-  let val idx = if i < 10 then "0" ^ Int.toString i else Int.toString i
-  in "  " ^ idx ^ " " ^ step_label step ^ "\n" end
+  case step of
+      StepChoice {label, alternatives, ...} =>
+        let
+          fun alt_lines (_, []) = ""
+            | alt_lines (j, [alt]) = "  " ^ format_index j ^ "   " ^ alt ^ "\n"
+            | alt_lines (j, alt :: rest) =
+                "  " ^ format_index j ^ "   " ^ alt ^ "\n" ^
+                "  " ^ format_index (j + 1) ^ "   |\n" ^
+                alt_lines (j + 2, rest)
+        in
+          "  " ^ format_index i ^ " " ^ label ^ "\n" ^ alt_lines (i + 1, alternatives)
+        end
+    | _ => "  " ^ format_index i ^ " " ^ step_label step ^ "\n"
+
+fun format_plan_lines steps =
+  let
+    fun loop _ [] = ""
+      | loop i (step :: rest) = format_step (i, step) ^ loop (i + display_line_count step) rest
+  in loop 0 steps end
+
+fun display_step_count plan = List.foldl (fn (step, n) => n + display_line_count step) 0 plan
 
 fun format_tactic {theory, theorem, source} tactic_text =
   let val plan = steps tactic_text
   in
     "holbuild proof-ir plan " ^ theory ^ ":" ^ theorem ^ " source=" ^ source ^
-    " (" ^ Int.toString (length plan) ^ " steps)\n" ^
-    String.concat (map format_step (ListPair.zip (List.tabulate(length plan, fn i => i), plan)))
+    " (" ^ Int.toString (display_step_count plan) ^ " steps)\n" ^
+    format_plan_lines plan
   end
 
 end
