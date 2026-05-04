@@ -674,6 +674,15 @@ fun then1_chain_count (Infix {left, id = (_, opn), right}) =
   | then1_chain_count _ = 0
 
 fun unsafe_then1_chain source exp =
+  (* Keep sibling THEN1 chains atomic when they have the shape
+
+       prefix_tac >- branch1 >- branch2 >- branch3
+
+     or a shorter chain with impl_tac in a branch.  Plain HOL executes the
+     whole Tactical.THEN1 chain and validation at once; decomposing the branches
+     as separate history boundaries can change the observable intermediate
+     goal/validation shape.  TRY-containing chains remain decomposed because
+     failed-prefix replay tests rely on their real failure boundary. *)
   not (expr_contains_try exp) andalso
   (then1_chain_count exp >= 3 orelse
    (then1_chain_count exp >= 2 andalso String.isSubstring "impl_tac" source))

@@ -790,13 +790,22 @@ fun steps body =
   let
     val tree = parse_tactic body
   in
-    (* HOL GoalFrag's validation is not faithful for some chained THEN1
-       proof shapes: real Vyper memSSA proofs are accepted by plain HOL but
-       decomposed GoalFrag can leave later theorems unusable.  Keep these
-       whole-theorem tactics plain rather than displaying/executing a finer
-       boundary than GoalFrag can currently represent.  TRY-containing chains
-       stay decomposed because failed-prefix tests rely on their real failure
-       boundary and the known repros do not need this fallback. *)
+    (* GoalFrag cannot faithfully decompose proofs shaped as one tactic
+       followed by several sibling THEN1/list-THEN1 branches, e.g.
+
+         rpt conj_tac
+         >- tac1
+         >- tac2
+         >- tac3
+
+       or shorter chains where an impl_tac branch changes the remaining goal
+       structure.  Plain HOL executes the full Tactical.THEN1 chain and its
+       validation as one tactic; GoalFrag open/close branch replay can expose a
+       different intermediate goal/validation shape.  Keep these whole-theorem
+       tactics plain rather than displaying/executing finer boundaries than the
+       runtime can represent.  TRY-containing chains stay decomposed because
+       failed-prefix tests rely on their real failure boundary and the known
+       unsafe shape does not require this fallback. *)
     if not (expr_contains_try tree) andalso
        (chained_then1_expr tree orelse
         (then1_chain_count tree >= 2 andalso expr_contains_impl_tac body tree)) then
