@@ -63,6 +63,8 @@ for event in started + finished:
         raise SystemExit(f'node key exposes internal NUL-delimited action key: {key!r}')
     if not key.startswith(event.get('target', '') + '#'):
         raise SystemExit(f'node key does not include display target: {key!r}')
+    if event.get('package') != 'json-output' or event.get('source') != 'src/JScript.sml':
+        raise SystemExit(f'node event lost source metadata: {event!r}')
 if not any(e.get('event') == 'build_finished' and isinstance(e.get('elapsed_ms'), int) for e in events):
     raise SystemExit('missing build_finished elapsed event')
 if any('\\u0000' in line or '\x1b' in line or '\r' in line for line in lines):
@@ -115,4 +117,16 @@ if 'top goal at failed fragment:' not in message:
     raise SystemExit('structured error did not include top-goal context')
 if 'json failure' not in message:
     raise SystemExit('structured error lost failure detail')
+if not any(e.get('log') and e.get('log') in e.get('message', '') for e in errors):
+    raise SystemExit('structured error did not expose failure log as separate key')
+failed = [e for e in events if e.get('event') == 'node_failed' and e.get('target') == 'BadTheory']
+if not failed:
+    raise SystemExit('missing node_failed event')
+for event in failed:
+    if not event.get('log'):
+        raise SystemExit(f'node_failed missing log field: {event!r}')
+    if event.get('package') != 'json-output' or event.get('source') != 'src/BadScript.sml':
+        raise SystemExit(f'node_failed lost source metadata: {event!r}')
+    if '\x00' in event.get('key', '') or '\\u0000' in event.get('key', ''):
+        raise SystemExit(f'node_failed key exposes internal NUL key: {event!r}')
 PY

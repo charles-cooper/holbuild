@@ -54,9 +54,46 @@ fun json_string_field name value =
 fun json_int_field name value =
   "\"" ^ name ^ "\":" ^ Int.toString value
 
+fun json_optional_string_field name value =
+  case value of
+      NONE => []
+    | SOME text => [json_string_field name text]
+
 fun short_hash text = String.substring(HolbuildHash.string_sha1 text, 0, 12)
 
 fun json_node_key key label = label ^ "#" ^ short_hash key
+
+fun json_node_metadata key =
+  case String.fields (fn c => c = #"\000") key of
+      [package, source, _] =>
+        json_optional_string_field "package" (SOME package) @
+        json_optional_string_field "source" (SOME source)
+    | _ => []
+
+fun json_node_fields key label =
+  [json_string_field "key" (json_node_key key label),
+   json_string_field "target" label] @
+  json_node_metadata key
+
+val instrumented_log_prefix = "instrumented log: "
+
+fun line_suffix prefix line =
+  if String.isPrefix prefix line then
+    SOME (String.extract(line, size prefix, NONE))
+  else NONE
+
+fun first_log_path lines =
+  case lines of
+      [] => NONE
+    | line :: rest =>
+        (case line_suffix instrumented_log_prefix line of
+             SOME path => SOME path
+           | NONE => first_log_path rest)
+
+fun log_path_from_message message =
+  first_log_path (String.fields (fn c => c = #"\n") message)
+
+fun json_log_field message = json_optional_string_field "log" (log_path_from_message message)
 
 fun json_fields fields = "{" ^ String.concatWith "," fields ^ "}\n"
 
@@ -73,7 +110,7 @@ fun json_message stream_name stream text =
      json_string_field "message" text]
 
 fun error msg =
-  emit_json TextIO.stdErr "error" [json_string_field "message" msg]
+  emit_json TextIO.stdErr "error" (json_string_field "message" msg :: json_log_field msg)
 
 fun env_truthy s = s = "1" orelse s = "true" orelse s = "yes" orelse s = "on"
 fun env_falsey s = s = "0" orelse s = "false" orelse s = "no" orelse s = "off"
@@ -245,9 +282,7 @@ fun start_node status key label =
           else
             (active := {key = key, label = label} :: remove_active key (!active);
              if json_mode () then
-               emit_json TextIO.stdOut "node_started"
-                 [json_string_field "key" (json_node_key key label),
-                  json_string_field "target" label]
+               emit_json TextIO.stdOut "node_started" (json_node_fields key label)
              else if enabled then redraw status
              else ())
         end)
@@ -264,11 +299,10 @@ fun finish_node status key label outcome =
              active := remove_active key (!active);
              if json_mode () then
                emit_json TextIO.stdOut "node_finished"
-                 [json_string_field "key" (json_node_key key label),
-                  json_string_field "target" label,
-                  json_string_field "outcome" (outcome_text outcome),
-                  json_int_field "finished" (!finished),
-                  json_int_field "total" total]
+                 (json_node_fields key label @
+                  [json_string_field "outcome" (outcome_text outcome),
+                   json_int_field "finished" (!finished),
+                   json_int_field "total" total])
              else if enabled then redraw status
              else print (label ^ " " ^ outcome_text outcome ^ "\n"))
         end)
@@ -329,7 +363,10 @@ fun fail status key label msg =
            if !ended then ()
            else
              (active := remove_active key (!active);
-              if enabled then
+              if json_mode () then
+                emit_json TextIO.stdOut "node_failed"
+                  (json_node_fields key label @ json_log_field msg)
+              else if enabled then
                 (TextIO.output (TextIO.stdOut, "\r" ^ clear_to_eol);
                  TextIO.flushOut TextIO.stdOut)
               else ();
