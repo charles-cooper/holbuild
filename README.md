@@ -217,8 +217,9 @@ except for the reserved `[dependencies.HOLDIR]` package, which uses holbuild's
 built-in root-HOL manifest and the runtime `--holdir`/`HOLBUILD_HOLDIR` path.
 There is no `.holpath`, ambient `HOLPATH`, or user-facing include-path schema in
 project mode; dependency locations are resolved through manifests plus local
-overrides. Local config paths are literal today; shell-style `$HOME` expansion is
-a future wishlist item, not current behavior. `[build].roots` lists
+overrides. Path fields for dependency manifests/paths and local override paths
+support `$VAR` and `${VAR}` environment variable substitution; unset variables
+are errors. `[build].roots` lists
 package-root-relative source paths for default entry points when `holbuild build`
 has no CLI target; root source paths must be
 discoverable through `[build].members`. `[build].members` remains the source

@@ -54,7 +54,7 @@ name = "dep"
 members = ["src"]
 
 [dependencies.nested]
-manifest = "nested-shim.toml"
+manifest = "$HOLBUILD_TEST_SHIMDIR/nested-shim.toml"
 TOML
 cat > "$shimdir/nested-shim.toml" <<'TOML'
 [project]
@@ -64,7 +64,7 @@ name = "nested"
 members = ["src"]
 TOML
 
-cat > "$project/holproject.toml" <<TOML
+cat > "$project/holproject.toml" <<'TOML'
 [project]
 name = "consumer"
 
@@ -72,15 +72,18 @@ name = "consumer"
 members = ["src"]
 
 [dependencies.dep]
-manifest = "$shimdir/dep-shim.toml"
+manifest = "${HOLBUILD_TEST_SHIMDIR}/dep-shim.toml"
 TOML
-cat > "$project/.holconfig.toml" <<TOML
+cat > "$project/.holconfig.toml" <<'TOML'
 [overrides.dep]
-path = "$dep"
+path = "$HOLBUILD_TEST_DEP"
 
 [overrides.nested]
-path = "$nested"
+path = "${HOLBUILD_TEST_NESTED}"
 TOML
+export HOLBUILD_TEST_SHIMDIR="$shimdir"
+export HOLBUILD_TEST_DEP="$dep"
+export HOLBUILD_TEST_NESTED="$nested"
 cat > "$project/src/BScript.sml" <<'SML'
 open HolKernel Parse boolLib bossLib;
 open ATheory CTheory;

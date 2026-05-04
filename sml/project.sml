@@ -191,6 +191,54 @@ fun table_field table key =
 fun string_field table name = string_at table [name]
 fun string_array_field table name = string_array_at table [name]
 
+fun env_name_char c = Char.isAlphaNum c orelse c = #"_"
+
+fun env_value context name =
+  if name = "" then die (context ^ " contains empty environment variable reference")
+  else
+    case OS.Process.getEnv name of
+        SOME value => value
+      | NONE => die (context ^ " references unset environment variable " ^ name)
+
+fun expand_env context text =
+  let
+    val n = size text
+    fun emit start stop acc =
+      if stop <= start then acc else String.substring(text, start, stop - start) :: acc
+    fun braced start acc =
+      let
+        fun find j =
+          if j >= n then die (context ^ " contains unterminated ${...} reference")
+          else if String.sub(text, j) = #"}" then j
+          else find (j + 1)
+        val close = find start
+        val name = String.substring(text, start, close - start)
+      in loop (close + 1) (env_value context name :: acc) end
+    and unbraced start acc =
+      let
+        fun take j = if j < n andalso env_name_char (String.sub(text, j)) then take (j + 1) else j
+        val stop = take start
+      in
+        if stop = start then loop start ("$" :: acc)
+        else loop stop (env_value context (String.substring(text, start, stop - start)) :: acc)
+      end
+    and loop i acc =
+      if i >= n then String.concat (rev acc)
+      else
+        case String.sub(text, i) of
+            #"$" =>
+              if i + 1 < n andalso String.sub(text, i + 1) = #"{" then braced (i + 2) acc
+              else unbraced (i + 1) acc
+          | _ =>
+              let
+                fun plain j = if j < n andalso String.sub(text, j) <> #"$" then plain (j + 1) else j
+                val j = plain i
+              in loop j (emit i j acc) end
+  in loop 0 [] end
+
+fun path_string_field context table name =
+  Option.map (expand_env (context ^ "." ^ name)) (string_field table name)
+
 fun string_array_field_opt table name =
   case lookup table [name] of
       NONE => NONE
@@ -306,8 +354,8 @@ fun validate_local_config_table table =
 fun parse_dependency (name, table) =
   Dependency
     { name = name,
-      path = string_field table "path",
-      manifest = string_field table "manifest",
+      path = path_string_field ("dependencies." ^ name) table "path",
+      manifest = path_string_field ("dependencies." ^ name) table "manifest",
       git = string_field table "git",
       rev = string_field table "rev" }
 
@@ -334,7 +382,7 @@ fun action_policies_at root table =
   map (parse_action_policy root) (named_table_entries table ["actions"])
 
 fun parse_override (name, table) =
-  case string_field table "path" of
+  case path_string_field ("overrides." ^ name) table "path" of
       SOME path => Override {name = name, path = path}
     | NONE => die ("[overrides." ^ name ^ "] requires path")
 

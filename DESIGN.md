@@ -61,8 +61,11 @@ path = "../foo-dev"
 An override changes where package `foo` is found on this machine; it does not
 change the package identity. The override path must still validate as `foo`,
 either by containing `foo`'s `holproject.toml` or by using the configured shim
-manifest for that dependency. Local config is schema-checked too; unknown fields
-in `.holconfig.toml` are errors rather than silently ignored.
+manifest for that dependency. Dependency `path`/`manifest` and local override
+`path` fields support `$VAR` / `${VAR}` environment substitution so worktrees can
+share committed shims without copying machine-specific `.holconfig.toml`; unset
+variables are hard errors. Local config is schema-checked too; unknown fields in
+`.holconfig.toml` are errors rather than silently ignored.
 
 Transition rule:
 
