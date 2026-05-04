@@ -397,8 +397,8 @@ fun deps_loaded_path project node deps_key =
 
 fun theorem_checkpoint_root project node = checkpoint_base project node ^ ".theorems"
 
-fun theorem_checkpoint_dir project node deps_key prefix_hash =
-  Path.concat(Path.concat(theorem_checkpoint_root project node, deps_key), prefix_hash)
+fun theorem_checkpoint_dir project node deps_key proof_engine prefix_hash =
+  Path.concat(Path.concat(Path.concat(theorem_checkpoint_root project node, deps_key), proof_engine), prefix_hash)
 
 fun final_context_path project node = checkpoint_base project node ^ ".final_context.save"
 
@@ -1059,38 +1059,40 @@ fun metadata_path (project : HolbuildProject.t) node =
     Path.concat(base, #relative_path source ^ ".key")
   end
 
-fun theorem_context_path project node deps_key prefix_hash safe_name =
-  Path.concat(theorem_checkpoint_dir project node deps_key prefix_hash,
+fun theorem_context_path project node deps_key proof_engine prefix_hash safe_name =
+  Path.concat(theorem_checkpoint_dir project node deps_key proof_engine prefix_hash,
               safe_name ^ "_context.save")
 
-fun theorem_end_of_proof_path project node deps_key prefix_hash safe_name =
-  Path.concat(theorem_checkpoint_dir project node deps_key prefix_hash,
+fun theorem_end_of_proof_path project node deps_key proof_engine prefix_hash safe_name =
+  Path.concat(theorem_checkpoint_dir project node deps_key proof_engine prefix_hash,
               safe_name ^ "_end_of_proof.save")
 
-fun failed_prefix_checkpoint_dir project node deps_key =
-  Path.concat(theorem_checkpoint_root project node, Path.concat(deps_key, ".failed"))
+fun failed_prefix_checkpoint_dir project node deps_key proof_engine =
+  Path.concat(theorem_checkpoint_root project node, Path.concat(Path.concat(deps_key, proof_engine), ".failed"))
 
-fun theorem_failed_prefix_path project node deps_key safe_name =
-  Path.concat(failed_prefix_checkpoint_dir project node deps_key,
+fun theorem_failed_prefix_path project node deps_key proof_engine safe_name =
+  Path.concat(failed_prefix_checkpoint_dir project node deps_key proof_engine,
               safe_name ^ "_failed_prefix.save")
 
 fun discover_theorem_boundaries source_path source_text =
   HolbuildTheorySpans.scan source_path source_text
 
-fun theorem_checkpoint_key {kind, name, safe_name, boundary, deps_key, prefix_hash} =
+fun theorem_checkpoint_key {kind, name, safe_name, boundary, deps_key, proof_engine, prefix_hash} =
   HolbuildToolchain.hash_text
     (String.concatWith "\n"
-       ["holbuild-theorem-checkpoint-key-v1",
+       ["holbuild-theorem-checkpoint-key-v2",
         "kind=" ^ kind,
         "name=" ^ name,
         "safe_name=" ^ safe_name,
         "boundary=" ^ Int.toString boundary,
         "deps_key=" ^ deps_key,
+        "proof_engine=" ^ proof_engine,
         "prefix_key=" ^ prefix_hash] ^ "\n")
 
-fun theorem_checkpoint_ok kind deps_key prefix_hash checkpoint_key =
+fun theorem_checkpoint_ok kind deps_key proof_engine prefix_hash checkpoint_key =
   checkpoint_ok_text kind
     [("deps_key", deps_key),
+     ("proof_engine", proof_engine),
      ("prefix_key", prefix_hash),
      ("checkpoint_key", checkpoint_key)]
 
@@ -1100,20 +1102,22 @@ fun theorem_header_hash source theorem_start tactic_start =
 fun pre_theorem_hash source theorem_start =
   HolbuildToolchain.hash_text (String.substring(source, 0, theorem_start))
 
-fun failed_prefix_ok new_ir deps_key safe_name pre_hash header_hash =
+fun failed_prefix_ok proof_engine deps_key safe_name pre_hash header_hash =
   checkpoint_ok_text "failed_prefix"
     [("deps_key", deps_key),
+     ("proof_engine", proof_engine),
      ("safe_name", safe_name),
      ("pre_theorem_key", pre_hash),
      ("header_key", header_hash),
-     ("failure_diagnostic_key", if new_ir then "proof_ir_v1" else "failed_fragment_span_v6")]
+     ("failure_diagnostic_key", proof_engine)]
 
-fun theorem_checkpoint_specs new_ir project node deps_key source boundaries =
+fun theorem_checkpoint_specs proof_engine project node deps_key source boundaries =
   map (fn {kind, name, safe_name, theorem_start, theorem_stop, boundary, tactic_start,
            tactic_end, tactic_text, has_proof_attrs, prefix_hash} =>
           let
             val checkpoint_key = theorem_checkpoint_key {kind = kind, name = name, safe_name = safe_name,
                                                          boundary = boundary, deps_key = deps_key,
+                                                         proof_engine = proof_engine,
                                                          prefix_hash = prefix_hash}
             val header_hash = theorem_header_hash source theorem_start tactic_start
             val pre_hash = pre_theorem_hash source theorem_start
@@ -1123,12 +1127,12 @@ fun theorem_checkpoint_specs new_ir project node deps_key source boundaries =
              tactic_start = tactic_start, tactic_end = tactic_end,
              tactic_text = tactic_text, has_proof_attrs = has_proof_attrs,
              prefix_hash = prefix_hash,
-             context_path = theorem_context_path project node deps_key prefix_hash safe_name,
-             context_ok = theorem_checkpoint_ok "theorem_context" deps_key prefix_hash checkpoint_key,
-             end_of_proof_path = theorem_end_of_proof_path project node deps_key prefix_hash safe_name,
-             end_of_proof_ok = theorem_checkpoint_ok "end_of_proof" deps_key prefix_hash checkpoint_key,
-             failed_prefix_path = theorem_failed_prefix_path project node deps_key safe_name,
-             failed_prefix_ok = failed_prefix_ok new_ir deps_key safe_name pre_hash header_hash,
+             context_path = theorem_context_path project node deps_key proof_engine prefix_hash safe_name,
+             context_ok = theorem_checkpoint_ok "theorem_context" deps_key proof_engine prefix_hash checkpoint_key,
+             end_of_proof_path = theorem_end_of_proof_path project node deps_key proof_engine prefix_hash safe_name,
+             end_of_proof_ok = theorem_checkpoint_ok "end_of_proof" deps_key proof_engine prefix_hash checkpoint_key,
+             failed_prefix_path = theorem_failed_prefix_path project node deps_key proof_engine safe_name,
+             failed_prefix_ok = failed_prefix_ok proof_engine deps_key safe_name pre_hash header_hash,
              deps_key = deps_key,
              checkpoint_key = checkpoint_key}
           end)
@@ -1713,6 +1717,10 @@ fun checkpoint_policy_for_node ({skip_checkpoints, goalfrag, new_ir, tactic_time
                     goalfrag_plan = if goalfrag then goalfrag_plan else NONE,
                     goalfrag_trace = goalfrag andalso goalfrag_trace}
 
+fun proof_engine (CheckpointPolicy {goalfrag = false, ...}) = "plain_v1"
+  | proof_engine (CheckpointPolicy {new_ir = true, ...}) = "proof_ir_v1"
+  | proof_engine _ = "goalfrag_failed_fragment_span_v6"
+
 fun build_config_lines_for_node options project node =
   case #kind (HolbuildBuildPlan.source_of node) of
       HolbuildSourceIndex.TheoryScript => policy_config_lines (checkpoint_policy_for_node options project node)
@@ -1726,7 +1734,7 @@ fun theory_checkpoints_for_node policy project plan keys toolchain_key node sour
       val deps_key = dependency_context_key toolchain_key plan keys node
       val boundaries = discover_theorem_boundaries (source_file node) source_text
     in
-      theorem_checkpoint_specs (proof_ir_enabled policy) project node deps_key source_text boundaries
+      theorem_checkpoint_specs (proof_engine policy) project node deps_key source_text boundaries
     end
     handle Error msg =>
       (warn ("could not parse theorem boundaries for " ^ logical_name node ^

@@ -24,6 +24,8 @@ val active_tactic_text_ref = ref ""
 val successful_step_count_ref = ref 0
 val successful_prefix_end_ref = ref 0
 val failed_step_end_ref = ref NONE : int option ref
+val compiled_tactic_ref = ref Tactical.ALL_TAC
+val compiled_list_tactic_ref = ref Tactical.ALL_LT
 
 fun env_bool name =
   case OS.Process.getEnv name of
@@ -190,21 +192,44 @@ fun print_goal_state label =
 
 fun report_step_failure label e = (save_failed_prefix_checkpoint (); print_goal_state label; raise e)
 
-fun eval_step label program fail_msg =
-  with_tactic_timeout label
-    (fn () => if smlExecute.quse_string program then () else raise Fail fail_msg) ()
-  handle e => report_step_failure label e
+fun compile_tactic label program =
+  if smlExecute.quse_string ("HolbuildProofIrRuntime.compiled_tactic_ref := (" ^ program ^ ");") then
+    !compiled_tactic_ref
+  else
+    raise Fail ("tactic fragment did not compile: " ^ label)
+
+fun compile_list_tactic label program =
+  if smlExecute.quse_string ("HolbuildProofIrRuntime.compiled_list_tactic_ref := (" ^ program ^ ");") then
+    !compiled_list_tactic_ref
+  else
+    raise Fail ("list tactic fragment did not compile: " ^ label)
+
+fun apply_tactic_step label program =
+  let val tactic = compile_tactic label program
+  in
+    with_tactic_timeout label (fn () => (proofManagerLib.expand tactic; ())) ()
+    handle e => report_step_failure label e
+  end
+
+fun no_open_goals () =
+  ((proofManagerLib.top_goals (); false)
+   handle _ => true)
+
+fun allgoals_suffix_label label = String.isPrefix ">> " label
+
+fun apply_list_tactic_step label program =
+  if allgoals_suffix_label label andalso no_open_goals () then ()
+  else
+    let val list_tactic = compile_list_tactic label program
+    in
+      with_tactic_timeout label (fn () => (proofManagerLib.expand_list list_tactic; ())) ()
+      handle e => report_step_failure label e
+    end
 
 fun step proof_step =
   case proof_step of
-      HolbuildProofIr.StepTactic {label, program, ...} =>
-        eval_step label
-          ("proofManagerLib.expand (" ^ program ^ ");")
-          ("tactic fragment failed: " ^ label)
-    | HolbuildProofIr.StepList {label, program, ...} =>
-        eval_step label
-          ("proofManagerLib.expand_list (" ^ program ^ ");")
-          ("list tactic fragment failed: " ^ label)
+      HolbuildProofIr.StepTactic {label, program, ...} => apply_tactic_step label program
+    | HolbuildProofIr.StepList {label, program, ...} => apply_list_tactic_step label program
 
 fun inspection_matches wanted name =
   case wanted of NONE => false | SOME selected => selected = name

@@ -294,7 +294,10 @@ path.write_text(path.read_text().replace('FAIL_TAC "expected replay seed failure
 PY
 plain_replay_log=$tmpdir/plain-replay.log
 (cd "$plain_replay_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --skip-goalfrag --no-cache ATheory) > "$plain_replay_log" 2>&1
-require_grep "resuming ATheory from checkpoint a_thm" "$plain_replay_log"
+if grep -q "resuming ATheory from checkpoint a_thm" "$plain_replay_log"; then
+  echo "--skip-goalfrag reused goalfrag theorem checkpoint" >&2
+  exit 1
+fi
 require_grep "ATheory built" "$plain_replay_log"
 
 resume_replay_project=$tmpdir/resume-replay-project
