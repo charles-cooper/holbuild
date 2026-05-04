@@ -173,6 +173,51 @@ holbuild proof-ir plan ATheory:try_repeat_reverse_lt_plan source=src/AScript.sml
 EXPECTED
 
 cat >> "$project/src/AScript.sml" <<'SML'
+Theorem null_ok_rotate_plan:
+  T /\ (T ==> T)
+Proof
+  CONJ_TAC
+  >>> NULL_OK_LT (ROTATE_LT 1)
+  >>> TACS_TO_LT [DISCH_TAC >> ACCEPT_TAC TRUTH, ACCEPT_TAC TRUTH]
+QED
+SML
+check_plan null_ok_rotate_plan <<'EXPECTED'
+holbuild proof-ir plan ATheory:null_ok_rotate_plan source=src/AScript.sml (3 steps)
+  00 CONJ_TAC
+  01 >> list_tac NULL_OK_LT (ROTATE_LT 1)
+  02 >> list_tac TACS_TO_LT [DISCH_TAC >> ACCEPT_TAC TRUTH, ACCEPT_TAC TRUTH]
+EXPECTED
+
+cat >> "$project/src/AScript.sml" <<'SML'
+Theorem null_ok_empty_plan:
+  T
+Proof
+  ACCEPT_TAC TRUTH >>> NULL_OK_LT (TACS_TO_LT [])
+QED
+SML
+check_plan null_ok_empty_plan <<'EXPECTED'
+holbuild proof-ir plan ATheory:null_ok_empty_plan source=src/AScript.sml (2 steps)
+  00 ACCEPT_TAC TRUTH
+  01 >> list_tac NULL_OK_LT (TACS_TO_LT [])
+EXPECTED
+
+cat >> "$project/src/AScript.sml" <<'SML'
+Theorem orelse_lt_plan:
+  T /\ T
+Proof
+  CONJ_TAC >>> (NO_LT ORELSE_LT TACS_TO_LT [ACCEPT_TAC TRUTH, ACCEPT_TAC TRUTH])
+QED
+SML
+check_plan orelse_lt_plan <<'EXPECTED'
+holbuild proof-ir plan ATheory:orelse_lt_plan source=src/AScript.sml (5 steps)
+  00 CONJ_TAC
+  01 >> list_tac ORELSE_LT
+  02   NO_LT
+  03   |
+  04   TACS_TO_LT [ACCEPT_TAC TRUTH, ACCEPT_TAC TRUTH]
+EXPECTED
+
+cat >> "$project/src/AScript.sml" <<'SML'
 Theorem orelse_plan:
   T
 Proof

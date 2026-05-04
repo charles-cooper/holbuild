@@ -277,6 +277,26 @@ Proof
   >>> TACS_TO_LT [ACCEPT_TAC TRUTH, ACCEPT_TAC TRUTH]
 QED
 
+Theorem null_ok_empty_success:
+  T
+Proof
+  ACCEPT_TAC TRUTH >>> NULL_OK_LT (TACS_TO_LT [])
+QED
+
+Theorem rotate_lt_success:
+  T ∧ (T ==> T)
+Proof
+  CONJ_TAC
+  >>> NULL_OK_LT (ROTATE_LT 1)
+  >>> TACS_TO_LT [DISCH_TAC >> ACCEPT_TAC TRUTH, ACCEPT_TAC TRUTH]
+QED
+
+Theorem orelse_lt_success:
+  T ∧ T
+Proof
+  CONJ_TAC >>> (NO_LT ORELSE_LT TACS_TO_LT [ACCEPT_TAC TRUTH, ACCEPT_TAC TRUTH])
+QED
+
 Theorem reverse_then1_success:
   T ∧ T
 Proof

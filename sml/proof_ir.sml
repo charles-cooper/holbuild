@@ -83,13 +83,14 @@ and list_tactic =
     LtThenLT of list_tactic list
   | LtThen of list_tactic * tactic list
   | LtTacsToLT of tactic list
-  | LtNullOk of list_tactic
+  | LtNullOk of (int * int) * list_tactic
   | LtOrelse of list_tactic list
   | LtAllGoals of tactic
   | LtNthGoal of tactic * (int * int)
   | LtLastGoal of tactic
   | LtHeadGoal of tactic
   | LtSplit of (int * int) * list_tactic * list_tactic
+  | LtRotate of (int * int) * (int * int)
   | LtReverse of int * int
   | LtTry of (int * int) * list_tactic
   | LtRepeat of (int * int) * list_tactic
@@ -146,7 +147,7 @@ and list_tactic_end (LtThenLT []) = 0
   | list_tactic_end (LtThen (_, ts)) = tactic_end (List.last ts)
   | list_tactic_end (LtTacsToLT []) = 0
   | list_tactic_end (LtTacsToLT ts) = tactic_end (List.last ts)
-  | list_tactic_end (LtNullOk lt) = list_tactic_end lt
+  | list_tactic_end (LtNullOk (sp, _)) = span_end sp
   | list_tactic_end (LtOrelse []) = 0
   | list_tactic_end (LtOrelse xs) = list_tactic_end (List.last xs)
   | list_tactic_end (LtAllGoals t) = tactic_end t
@@ -154,6 +155,7 @@ and list_tactic_end (LtThenLT []) = 0
   | list_tactic_end (LtLastGoal t) = tactic_end t
   | list_tactic_end (LtHeadGoal t) = tactic_end t
   | list_tactic_end (LtSplit (sp, _, _)) = span_end sp
+  | list_tactic_end (LtRotate (sp, _)) = span_end sp
   | list_tactic_end (LtReverse sp) = span_end sp
   | list_tactic_end (LtTry (sp, _)) = span_end sp
   | list_tactic_end (LtRepeat (sp, _)) = span_end sp
@@ -257,6 +259,8 @@ and parse_list_tactic_app e =
     | SOME ("LASTGOAL", [t]) => LtLastGoal (parse_tactic_ast t)
     | SOME ("HEADGOAL", [t]) => LtHeadGoal (parse_tactic_ast t)
     | SOME ("SPLIT_LT", [n, branches]) => parse_split_lt e n branches
+    | SOME ("NULL_OK_LT", [lt]) => LtNullOk (span e, parse_list_tactic_ast lt)
+    | SOME ("ROTATE_LT", [n]) => LtRotate (span e, span n)
     | SOME ("REVERSE_LT", []) => LtReverse (span e)
     | SOME ("TRY_LT", [lt]) => LtTry (span e, parse_list_tactic_ast lt)
     | SOME ("REPEAT_LT", [lt]) => LtRepeat (span e, parse_list_tactic_ast lt)
@@ -336,13 +340,14 @@ and list_tactic_program source lt =
     | LtThenLT xs => join_program "Tactical.THEN_LT" (map (list_tactic_program source) xs) "Tactical.ALL_LT"
     | LtThen (lt, ts) => join_program "Tactical.THEN" (list_tactic_program source lt :: map (tactic_program source) ts) "Tactical.ALL_LT"
     | LtTacsToLT ts => "Tactical.TACS_TO_LT [" ^ String.concatWith ", " (map (tactic_program source) ts) ^ "]"
-    | LtNullOk lt => "Tactical.NULL_OK_LT(" ^ list_tactic_program source lt ^ ")"
+    | LtNullOk (_, lt) => "Tactical.NULL_OK_LT(" ^ list_tactic_program source lt ^ ")"
     | LtOrelse xs => join_program "Tactical.ORELSE_LT" (map (list_tactic_program source) xs) "Tactical.NO_LT"
     | LtAllGoals t => "Tactical.ALLGOALS(" ^ tactic_program source t ^ ")"
     | LtNthGoal (t, n) => "Tactical.NTH_GOAL (" ^ tactic_program source t ^ ") (" ^ source_text source n ^ ")"
     | LtLastGoal t => "Tactical.LASTGOAL(" ^ tactic_program source t ^ ")"
     | LtHeadGoal t => "Tactical.HEADGOAL(" ^ tactic_program source t ^ ")"
     | LtSplit (n, a, b) => "Tactical.SPLIT_LT (" ^ source_text source n ^ ") (" ^ list_tactic_program source a ^ ", " ^ list_tactic_program source b ^ ")"
+    | LtRotate (_, n) => "Tactical.ROTATE_LT (" ^ source_text source n ^ ")"
     | LtReverse _ => "Tactical.REVERSE_LT"
     | LtTry (_, lt) => "Tactical.TRY_LT(" ^ list_tactic_program source lt ^ ")"
     | LtRepeat (_, lt) => "Tactical.REPEAT_LT(" ^ list_tactic_program source lt ^ ")"
@@ -381,7 +386,7 @@ and list_tactic_span lt =
     | LtThen (lt, ts) => (#1 (list_tactic_span lt), #2 (tactic_span (List.last ts)))
     | LtTacsToLT [] => (0, 0)
     | LtTacsToLT ts => (#1 (tactic_span (hd ts)), #2 (tactic_span (List.last ts)))
-    | LtNullOk lt => list_tactic_span lt
+    | LtNullOk (sp, _) => sp
     | LtOrelse [] => (0, 0)
     | LtOrelse xs => (#1 (list_tactic_span (hd xs)), #2 (list_tactic_span (List.last xs)))
     | LtAllGoals t => tactic_span t
@@ -389,6 +394,7 @@ and list_tactic_span lt =
     | LtLastGoal t => tactic_span t
     | LtHeadGoal t => tactic_span t
     | LtSplit (n, _, _) => n
+    | LtRotate (sp, _) => sp
     | LtReverse sp => sp
     | LtTry (sp, _) => sp
     | LtRepeat (sp, _) => sp
@@ -482,6 +488,10 @@ and plan_list_tactic source prefix lt =
         [list_step source (list_tactic_end lt)
            (">> list_tac FIRST_LT " ^ tactic_label source t)
            (list_tactic_program source lt)]
+    | LtNullOk _ =>
+        [list_step source (list_tactic_end lt) (">> list_tac " ^ list_tactic_label source lt) (list_tactic_program source lt)]
+    | LtRotate _ =>
+        [list_step source (list_tactic_end lt) (">> list_tac " ^ list_tactic_label source lt) (list_tactic_program source lt)]
     | LtReverse _ =>
         [list_step source (list_tactic_end lt) (">> list_tac REVERSE_LT") (list_tactic_program source lt)]
     | LtTry _ =>
@@ -505,6 +515,8 @@ and list_tactic_label source lt =
     | LtLastGoal t => "LASTGOAL (" ^ tactic_label source t ^ ")"
     | LtHeadGoal t => "HEADGOAL (" ^ tactic_label source t ^ ")"
     | LtSplit (n, a, b) => "SPLIT_LT " ^ source_text source n ^ " (" ^ list_tactic_label source a ^ ", " ^ list_tactic_label source b ^ ")"
+    | LtNullOk (_, inner) => "NULL_OK_LT (" ^ list_tactic_label source inner ^ ")"
+    | LtRotate (_, n) => "ROTATE_LT " ^ source_text source n
     | LtReverse _ => "REVERSE_LT"
     | LtTry _ => source_text source (list_tactic_span lt)
     | LtRepeat _ => source_text source (list_tactic_span lt)
