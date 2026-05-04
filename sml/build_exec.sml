@@ -871,6 +871,33 @@ fun path_dependent_cache_key project input_key =
         "input_key=" ^ input_key,
         "root=" ^ canonical_path (project_artifact_root project)] ^ "\n")
 
+fun direct_project_theory_deps plan node =
+  List.filter
+    (fn dep => #kind (HolbuildBuildPlan.source_of dep) = HolbuildSourceIndex.TheoryScript)
+    (HolbuildBuildPlan.direct_project_deps plan node)
+
+fun parent_output_cache_lines plan node =
+  map
+    (fn dep =>
+        let val {data_path, ...} = theory_outputs dep
+        in String.concat ["parent=", HolbuildBuildPlan.package dep, ":",
+                          HolbuildBuildPlan.relative_path dep, ":",
+                          logical_name dep, "@", file_hash data_path]
+        end)
+    (direct_project_theory_deps plan node)
+
+fun parent_output_cache_key plan node input_key =
+  case parent_output_cache_lines plan node of
+      [] => input_key
+    | parent_lines =>
+        HolbuildHash.string_sha1
+          (String.concatWith "\n"
+             (["holbuild-parent-output-cache-v1", "input_key=" ^ input_key] @ parent_lines) ^ "\n")
+
+fun theory_cache_keys project plan node input_key =
+  let val context_key = parent_output_cache_key plan node input_key
+  in unique_strings [context_key, path_dependent_cache_key project context_key] end
+
 fun cache_warning_subject node =
   String.concat [logical_name node, " (", source_file node, ")"]
 
@@ -896,22 +923,26 @@ fun publish_cache_manifest root cache_key subject cache_replacements staged_sig 
       | NONE => write_text manifest_path manifest
   end
 
-fun publish_theory_cache project node input_key dat_replacements staged_sig staged_sml staged_dat mldeps =
+fun publish_theory_cache project plan node input_key dat_replacements staged_sig staged_sml staged_dat mldeps =
   let
     val root = cache_root ()
     val _ = HolbuildCache.ensure_layout root
     val template = FS.tmpName ()
     val cache_mldeps = List.filter (not o transient_stage_mldep) mldeps
-    val path_dependent = List.exists transient_stage_mldep mldeps andalso dat_mentions_stage_key input_key staged_dat
-    val cache_key = if path_dependent then path_dependent_cache_key project input_key else input_key
+    val context_key = parent_output_cache_key plan node input_key
+    val path_dependent = List.exists transient_stage_mldep mldeps andalso dat_mentions_stage_key context_key staged_dat
+    val cache_key = if path_dependent then path_dependent_cache_key project context_key else context_key
     fun cleanup () = FS.remove template handle OS.SysErr _ => ()
-    fun drop_stable_path_dependent () = remove_file (HolbuildCache.action_manifest root input_key)
+    fun drop_stale_manifest key = remove_file (HolbuildCache.action_manifest root key)
     val subject = cache_warning_subject node
     fun publish () = publish_cache_manifest root cache_key subject dat_replacements staged_sig staged_sml staged_dat cache_mldeps template
     fun skip_locked_publish () = ()
   in
-    ((if path_dependent then
-        HolbuildCache.with_action_publish_lock root input_key drop_stable_path_dependent skip_locked_publish
+    ((if cache_key <> input_key then
+        HolbuildCache.with_action_publish_lock root input_key (fn () => drop_stale_manifest input_key) skip_locked_publish
+      else ());
+     (if cache_key <> context_key then
+        HolbuildCache.with_action_publish_lock root context_key (fn () => drop_stale_manifest context_key) skip_locked_publish
       else ());
      HolbuildCache.with_action_publish_lock root cache_key publish skip_locked_publish;
      cleanup ())
@@ -1048,8 +1079,8 @@ fun materialize_theory_cache_key project plan cache_key node =
                false)
 
 fun materialize_theory_cache _ project plan input_key node =
-  materialize_theory_cache_key project plan input_key node orelse
-  materialize_theory_cache_key project plan (path_dependent_cache_key project input_key) node
+  List.exists (fn cache_key => materialize_theory_cache_key project plan cache_key node)
+              (theory_cache_keys project plan node input_key)
 
 fun metadata_path (project : HolbuildProject.t) node =
   let
@@ -1520,7 +1551,7 @@ fun build_theory cache_allowed policy tc project base_context plan keys toolchai
                                   generated_holdep_mldeps plan tc staged_sml)
     val _ =
       if cache_allowed then
-        publish_theory_cache project node input_key cache_replacements staged_sig staged_sml staged_dat mldeps
+        publish_theory_cache project plan node input_key cache_replacements staged_sig staged_sml staged_dat mldeps
       else ()
   in
     write_local_theory_manifests plan node mldeps;

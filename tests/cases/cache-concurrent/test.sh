@@ -89,6 +89,46 @@ for project in "${projects[@]}"; do
   require_file "$project/.holbuild/obj/src/ATheory.dat"
 done
 
+parent_sensitive_source=$tmpdir/parent-sensitive-source
+parent_sensitive_a1=$tmpdir/parent-sensitive-a1
+parent_sensitive_a2=$tmpdir/parent-sensitive-a2
+mkdir -p "$parent_sensitive_source/src" "$parent_sensitive_a1" "$parent_sensitive_a2"
+cat > "$parent_sensitive_source/holproject.toml" <<'TOML'
+[project]
+name = "parentsensitive"
+
+[build]
+members = ["src"]
+TOML
+cat > "$parent_sensitive_source/src/AScript.sml" <<'SML'
+Theory A
+Ancestors arithmetic
+
+Theorem add_one:
+  1 + 1 = 2
+Proof
+  simp[]
+QED
+
+val _ = export_theory();
+SML
+cat > "$parent_sensitive_source/src/BScript.sml" <<'SML'
+Theory B
+Ancestors A
+
+val _ = export_theory();
+SML
+
+(cd "$parent_sensitive_a1" && "$HOLBUILD_BIN" --source-dir "$parent_sensitive_source" --holdir "$HOLDIR" build BTheory) > "$tmpdir/parent-sensitive-a1.log" 2>&1
+(cd "$parent_sensitive_a2" && "$HOLBUILD_BIN" --source-dir "$parent_sensitive_source" --holdir "$HOLDIR" build BTheory) > "$tmpdir/parent-sensitive-a2.log" 2>&1
+if grep -q "cache entry already exists with different outputs" "$tmpdir/parent-sensitive-a2.log"; then
+  cat "$tmpdir/parent-sensitive-a2.log" >&2
+  echo "cache key ignored local parent theory output hash" >&2
+  exit 1
+fi
+require_file "$parent_sensitive_a1/.holbuild/obj/src/BTheory.dat"
+require_file "$parent_sensitive_a2/.holbuild/obj/src/BTheory.dat"
+
 manifest=$(find "$HOLBUILD_CACHE/actions" -mindepth 2 -maxdepth 2 -name manifest -print -quit)
 sig_hash=$(awk '/^blob sig / { print $3 }' "$manifest")
 dat_hash=$(awk '/^blob dat / { print $3 }' "$manifest")
