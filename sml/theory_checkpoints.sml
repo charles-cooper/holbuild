@@ -139,31 +139,52 @@ fun runtime_helper_path () =
       SOME path => path
     | NONE => OS.Path.concat(HolbuildRuntimePaths.source_root, "sml/goalfrag_runtime.sml")
 
+fun proof_ir_runtime_helper_path () =
+  case OS.Process.getEnv "HOLBUILD_PROOF_IR_RUNTIME" of
+      SOME path => path
+    | NONE => OS.Path.concat(HolbuildRuntimePaths.source_root, "sml/proof_ir_runtime.sml")
+
 fun goalfrag_plan_helper_path () =
   OS.Path.concat(HolbuildRuntimePaths.source_root, "sml/goalfrag_plan.sml")
 
-fun runtime_install_lines {checkpoint_enabled, tactic_timeout, timeout_marker, plan_theorem, trace_all, plan_only_marker} =
-  ["use " ^ HolbuildToolchain.sml_string (goalfrag_plan_helper_path ()) ^ ";",
-   "use " ^ HolbuildToolchain.sml_string (runtime_helper_path ()) ^ ";",
-   "val _ = HolbuildGoalfragRuntime.install {checkpoint_enabled = " ^
-     (if checkpoint_enabled then "true" else "false") ^
-     ", tactic_timeout = " ^ option_real_sml tactic_timeout ^
-     ", timeout_marker = " ^ option_string_sml timeout_marker ^
-     ", plan_theorem = " ^ option_string_sml plan_theorem ^
-     ", trace_all = " ^ (if trace_all then "true" else "false") ^
-     ", plan_only_marker = " ^ option_string_sml plan_only_marker ^ "};",
-   "val holbuild_begin_theorem = HolbuildGoalfragRuntime.begin_theorem;",
-   "val holbuild_save_theorem_context = HolbuildGoalfragRuntime.save_theorem_context;"]
+fun proof_ir_helper_path () =
+  OS.Path.concat(HolbuildRuntimePaths.source_root, "sml/proof_ir.sml")
+
+fun runtime_install_lines {checkpoint_enabled, tactic_timeout, timeout_marker, plan_theorem, trace_all, plan_only_marker, new_ir} =
+  if new_ir then
+    ["use " ^ HolbuildToolchain.sml_string (proof_ir_helper_path ()) ^ ";",
+     "use " ^ HolbuildToolchain.sml_string (proof_ir_runtime_helper_path ()) ^ ";",
+     "val _ = HolbuildProofIrRuntime.install {checkpoint_enabled = " ^
+       (if checkpoint_enabled then "true" else "false") ^
+       ", tactic_timeout = " ^ option_real_sml tactic_timeout ^
+       ", timeout_marker = " ^ option_string_sml timeout_marker ^
+       ", plan_theorem = " ^ option_string_sml plan_theorem ^
+       ", trace_all = " ^ (if trace_all then "true" else "false") ^
+       ", plan_only_marker = " ^ option_string_sml plan_only_marker ^ "};",
+     "val holbuild_begin_theorem = HolbuildProofIrRuntime.begin_theorem;",
+     "val holbuild_save_theorem_context = HolbuildProofIrRuntime.save_theorem_context;"]
+  else
+    ["use " ^ HolbuildToolchain.sml_string (goalfrag_plan_helper_path ()) ^ ";",
+     "use " ^ HolbuildToolchain.sml_string (runtime_helper_path ()) ^ ";",
+     "val _ = HolbuildGoalfragRuntime.install {checkpoint_enabled = " ^
+       (if checkpoint_enabled then "true" else "false") ^
+       ", tactic_timeout = " ^ option_real_sml tactic_timeout ^
+       ", timeout_marker = " ^ option_string_sml timeout_marker ^
+       ", plan_theorem = " ^ option_string_sml plan_theorem ^
+       ", trace_all = " ^ (if trace_all then "true" else "false") ^
+       ", plan_only_marker = " ^ option_string_sml plan_only_marker ^ "};",
+     "val holbuild_begin_theorem = HolbuildGoalfragRuntime.begin_theorem;",
+     "val holbuild_save_theorem_context = HolbuildGoalfragRuntime.save_theorem_context;"]
 
 
 fun runtime_prelude _ [] = ""
   | runtime_prelude config _ = runtime_lines (runtime_load_lines @ runtime_install_lines config)
 
-fun instrument ({source, start_offset, checkpoints, save_checkpoints, tactic_timeout, timeout_marker, plan_theorem, trace_all, plan_only_marker} :
+fun instrument ({source, start_offset, checkpoints, save_checkpoints, tactic_timeout, timeout_marker, plan_theorem, trace_all, plan_only_marker, new_ir} :
                 {source : string, start_offset : int, checkpoints : checkpoint list,
                  save_checkpoints : bool, tactic_timeout : real option,
                  timeout_marker : string option, plan_theorem : string option,
-                 trace_all : bool, plan_only_marker : string option}) =
+                 trace_all : bool, plan_only_marker : string option, new_ir : bool}) =
   let
     val n = size source
     fun source_slice i j = String.substring(source, i, j - i)
@@ -188,7 +209,8 @@ fun instrument ({source, start_offset, checkpoints, save_checkpoints, tactic_tim
                      timeout_marker = timeout_marker,
                      plan_theorem = plan_theorem,
                      trace_all = trace_all,
-                     plan_only_marker = plan_only_marker}
+                     plan_only_marker = plan_only_marker,
+                     new_ir = new_ir}
                     active_checkpoints ^
     loop start_offset checkpoints []
   end

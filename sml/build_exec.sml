@@ -1100,15 +1100,15 @@ fun theorem_header_hash source theorem_start tactic_start =
 fun pre_theorem_hash source theorem_start =
   HolbuildToolchain.hash_text (String.substring(source, 0, theorem_start))
 
-fun failed_prefix_ok deps_key safe_name pre_hash header_hash =
+fun failed_prefix_ok new_ir deps_key safe_name pre_hash header_hash =
   checkpoint_ok_text "failed_prefix"
     [("deps_key", deps_key),
      ("safe_name", safe_name),
      ("pre_theorem_key", pre_hash),
      ("header_key", header_hash),
-     ("failure_diagnostic_key", "failed_fragment_span_v6")]
+     ("failure_diagnostic_key", if new_ir then "proof_ir_v1" else "failed_fragment_span_v6")]
 
-fun theorem_checkpoint_specs project node deps_key source boundaries =
+fun theorem_checkpoint_specs new_ir project node deps_key source boundaries =
   map (fn {kind, name, safe_name, theorem_start, theorem_stop, boundary, tactic_start,
            tactic_end, tactic_text, has_proof_attrs, prefix_hash} =>
           let
@@ -1128,7 +1128,7 @@ fun theorem_checkpoint_specs project node deps_key source boundaries =
              end_of_proof_path = theorem_end_of_proof_path project node deps_key prefix_hash safe_name,
              end_of_proof_ok = theorem_checkpoint_ok "end_of_proof" deps_key prefix_hash checkpoint_key,
              failed_prefix_path = theorem_failed_prefix_path project node deps_key safe_name,
-             failed_prefix_ok = failed_prefix_ok deps_key safe_name pre_hash header_hash,
+             failed_prefix_ok = failed_prefix_ok new_ir deps_key safe_name pre_hash header_hash,
              deps_key = deps_key,
              checkpoint_key = checkpoint_key}
           end)
@@ -1236,16 +1236,17 @@ fun best_failed_prefix_checkpoint checkpoints =
       [] => NONE
     | first :: rest => SOME (List.foldl later_failed_prefix_candidate first rest)
 
-type build_options = {use_cache : bool, force : bool, skip_checkpoints : bool, goalfrag : bool, tactic_timeout : real option, goalfrag_plan : string option, goalfrag_trace : bool}
+type build_options = {use_cache : bool, force : bool, skip_checkpoints : bool, goalfrag : bool, new_ir : bool, tactic_timeout : real option, goalfrag_plan : string option, goalfrag_trace : bool}
 
 datatype checkpoint_policy =
-  CheckpointPolicy of {checkpoint : bool, goalfrag : bool, tactic_timeout : real option, goalfrag_plan : string option, goalfrag_trace : bool}
+  CheckpointPolicy of {checkpoint : bool, goalfrag : bool, new_ir : bool, tactic_timeout : real option, goalfrag_plan : string option, goalfrag_trace : bool}
 
 val no_checkpoint_policy =
-  CheckpointPolicy {checkpoint = false, goalfrag = false, tactic_timeout = NONE, goalfrag_plan = NONE, goalfrag_trace = false}
+  CheckpointPolicy {checkpoint = false, goalfrag = false, new_ir = false, tactic_timeout = NONE, goalfrag_plan = NONE, goalfrag_trace = false}
 
 fun checkpoint_enabled (CheckpointPolicy {checkpoint, ...}) = checkpoint
 fun goalfrag_enabled (CheckpointPolicy {goalfrag, ...}) = goalfrag
+fun proof_ir_enabled (CheckpointPolicy {new_ir, ...}) = new_ir
 fun tactic_timeout (CheckpointPolicy {tactic_timeout, ...}) = tactic_timeout
 fun goalfrag_plan (CheckpointPolicy {goalfrag_plan, ...}) = goalfrag_plan
 fun goalfrag_trace (CheckpointPolicy {goalfrag_trace, ...}) = goalfrag_trace
@@ -1282,7 +1283,8 @@ fun instrumented_source policy timeout_marker plan_only_marker source_text start
        timeout_marker = timeout_marker,
        plan_theorem = goalfrag_plan policy,
        trace_all = goalfrag_trace policy,
-       plan_only_marker = plan_only_marker}
+       plan_only_marker = plan_only_marker,
+       new_ir = proof_ir_enabled policy}
   else plain_source_from_checkpoint source_text start_offset
 
 fun replay_candidate project node checkpoints =
@@ -1301,14 +1303,15 @@ fun failed_prefix_resume_source policy timeout_marker plan_only_marker source ch
        timeout_marker = SOME timeout_marker,
        plan_theorem = goalfrag_plan policy,
        trace_all = goalfrag_trace policy,
-       plan_only_marker = plan_only_marker}
+       plan_only_marker = plan_only_marker,
+       new_ir = proof_ir_enabled policy}
     val prelude = HolbuildTheoryCheckpoints.runtime_prelude runtime_config [checkpoint]
     val theorem_binding = #safe_name checkpoint
     val save_line =
       String.concat
         ["val ", theorem_binding, " = Theory.save_thm(",
          HolbuildToolchain.sml_string (#name checkpoint), ", ",
-         "HolbuildGoalfragRuntime.finish_failed_prefix ",
+         (if proof_ir_enabled policy then "HolbuildProofIrRuntime.finish_failed_prefix " else "HolbuildGoalfragRuntime.finish_failed_prefix "),
          HolbuildToolchain.sml_string (#name checkpoint), " ",
          HolbuildToolchain.sml_string prefix_text, " ",
          Int.toString step_count, " ",
@@ -1323,7 +1326,8 @@ fun failed_prefix_resume_source policy timeout_marker plan_only_marker source ch
          timeout_marker = SOME timeout_marker,
          plan_theorem = goalfrag_plan policy,
          trace_all = goalfrag_trace policy,
-         plan_only_marker = plan_only_marker}
+         plan_only_marker = plan_only_marker,
+         new_ir = proof_ir_enabled policy}
   in
     prelude ^ save_line ^ suffix
   end
@@ -1701,9 +1705,10 @@ fun root_package_node project node =
 fun effective_tactic_timeout goalfrag root_package tactic_timeout =
   if goalfrag andalso root_package then tactic_timeout else NONE
 
-fun checkpoint_policy_for_node ({skip_checkpoints, goalfrag, tactic_timeout, goalfrag_plan, goalfrag_trace, ...} : build_options) project node =
+fun checkpoint_policy_for_node ({skip_checkpoints, goalfrag, new_ir, tactic_timeout, goalfrag_plan, goalfrag_trace, ...} : build_options) project node =
   CheckpointPolicy {checkpoint = not skip_checkpoints,
                     goalfrag = goalfrag,
+                    new_ir = new_ir,
                     tactic_timeout = effective_tactic_timeout goalfrag (root_package_node project node) tactic_timeout,
                     goalfrag_plan = if goalfrag then goalfrag_plan else NONE,
                     goalfrag_trace = goalfrag andalso goalfrag_trace}
@@ -1721,7 +1726,7 @@ fun theory_checkpoints_for_node policy project plan keys toolchain_key node sour
       val deps_key = dependency_context_key toolchain_key plan keys node
       val boundaries = discover_theorem_boundaries (source_file node) source_text
     in
-      theorem_checkpoint_specs project node deps_key source_text boundaries
+      theorem_checkpoint_specs (proof_ir_enabled policy) project node deps_key source_text boundaries
     end
     handle Error msg =>
       (warn ("could not parse theorem boundaries for " ^ logical_name node ^

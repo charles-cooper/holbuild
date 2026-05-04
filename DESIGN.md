@@ -608,14 +608,19 @@ context.
 
 When goalfrag is enabled, holbuild applies a tactic timeout to each goalfrag
 step, and to the conservative whole-tactic path used for attributed/opaque proof
-cases. The CLI default is 2.5 seconds per tactic step for the root package;
+cases. `--new-ir` is an experimental alternate theorem instrumentation engine:
+it still uses HOLSource parser recovery, but lowers `HOLSourceAST.exp` directly to
+a holbuild proof IR instead of using `TacticParse`/`goalFrag` as the executable
+semantics. Default builds continue to use the existing GoalFrag path until the
+new runtime boundaries are stabilized. The CLI default is 2.5 seconds per tactic step for the root package;
 `--tactic-timeout SECONDS` changes that root-package timeout, and
 `--tactic-timeout 0` disables it. Dependency package builds use no tactic timeout,
 so a consumer's proof-debug timeout does not make dependency builds fail.
 `goalfrag-plan THEORY:THEOREM` and `--goalfrag-trace` are debugging/inspection paths.
 `holbuild goalfrag-plan THEORY:THEOREM` is static inspection: it discovers sources,
 finds the named theorem in the named theory script, pretty-prints the final
-executable GoalFrag step IR, and exits without acquiring the project build lock,
+executable GoalFrag step IR (or `goalfrag-plan --new-ir THEORY:THEOREM` for the
+experimental proof IR), and exits without acquiring the project build lock,
 planning dependencies, consulting cache/up-to-date state, or executing the proof.
 The pretty form must remain faithful to the IR: each
 numbered line is one executable tactic/list-tactic/GoalFrag operation; indentation
@@ -632,8 +637,9 @@ open-goal counts. Use `--force` with trace when the artifact is already up to da
 and you need source execution; `--force` bypasses local up-to-date checks and
 global cache restore without disabling cache publication. Planning/tracing are not action-key inputs. Because
 timeouts, planning, and tracing only exist in the goalfrag runtime,
-`--skip-goalfrag --tactic-timeout ...`, `--skip-goalfrag --goalfrag-plan ...`, and
-`--skip-goalfrag --goalfrag-trace ...` are rejected instead of silently ignoring
+`--skip-goalfrag --new-ir ...`, `--skip-goalfrag --tactic-timeout ...`,
+`--skip-goalfrag --goalfrag-plan ...`, and `--skip-goalfrag --goalfrag-trace ...`
+are rejected instead of silently ignoring
 the request. Goalfrag, checkpoint creation, tactic timeout, planning, and tracing are execution/debug policy,
 not final artifact semantics. They must not be included in the final theory
 action key or local metadata comparison for `.uo/.ui/.dat`: switching

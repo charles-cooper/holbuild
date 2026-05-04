@@ -24,6 +24,38 @@ members = ["src"]
 TOML
 }
 
+run_new_ir_smoke_project() {
+  local project=$tmpdir/new-ir
+  make_project "$project"
+  cat > "$project/src/AScript.sml" <<'SML'
+open HolKernel Parse boolLib bossLib;
+val _ = new_theory "A";
+
+Theorem sequence_allgoals:
+  T /\ T
+Proof
+  CONJ_TAC >> ACCEPT_TAC TRUTH
+QED
+
+Theorem branch_then1:
+  T /\ T
+Proof
+  CONJ_TAC >- ACCEPT_TAC TRUTH >- ACCEPT_TAC TRUTH
+QED
+
+Theorem parser_recovery:
+  T
+Proof
+  ( ACCEPT_TAC TRUTH
+QED
+
+val _ = export_theory();
+SML
+  (cd "$project" && HOLBUILD_ECHO_CHILD_LOGS=1 "$HOLBUILD_BIN" --holdir "$HOLDIR" build --new-ir --skip-checkpoints --tactic-timeout 60) > "$tmpdir/new-ir.out" 2>&1
+  require_grep "parse error: expected closing parenthesis" "$tmpdir/new-ir.out"
+  require_file "$project/.holbuild/obj/src/ATheory.dat"
+}
+
 run_goalfrag_success_project() {
   local project=$tmpdir/success
   make_project "$project"
@@ -158,6 +190,7 @@ SML
   fi
 }
 
+run_new_ir_smoke_project
 run_goalfrag_success_project
 
 expect_both_fail first_empty_then 'Theorem first_empty_then:

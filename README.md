@@ -136,18 +136,22 @@ subcommand.
 disabling goalfrag proof execution. By default checkpoints may be created during
 a build but are removed after successful artifact/metadata writes.
 `--skip-goalfrag` opts out of modern theorem instrumentation.
+`--new-ir` is an experimental theorem instrumentation engine that parses tactic
+syntax from `HOLSourceAST` directly instead of using HOL `goalFrag`; it is hidden
+behind the flag until its runtime boundaries are stabilized.
 `--tactic-timeout SECONDS` sets the root-project per-tactic goalfrag timeout;
 the default is 2.5 seconds, and `0` disables the timeout. Dependency packages
 build with no tactic timeout. `goalfrag-plan THEORY:THEOREM` statically prints a
 faithful, pretty form of the executable GoalFrag step IR for one theorem and exits
-without building. Each numbered line is one executable tactic/list-tactic/GoalFrag
+without building; `goalfrag-plan --new-ir THEORY:THEOREM` prints the experimental
+proof-IR plan. Each numbered line is one executable tactic/list-tactic/GoalFrag
 operation; indentation and body text are formatting only. `--goalfrag-trace`
 runs a build, records runtime traces for all instrumented proofs in the child log,
 and prints the failed theorem's trace excerpt on failure. Use trace with `--force`
 when you need to force source execution for proof-performance/debug inspection.
 Combining `--skip-goalfrag` with
-`--tactic-timeout`, `--goalfrag-plan`, or `--goalfrag-trace` is an error because
-all three are implemented by the goalfrag runtime. Goalfrag/checkpoint/timeout
+`--new-ir`, `--tactic-timeout`, `--goalfrag-plan`, or `--goalfrag-trace` is an error because
+all four are implemented by the theorem instrumentation runtime. Goalfrag/checkpoint/timeout
 policy affects execution and diagnostics, not final theory artifact action keys. `--json` emits newline-delimited
 JSON status/message/error events for build output. `gc` removes stale project-local
 `.holbuild` stage/log/checkpoint residue and runs global cache GC using `$HOLBUILD_CACHE`,
