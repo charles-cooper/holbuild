@@ -707,6 +707,39 @@ else:
     raise SystemExit("missing underlined grouped failure source row")
 PY
 
+close_paren_failure_project=$tmpdir/close-paren-failure-project
+mkdir -p "$close_paren_failure_project/src"
+cp "$project/holproject.toml" "$close_paren_failure_project/holproject.toml"
+cat > "$close_paren_failure_project/src/AScript.sml" <<'SML'
+open HolKernel Parse boolLib bossLib;
+val _ = new_theory "A";
+Theorem close_paren_failure:
+  T /\ T
+Proof
+  CONJ_TAC
+  >- (
+    ALL_TAC
+  )
+  >- ACCEPT_TAC TRUTH
+QED
+val _ = export_theory();
+SML
+close_paren_failure_log=$tmpdir/close-paren-failure.log
+if (cd "$close_paren_failure_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$close_paren_failure_log" 2>&1; then
+  echo "expected close-paren branch proof to fail build" >&2
+  exit 1
+fi
+require_grep "fragment: close_paren" "$close_paren_failure_log"
+require_grep "source: .*AScript.sml:[89]:" "$close_paren_failure_log"
+python3 - <<PY
+from pathlib import Path
+text = Path("$close_paren_failure_log").read_text()
+if any(line.startswith(">") and "|   CONJ_TAC" in line for line in text.splitlines()):
+    raise SystemExit("close_paren source location fell back to proof start")
+if not any(line.startswith(">") and ("|   )" in line or "|     ALL_TAC" in line) for line in text.splitlines()):
+    raise SystemExit("close_paren source location did not point at failing branch close/body")
+PY
+
 same_fragment_project=$tmpdir/same-fragment-project
 mkdir -p "$same_fragment_project/src"
 cp "$project/holproject.toml" "$same_fragment_project/holproject.toml"
