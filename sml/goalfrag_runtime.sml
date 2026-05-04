@@ -177,6 +177,13 @@ fun failed_theorem_line () =
       NONE => ""
     | SOME name => "\nholbuild failed theorem: " ^ name
 
+val failed_step_end_ref = ref NONE : int option ref
+
+fun failed_step_end_line () =
+  case !failed_step_end_ref of
+      NONE => ""
+    | SOME end_pos => "\nholbuild failed fragment end: " ^ Int.toString end_pos
+
 fun print_goal_state label =
   let
     val goals = proofManagerLib.top_goals()
@@ -184,6 +191,7 @@ fun print_goal_state label =
     TextIO.output(TextIO.stdErr,
       String.concat ["\nholbuild goal state at failed fragment: ", label,
                      failed_theorem_line (),
+                     failed_step_end_line (),
                      "\nholbuild remaining goals: ", Int.toString (length goals), "\n",
                      "holbuild top goal:\n",
                      top_goal_text goals,
@@ -333,18 +341,24 @@ fun trace_goalfrag_after status elapsed index step' =
               " label=", display_label (step_label step'), "\n"]
 
 fun run_maybe_traced_step index step' =
-  if trace_enabled () then
-    let
-      val _ = trace_goalfrag_before index step'
-      val t0 = Time.now()
-      val result = (step step'; NONE) handle e => SOME e
-      val elapsed = seconds (t0, Time.now())
-    in
-      case result of
-          NONE => trace_goalfrag_after "ok" elapsed index step'
-        | SOME e => (trace_goalfrag_after "failed" elapsed index step'; raise e)
-    end
-  else step step'
+  let
+    val old_failed_step_end = !failed_step_end_ref
+    val _ = failed_step_end_ref := SOME (step_end step')
+    fun restore () = failed_step_end_ref := old_failed_step_end
+  in
+    if trace_enabled () then
+      let
+        val _ = trace_goalfrag_before index step'
+        val t0 = Time.now()
+        val result = (step step'; NONE) handle e => SOME e
+        val elapsed = seconds (t0, Time.now())
+      in
+        case result of
+            NONE => (trace_goalfrag_after "ok" elapsed index step'; restore ())
+          | SOME e => (trace_goalfrag_after "failed" elapsed index step'; restore (); raise e)
+      end
+    else (step step'; restore ())
+  end
 
 fun run_steps_from _ [] = ()
   | run_steps_from index (step' :: rest) =
