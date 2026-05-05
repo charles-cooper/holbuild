@@ -25,6 +25,7 @@ val active_tactic_text_ref = ref ""
 val successful_step_count_ref = ref 0
 val successful_prefix_end_ref = ref 0
 val failed_step_end_ref = ref NONE : int option ref
+val failed_step_span_ref = ref NONE : (int * int) option ref
 val failed_plan_position_ref = ref NONE : (int * string * string) option ref
 val compiled_tactic_ref = ref Tactical.ALL_TAC
 val compiled_list_tactic_ref = ref Tactical.ALL_LT
@@ -184,6 +185,13 @@ fun failed_step_end_line () =
       NONE => ""
     | SOME end_pos => "\nholbuild failed fragment end: " ^ Int.toString end_pos
 
+fun failed_step_span_line () =
+  case !failed_step_span_ref of
+      NONE => ""
+    | SOME (start_pos, end_pos) =>
+        String.concat ["\nholbuild failed fragment span: ", Int.toString start_pos,
+                       " ", Int.toString end_pos]
+
 fun display_label label =
   String.translate (fn #"\n" => "\\n" | #"\t" => "\\t" | c => String.str c) label
 
@@ -221,6 +229,7 @@ fun print_goal_state label =
       String.concat ["\nholbuild goal state at failed fragment: ", label,
                      failed_theorem_line (),
                      failed_step_end_line (),
+                     failed_step_span_line (),
                      failed_plan_position_line (),
                      "\nholbuild remaining goals: ", Int.toString (length goals), "\n",
                      "holbuild top goal:\n",
@@ -372,12 +381,16 @@ fun trace_after status elapsed index proof_step =
 fun run_maybe_traced_step index display_index proof_step =
   let
     val old_failed_step_end = !failed_step_end_ref
+    val old_failed_step_span = !failed_step_span_ref
     val old_failed_plan_position = !failed_plan_position_ref
     val _ = failed_step_end_ref := SOME (HolbuildProofIr.step_end proof_step)
+    val _ = failed_step_span_ref := SOME (HolbuildProofIr.step_start proof_step,
+                                          HolbuildProofIr.step_end proof_step)
     val _ = failed_plan_position_ref := SOME (display_index,
                                               HolbuildProofIr.step_kind proof_step,
                                               HolbuildProofIr.step_label proof_step)
     fun restore () = (failed_step_end_ref := old_failed_step_end;
+                      failed_step_span_ref := old_failed_step_span;
                       failed_plan_position_ref := old_failed_plan_position)
   in
     if trace_enabled () then
@@ -467,10 +480,14 @@ fun proof_ir_prove name end_path end_ok checkpoint_depth g tactic_text =
     case plan of
         [plain_step as HolbuildProofIr.StepPlain {label, ...}] =>
           let
+            val old_failed_step_span = !failed_step_span_ref
             val old_failed_plan_position = !failed_plan_position_ref
+            val _ = failed_step_span_ref := SOME (HolbuildProofIr.step_start plain_step,
+                                                  HolbuildProofIr.step_end plain_step)
             val _ = failed_plan_position_ref := SOME (0, HolbuildProofIr.step_kind plain_step, label)
             val result = TraceOk (atomic_prove label g (compile_tactic label (HolbuildProofIr.step_program plain_step)))
                          handle e => TraceError e
+            val _ = failed_step_span_ref := old_failed_step_span
             val _ = failed_plan_position_ref := old_failed_plan_position
           in
             case result of
@@ -586,6 +603,7 @@ fun install ({checkpoint_enabled, tactic_timeout, timeout_marker, plan_theorem, 
    theorem_info_ref := NONE;
    context_info_ref := NONE;
    failed_step_end_ref := NONE;
+   failed_step_span_ref := NONE;
    failed_plan_position_ref := NONE;
    failed_prefix_resume_active_ref := false;
    proving_with_proof_ir_ref := false;

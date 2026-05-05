@@ -113,12 +113,19 @@ and list_tactic =
   | LtAtomic of int * (int * int)
 
 datatype step =
-    StepTactic of {end_pos : int, label : string, program : string}
-  | StepList of {end_pos : int, label : string, program : string}
-  | StepChoice of {end_pos : int, label : string, program : string, alternatives : string list}
-  | StepListChoice of {end_pos : int, label : string, program : string, alternatives : string list}
-  | StepGentleThen1 of {end_pos : int, label : string, list_suffix : bool, first_program : string, second_program : string}
-  | StepPlain of {end_pos : int, label : string, program : string}
+    StepTactic of {start_pos : int, end_pos : int, label : string, program : string}
+  | StepList of {start_pos : int, end_pos : int, label : string, program : string}
+  | StepChoice of {start_pos : int, end_pos : int, label : string, program : string, alternatives : string list}
+  | StepListChoice of {start_pos : int, end_pos : int, label : string, program : string, alternatives : string list}
+  | StepGentleThen1 of {start_pos : int, end_pos : int, label : string, list_suffix : bool, first_program : string, second_program : string}
+  | StepPlain of {start_pos : int, end_pos : int, label : string, program : string}
+
+fun step_start (StepTactic {start_pos, ...}) = start_pos
+  | step_start (StepList {start_pos, ...}) = start_pos
+  | step_start (StepChoice {start_pos, ...}) = start_pos
+  | step_start (StepListChoice {start_pos, ...}) = start_pos
+  | step_start (StepGentleThen1 {start_pos, ...}) = start_pos
+  | step_start (StepPlain {start_pos, ...}) = start_pos
 
 fun step_end (StepTactic {end_pos, ...}) = end_pos
   | step_end (StepList {end_pos, ...}) = end_pos
@@ -499,34 +506,37 @@ fun tactic_label source (TacThen []) = "ALL_TAC"
   | tactic_label source tactic = source_text source (tactic_span tactic)
 
 fun tactic_step source tactic =
-  StepTactic {end_pos = tactic_end tactic,
-              label = tactic_label source tactic,
-              program = tactic_program source tactic}
+  let val sp = tactic_span tactic
+  in
+    StepTactic {start_pos = #1 sp, end_pos = #2 sp,
+                label = tactic_label source tactic,
+                program = tactic_program source tactic}
+  end
 
-fun list_step source label_end label program =
-  StepList {end_pos = label_end, label = label, program = program}
+fun list_step sp label program =
+  StepList {start_pos = #1 sp, end_pos = #2 sp, label = label, program = program}
 
-fun choice_step end_pos label program alternatives =
-  StepChoice {end_pos = end_pos, label = label, program = program, alternatives = alternatives}
+fun choice_step sp label program alternatives =
+  StepChoice {start_pos = #1 sp, end_pos = #2 sp, label = label, program = program, alternatives = alternatives}
 
-fun list_choice_step end_pos label program alternatives =
-  StepListChoice {end_pos = end_pos, label = label, program = program, alternatives = alternatives}
+fun list_choice_step sp label program alternatives =
+  StepListChoice {start_pos = #1 sp, end_pos = #2 sp, label = label, program = program, alternatives = alternatives}
 
-fun gentle_then1_step end_pos label list_suffix first_program second_program =
-  StepGentleThen1 {end_pos = end_pos, label = label, list_suffix = list_suffix,
+fun gentle_then1_step sp label list_suffix first_program second_program =
+  StepGentleThen1 {start_pos = #1 sp, end_pos = #2 sp, label = label, list_suffix = list_suffix,
                    first_program = first_program, second_program = second_program}
 
 fun allgoals_step source tactic =
   let val label = ">> " ^ tactic_label source tactic
-  in list_step source (tactic_end tactic) label ("Tactical.ALLGOALS(" ^ tactic_program source tactic ^ ")") end
+  in list_step (tactic_span tactic) label ("Tactical.ALLGOALS(" ^ tactic_program source tactic ^ ")") end
 
 fun allgoals_choice_step source label tactic alternatives =
-  list_choice_step (tactic_end tactic) label ("Tactical.ALLGOALS(" ^ tactic_program source tactic ^ ")") alternatives
+  list_choice_step (tactic_span tactic) label ("Tactical.ALLGOALS(" ^ tactic_program source tactic ^ ")") alternatives
 
 fun suffices_tactic_program source q = "Q_TAC SUFF_TAC " ^ source_text source q
 
 fun suffices_branch_step source q rhs list_suffix =
-  gentle_then1_step (tactic_end rhs) ("  >- " ^ tactic_label source rhs) list_suffix
+  gentle_then1_step (tactic_span rhs) ("  >- " ^ tactic_label source rhs) list_suffix
     (suffices_tactic_program source q)
     ("Tactical.THEN(" ^ tactic_program source rhs ^ ", Tactical.NO_TAC)")
 
@@ -547,85 +557,85 @@ fun plan_tactic source tactic =
     | TacThen (first :: rest) => plan_tactic source first @ List.concat (map (suffix_steps source) rest)
     | TacThen1 (lhs, rhs) =>
         plan_tactic source lhs @
-        [list_step source (tactic_end rhs) (">- " ^ source_text source (tactic_span rhs))
+        [list_step (tactic_span rhs) (">- " ^ source_text source (tactic_span rhs))
            ("Tactical.NTH_GOAL (Tactical.THEN(" ^ tactic_program source rhs ^ ", Tactical.NO_TAC)) 1")]
     | TacThenL (lhs, branches) =>
         plan_tactic source lhs @
-        [list_step source (tactic_end tactic) ">| [...]"
+        [list_step (tactic_span tactic) ">| [...]"
            ("Tactical.NULL_OK_LT (Tactical.TACS_TO_LT [" ^ String.concatWith ", " (map (tactic_program source) branches) ^ "])")]
     | TacThenLT (lhs, lt) => plan_tactic source lhs @ plan_list_tactic source ">>>" lt
-    | TacOrelse xs => [choice_step (tactic_end tactic) "ORELSE" (tactic_program source tactic) (map (tactic_label source) xs)]
-    | TacTry (_, t) => [choice_step (tactic_end tactic) "TRY" (tactic_program source tactic) [tactic_label source t, "ALL_TAC"]]
-    | TacFirst (_, xs) => [choice_step (tactic_end tactic) "FIRST" (tactic_program source tactic) (map (tactic_label source) xs)]
-    | TacFirstProve (_, xs) => [choice_step (tactic_end tactic) "FIRST_PROVE" (tactic_program source tactic) (map (tactic_label source) xs)]
-    | TacMapFirst (_, xs) => [choice_step (tactic_end tactic) "FIRST" (tactic_program source tactic) (map (tactic_label source) xs)]
+    | TacOrelse xs => [choice_step (tactic_span tactic) "ORELSE" (tactic_program source tactic) (map (tactic_label source) xs)]
+    | TacTry (_, t) => [choice_step (tactic_span tactic) "TRY" (tactic_program source tactic) [tactic_label source t, "ALL_TAC"]]
+    | TacFirst (_, xs) => [choice_step (tactic_span tactic) "FIRST" (tactic_program source tactic) (map (tactic_label source) xs)]
+    | TacFirstProve (_, xs) => [choice_step (tactic_span tactic) "FIRST_PROVE" (tactic_program source tactic) (map (tactic_label source) xs)]
+    | TacMapFirst (_, xs) => [choice_step (tactic_span tactic) "FIRST" (tactic_program source tactic) (map (tactic_label source) xs)]
     | TacSufficesBy (q, rhs) =>
         [suffices_branch_step source q rhs false]
     | TacRepairGroup (_, inner) => plan_tactic source inner
     | _ => [tactic_step source tactic]
 and plan_list_tactic source prefix lt =
   case lt of
-      LtThenLT [] => [list_step source 0 (">> list_tac ALL_LT") (list_tactic_program source lt)]
+      LtThenLT [] => [list_step (list_tactic_span lt) (">> list_tac ALL_LT") (list_tactic_program source lt)]
     | LtThenLT xs => List.concat (map (plan_list_tactic source prefix) xs)
     | LtTacsToLT ts =>
-        [list_step source (list_tactic_end lt)
+        [list_step (list_tactic_span lt)
            (">> list_tac TACS_TO_LT [" ^ String.concatWith ", " (map (tactic_label source) ts) ^ "]")
            (list_tactic_program source lt)]
     | LtAllGoals t =>
-        [list_step source (list_tactic_end lt)
+        [list_step (list_tactic_span lt)
            (">> list_tac ALLGOALS (" ^ tactic_label source t ^ ")")
            (list_tactic_program source lt)]
     | LtNthGoal (t, n) =>
-        [list_step source (list_tactic_end lt)
+        [list_step (list_tactic_span lt)
            (">> list_tac NTH_GOAL (" ^ tactic_label source t ^ ") " ^ source_text source n)
            (list_tactic_program source lt)]
     | LtLastGoal t =>
-        [list_step source (list_tactic_end lt)
+        [list_step (list_tactic_span lt)
            (">> list_tac LASTGOAL (" ^ tactic_label source t ^ ")")
            (list_tactic_program source lt)]
     | LtHeadGoal t =>
-        [list_step source (list_tactic_end lt)
+        [list_step (list_tactic_span lt)
            (">> list_tac HEADGOAL (" ^ tactic_label source t ^ ")")
            (list_tactic_program source lt)]
     | LtSplit (n, a, b) =>
-        [list_step source (list_tactic_end lt)
+        [list_step (list_tactic_span lt)
            (">> list_tac SPLIT_LT " ^ source_text source n ^ " (" ^ list_tactic_label source a ^ ", " ^ list_tactic_label source b ^ ")")
            (list_tactic_program source lt)]
     | LtFirstLT t =>
-        [list_step source (list_tactic_end lt)
+        [list_step (list_tactic_span lt)
            (">> list_tac FIRST_LT " ^ tactic_label source t)
            (list_tactic_program source lt)]
     | LtUnary _ =>
-        [list_step source (list_tactic_end lt) (">> list_tac " ^ list_tactic_label source lt) (list_tactic_program source lt)]
+        [list_step (list_tactic_span lt) (">> list_tac " ^ list_tactic_label source lt) (list_tactic_program source lt)]
     | LtGenValidate _ =>
-        [list_step source (list_tactic_end lt) (">> list_tac " ^ list_tactic_label source lt) (list_tactic_program source lt)]
+        [list_step (list_tactic_span lt) (">> list_tac " ^ list_tactic_label source lt) (list_tactic_program source lt)]
     | LtTryAll _ =>
-        [list_step source (list_tactic_end lt) (">> list_tac " ^ list_tactic_label source lt) (list_tactic_program source lt)]
+        [list_step (list_tactic_span lt) (">> list_tac " ^ list_tactic_label source lt) (list_tactic_program source lt)]
     | LtSelect _ =>
-        [list_step source (list_tactic_end lt) (">> list_tac " ^ list_tactic_label source lt) (list_tactic_program source lt)]
+        [list_step (list_tactic_span lt) (">> list_tac " ^ list_tactic_label source lt) (list_tactic_program source lt)]
     | LtNullOk _ =>
-        [list_step source (list_tactic_end lt) (">> list_tac " ^ list_tactic_label source lt) (list_tactic_program source lt)]
+        [list_step (list_tactic_span lt) (">> list_tac " ^ list_tactic_label source lt) (list_tactic_program source lt)]
     | LtRotate _ =>
-        [list_step source (list_tactic_end lt) (">> list_tac " ^ list_tactic_label source lt) (list_tactic_program source lt)]
+        [list_step (list_tactic_span lt) (">> list_tac " ^ list_tactic_label source lt) (list_tactic_program source lt)]
     | LtReverse _ =>
-        [list_step source (list_tactic_end lt) (">> list_tac REVERSE_LT") (list_tactic_program source lt)]
+        [list_step (list_tactic_span lt) (">> list_tac REVERSE_LT") (list_tactic_program source lt)]
     | LtTry _ =>
-        [list_step source (list_tactic_end lt) (">> list_tac " ^ list_tactic_label source lt) (list_tactic_program source lt)]
+        [list_step (list_tactic_span lt) (">> list_tac " ^ list_tactic_label source lt) (list_tactic_program source lt)]
     | LtRepeat _ =>
-        [list_step source (list_tactic_end lt) (">> list_tac " ^ list_tactic_label source lt) (list_tactic_program source lt)]
+        [list_step (list_tactic_span lt) (">> list_tac " ^ list_tactic_label source lt) (list_tactic_program source lt)]
     | LtOrelse xs =>
-        [list_choice_step (list_tactic_end lt) (">> list_tac ORELSE_LT") (list_tactic_program source lt) (map (list_tactic_label source) xs)]
-    | LtSelectGoal sp => [list_step source (list_tactic_end lt) (">> list_tac Q.SELECT_GOAL_LT " ^ source_text source sp) (list_tactic_program source lt)]
-    | LtSelectGoals sp => [list_step source (list_tactic_end lt) (">> list_tac Q.SELECT_GOALS_LT " ^ source_text source sp) (list_tactic_program source lt)]
+        [list_choice_step (list_tactic_span lt) (">> list_tac ORELSE_LT") (list_tactic_program source lt) (map (list_tactic_label source) xs)]
+    | LtSelectGoal sp => [list_step (list_tactic_span lt) (">> list_tac Q.SELECT_GOAL_LT " ^ source_text source sp) (list_tactic_program source lt)]
+    | LtSelectGoals sp => [list_step (list_tactic_span lt) (">> list_tac Q.SELECT_GOALS_LT " ^ source_text source sp) (list_tactic_program source lt)]
     | LtQSelectThen (pats, body) =>
-        [list_step source (list_tactic_end lt)
+        [list_step (list_tactic_span lt)
            (">> list_tac Q.SELECT_GOALS_LT_THEN1 " ^ source_text source pats ^ " (" ^ tactic_label source body ^ ")")
            (list_tactic_program source lt)]
     | LtSelectThen (selector, body) =>
-        [list_step source (list_tactic_end lt)
+        [list_step (list_tactic_span lt)
            (">> list_tac SELECT_LT_THEN (" ^ tactic_label source selector ^ ") (" ^ tactic_label source body ^ ")")
            (list_tactic_program source lt)]
-    | _ => [list_step source (list_tactic_end lt) (prefix ^ " " ^ source_text source (list_tactic_span lt)) (list_tactic_program source lt)]
+    | _ => [list_step (list_tactic_span lt) (prefix ^ " " ^ source_text source (list_tactic_span lt)) (list_tactic_program source lt)]
 and list_tactic_label source lt =
   case lt of
       LtTacsToLT ts => "TACS_TO_LT [" ^ String.concatWith ", " (map (tactic_label source) ts) ^ "]"
@@ -691,7 +701,7 @@ fun steps source =
   let val exp = parse_tactic_expr source
   in
     if unsafe_then1_chain source exp then
-      [StepPlain {end_pos = size source, label = source, program = tactic_program source (parse_tactic_ast exp)}]
+      [StepPlain {start_pos = 0, end_pos = size source, label = source, program = tactic_program source (parse_tactic_ast exp)}]
     else plan_tactic source (parse_tactic_ast exp)
   end
 

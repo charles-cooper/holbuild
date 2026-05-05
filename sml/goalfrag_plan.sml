@@ -2,14 +2,23 @@ structure HolbuildGoalfragPlan =
 struct
 
 datatype step =
-    StepOpen of {end_pos : int, label : string}
-  | StepMid of {end_pos : int, label : string}
-  | StepClose of {end_pos : int, label : string}
-  | StepExpand of {end_pos : int, label : string}
-  | StepPlain of {end_pos : int, label : string}
-  | StepExpandList of {end_pos : int, label : string}
-  | StepSelect of {end_pos : int, label : string}
-  | StepSelects of {end_pos : int, label : string}
+    StepOpen of {start_pos : int, end_pos : int, label : string}
+  | StepMid of {start_pos : int, end_pos : int, label : string}
+  | StepClose of {start_pos : int, end_pos : int, label : string}
+  | StepExpand of {start_pos : int, end_pos : int, label : string}
+  | StepPlain of {start_pos : int, end_pos : int, label : string}
+  | StepExpandList of {start_pos : int, end_pos : int, label : string}
+  | StepSelect of {start_pos : int, end_pos : int, label : string}
+  | StepSelects of {start_pos : int, end_pos : int, label : string}
+
+fun step_start (StepOpen {start_pos, ...}) = start_pos
+  | step_start (StepMid {start_pos, ...}) = start_pos
+  | step_start (StepClose {start_pos, ...}) = start_pos
+  | step_start (StepExpand {start_pos, ...}) = start_pos
+  | step_start (StepPlain {start_pos, ...}) = start_pos
+  | step_start (StepExpandList {start_pos, ...}) = start_pos
+  | step_start (StepSelect {start_pos, ...}) = start_pos
+  | step_start (StepSelects {start_pos, ...}) = start_pos
 
 fun step_end (StepOpen {end_pos, ...}) = end_pos
   | step_end (StepMid {end_pos, ...}) = end_pos
@@ -336,14 +345,14 @@ fun collect_then1_steps steps =
   let
     fun go [] _ _ = NONE
       | go (StepClose _ :: rest) acc last = SOME (join_tactic (rev acc), last, rest)
-      | go (StepExpand {end_pos, label} :: rest) acc _ = go rest (label :: acc) end_pos
+      | go (StepExpand {end_pos, label, ...} :: rest) acc _ = go rest (label :: acc) end_pos
       | go _ _ _ = NONE
   in go steps [] 0 end
 
 fun merge_reverse_steps [] acc = rev acc
-  | merge_reverse_steps (StepExpandList {label = "Tactical.REVERSE_LT", ...} :: rest)
-                        (StepExpand {end_pos, label} :: acc) =
-      merge_reverse_steps rest (StepExpand {end_pos = end_pos, label = "Tactical.REVERSE (" ^ label ^ ")"} :: acc)
+  | merge_reverse_steps (StepExpandList {label = "Tactical.REVERSE_LT", end_pos = reverse_end, ...} :: rest)
+                        (StepExpand {start_pos, label, ...} :: acc) =
+      merge_reverse_steps rest (StepExpand {start_pos = start_pos, end_pos = reverse_end, label = "Tactical.REVERSE (" ^ label ^ ")"} :: acc)
   | merge_reverse_steps (step :: rest) acc = merge_reverse_steps rest (step :: acc)
 
 fun drop_prefix prefix text =
@@ -362,7 +371,7 @@ fun merge_select_then1_steps [] acc = rev acc
       (case collect_then1_steps rest of
            SOME (tacText, tacEnd, StepClose _ :: rest') =>
              merge_select_then1_steps rest'
-               (StepExpandList {end_pos = tacEnd,
+               (StepExpandList {start_pos = step_start select_open, end_pos = tacEnd,
                                 label = "Q.SELECT_GOALS_LT_THEN1 " ^ rename_pattern pattern ^ " (" ^ tacText ^ ")"} :: acc)
          | _ => merge_select_then1_steps (pattern_step :: next_step :: body_open :: rest) (select_open :: acc))
   | merge_select_then1_steps (step :: rest) acc = merge_select_then1_steps rest (step :: acc)
@@ -376,36 +385,37 @@ fun merge_select_steps [] acc = rev acc
                 if is_select_step step then collect rest' (step :: sels) else (rev sels, step :: rest')
           val (sels, afterSels) = collect rest [selectStep]
           val selectPrefix = String.concatWith " >>~ " (map select_prefix_step sels)
+          val selectStart = step_start selectStep
           val selectEnd = step_end (List.last sels)
-          fun consume (StepOpen {label = "open_then1", ...} :: StepExpand {end_pos, label} :: StepClose _ :: rest') =
+          fun consume (StepOpen {label = "open_then1", ...} :: StepExpand {end_pos, label, ...} :: StepClose _ :: rest') =
                 SOME (selectPrefix ^ " >- " ^ label, end_pos, rest')
-            | consume (StepOpen {label = "open_first", ...} :: StepExpand {end_pos, label} :: StepClose _ :: rest') =
+            | consume (StepOpen {label = "open_first", ...} :: StepExpand {end_pos, label, ...} :: StepClose _ :: rest') =
                 SOME (selectPrefix ^ " >- " ^ label, end_pos, rest')
             | consume _ = NONE
         in
           case consume afterSels of
-              SOME (text, tacEnd, rest') => merge_select_steps rest' (StepExpandList {end_pos = tacEnd, label = text} :: acc)
-            | NONE => merge_select_steps afterSels (StepExpandList {end_pos = selectEnd, label = selectPrefix} :: acc)
+              SOME (text, tacEnd, rest') => merge_select_steps rest' (StepExpandList {start_pos = selectStart, end_pos = tacEnd, label = text} :: acc)
+            | NONE => merge_select_steps afterSels (StepExpandList {start_pos = selectStart, end_pos = selectEnd, label = selectPrefix} :: acc)
         end
       else merge_select_steps rest (selectStep :: acc)
 
 fun step_of_frag end_pos label (TacticParse.FAtom (TacticParse.LSelectGoal _)) =
-      SOME (StepSelect {end_pos = end_pos, label = label})
+      SOME (StepSelect {start_pos = end_pos, end_pos = end_pos, label = label})
   | step_of_frag end_pos label (TacticParse.FAtom (TacticParse.LSelectGoals _)) =
-      SOME (StepSelects {end_pos = end_pos, label = label})
+      SOME (StepSelects {start_pos = end_pos, end_pos = end_pos, label = label})
   | step_of_frag end_pos label (TacticParse.FAtom TacticParse.LReverse) =
-      SOME (StepExpandList {end_pos = end_pos, label = label})
+      SOME (StepExpandList {start_pos = end_pos, end_pos = end_pos, label = label})
   | step_of_frag end_pos label (TacticParse.FAtom (TacticParse.LTacsToLT _)) =
-      SOME (StepExpandList {end_pos = end_pos, label = label})
+      SOME (StepExpandList {start_pos = end_pos, end_pos = end_pos, label = label})
   | step_of_frag end_pos label (TacticParse.FAtom a) =
-      if TacticParse.isTac a then SOME (StepExpand {end_pos = end_pos, label = label})
-      else SOME (StepExpandList {end_pos = end_pos, label = label})
+      if TacticParse.isTac a then SOME (StepExpand {start_pos = end_pos, end_pos = end_pos, label = label})
+      else SOME (StepExpandList {start_pos = end_pos, end_pos = end_pos, label = label})
   | step_of_frag end_pos label (TacticParse.FFOpen _) =
-      SOME (StepOpen {end_pos = end_pos, label = label})
+      SOME (StepOpen {start_pos = end_pos, end_pos = end_pos, label = label})
   | step_of_frag end_pos label (TacticParse.FFMid _) =
-      SOME (StepMid {end_pos = end_pos, label = label})
+      SOME (StepMid {start_pos = end_pos, end_pos = end_pos, label = label})
   | step_of_frag end_pos label (TacticParse.FFClose _) =
-      SOME (StepClose {end_pos = end_pos, label = label})
+      SOME (StepClose {start_pos = end_pos, end_pos = end_pos, label = label})
   | step_of_frag _ _ _ = NONE
 
 fun steps_from_tree body tree =
@@ -452,7 +462,8 @@ fun steps_from_tree body tree =
         | TacticParse.LFirst [] => text_or (span_of default e) "NO_LT"
         | _ => text_or (span_of default e) fallback
     fun atomic_tac default fallback e =
-      [StepExpand {end_pos = #2 (span_of default e), label = tactic_label default fallback e}]
+      let val sp = span_of default e
+      in [StepExpand {start_pos = #1 sp, end_pos = #2 sp, label = tactic_label default fallback e}] end
     fun suffices_by_expr e =
       case e of
           TacticParse.ThenLT (TacticParse.Group (_, _, TacticParse.ThenLT (TacticParse.Subgoal _, [TacticParse.LReverse])), [TacticParse.LThen1 _]) => true
@@ -464,14 +475,15 @@ fun steps_from_tree body tree =
     fun reverse_thenl_expr (TacticParse.ThenLT (lhs, lts)) = expr_contains_reverse body lhs andalso List.exists thenl_lt lts
       | reverse_thenl_expr _ = false
     fun atomic_list default fallback e =
-      [StepExpandList {end_pos = #2 (span_of default e), label = list_label default fallback e}]
-    fun close_at sp label = StepClose {end_pos = #2 sp, label = label}
+      let val sp = span_of default e
+      in [StepExpandList {start_pos = #1 sp, end_pos = #2 sp, label = list_label default fallback e}] end
+    fun close_at sp label = StepClose {start_pos = #1 sp, end_pos = #2 sp, label = label}
     (* Tactic-level combinators run once per input goal.  When the current
        GoalFrag state has multiple goals, wrap decomposed list-tactic structure
        in open_paren/close_paren so THEN1/FIRST choices cannot leak across
        sibling input goals. *)
     fun scoped_per_input_goal sp steps =
-      StepOpen {end_pos = #1 sp, label = "open_paren"} ::
+      StepOpen {start_pos = #1 sp, end_pos = #2 sp, label = "open_paren"} ::
       steps @ [close_at sp "close_paren"]
     fun interleave _ [] = []
       | interleave _ [x] = x
@@ -492,15 +504,15 @@ fun steps_from_tree body tree =
               in scoped_per_input_goal sp body end
         | TacticParse.Subgoal _ =>
             let val sp = span_of default e
-            in [StepExpand {end_pos = #2 sp, label = term_quote_text (text_or sp "``" )}] end
+            in [StepExpand {start_pos = #1 sp, end_pos = #2 sp, label = term_quote_text (text_or sp "``" )}] end
         | TacticParse.First [] => atomic_tac default "NO_TAC" e
         | TacticParse.First es =>
             let
               val sp = span_of default e
               val arms = map (fn x => plan_tac (span_of sp x) x) es
               val body =
-                [StepOpen {end_pos = #1 sp, label = "open_first"}] @
-                interleave (StepMid {end_pos = #1 sp, label = "next_first"}) arms @
+                [StepOpen {start_pos = #1 sp, end_pos = #2 sp, label = "open_first"}] @
+                interleave (StepMid {start_pos = #1 sp, end_pos = #2 sp, label = "next_first"}) arms @
                 [close_at sp "close_first"]
             in scoped_per_input_goal sp body end
         | TacticParse.Try _ => atomic_tac default "ALL_TAC" e
@@ -513,7 +525,7 @@ fun steps_from_tree body tree =
         | TacticParse.Rename _ => atomic_tac default "ALL_TAC" e
         | TacticParse.Opaque _ => atomic_tac default "ALL_TAC" e
         | TacticParse.Group (_, sp, x) => if suffices_by_expr x then atomic_tac sp "ALL_TAC" e else plan_tac sp x
-        | TacticParse.RepairEmpty (true, _, s) => [StepExpand {end_pos = #2 default, label = s}]
+        | TacticParse.RepairEmpty (true, _, s) => [StepExpand {start_pos = #1 default, end_pos = #2 default, label = s}]
         | TacticParse.RepairGroup (sp, _, x, _) => if suffices_by_expr x then atomic_tac sp "ALL_TAC" e else plan_tac sp x
         | _ => atomic_tac default "ALL_TAC" e
     and plan_lt default e =
@@ -525,7 +537,7 @@ fun steps_from_tree body tree =
             List.concat (map (fn x => plan_tac (span_of default x) x) tacs)
         | TacticParse.LThen1 x =>
             let val sp = span_of default x
-            in [StepOpen {end_pos = #1 sp, label = "open_then1"}] @
+            in [StepOpen {start_pos = #1 sp, end_pos = #2 sp, label = "open_then1"}] @
                plan_tac sp x @ [close_at sp "close_paren"]
             end
         | TacticParse.LAllGoals x => plan_tac (span_of default x) x
@@ -533,7 +545,7 @@ fun steps_from_tree body tree =
         | TacticParse.LSelectGoal _ => atomic_list default "Q.SELECT_GOAL_LT []" e
         | TacticParse.LSelectGoals _ => atomic_list default "Q.SELECT_GOALS_LT []" e
         | TacticParse.Group (_, sp, x) => plan_lt sp x
-        | TacticParse.RepairEmpty (false, _, s) => [StepExpandList {end_pos = #2 default, label = s}]
+        | TacticParse.RepairEmpty (false, _, s) => [StepExpandList {start_pos = #1 default, end_pos = #2 default, label = s}]
         | TacticParse.RepairGroup (sp, _, x, _) => plan_lt sp x
         | _ => atomic_list default "ALL_LT" e
   in
@@ -809,7 +821,7 @@ fun steps body =
     if not (expr_contains_try tree) andalso
        (chained_then1_expr tree orelse
         (then1_chain_count tree >= 2 andalso expr_contains_impl_tac body tree)) then
-      [StepPlain {end_pos = size body, label = trim_space body}]
+      [StepPlain {start_pos = 0, end_pos = size body, label = trim_space body}]
     else steps_from_tree body tree
   end
 

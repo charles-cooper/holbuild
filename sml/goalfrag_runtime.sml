@@ -178,12 +178,20 @@ fun failed_theorem_line () =
     | SOME name => "\nholbuild failed theorem: " ^ name
 
 val failed_step_end_ref = ref NONE : int option ref
+val failed_step_span_ref = ref NONE : (int * int) option ref
 val failed_plan_position_ref = ref NONE : (int * string * string) option ref
 
 fun failed_step_end_line () =
   case !failed_step_end_ref of
       NONE => ""
     | SOME end_pos => "\nholbuild failed fragment end: " ^ Int.toString end_pos
+
+fun failed_step_span_line () =
+  case !failed_step_span_ref of
+      NONE => ""
+    | SOME (start_pos, end_pos) =>
+        String.concat ["\nholbuild failed fragment span: ", Int.toString start_pos,
+                       " ", Int.toString end_pos]
 
 fun plan_position_label label =
   String.translate (fn #"\n" => "\\n" | #"\t" => "\\t" | c => String.str c) label
@@ -203,6 +211,7 @@ fun print_goal_state label =
       String.concat ["\nholbuild goal state at failed fragment: ", label,
                      failed_theorem_line (),
                      failed_step_end_line (),
+                     failed_step_span_line (),
                      failed_plan_position_line (),
                      "\nholbuild remaining goals: ", Int.toString (length goals), "\n",
                      "holbuild top goal:\n",
@@ -356,10 +365,13 @@ fun trace_goalfrag_after status elapsed index step' =
 fun run_maybe_traced_step index step' =
   let
     val old_failed_step_end = !failed_step_end_ref
+    val old_failed_step_span = !failed_step_span_ref
     val old_failed_plan_position = !failed_plan_position_ref
     val _ = failed_step_end_ref := SOME (step_end step')
+    val _ = failed_step_span_ref := SOME (step_start step', step_end step')
     val _ = failed_plan_position_ref := SOME (index, HolbuildGoalfragPlan.display_kind step', step_label step')
     fun restore () = (failed_step_end_ref := old_failed_step_end;
+                      failed_step_span_ref := old_failed_step_span;
                       failed_plan_position_ref := old_failed_plan_position)
   in
     if trace_enabled () then
@@ -417,7 +429,9 @@ fun trace_goalfrag_after_with_goals status elapsed index step' goals =
 fun run_whole_tactic g step' tac =
   let
     val label = step_label step'
+    val old_failed_step_span = !failed_step_span_ref
     val old_failed_plan_position = !failed_plan_position_ref
+    val _ = failed_step_span_ref := SOME (step_start step', step_end step')
     val _ = failed_plan_position_ref := SOME (0, HolbuildGoalfragPlan.display_kind step', label)
     fun apply () =
       with_tactic_timeout label (fn () => Tactical.TAC_PROOF(g, tac)) ()
@@ -439,6 +453,7 @@ fun run_whole_tactic g step' tac =
       else TraceOk (apply ()) handle e => TraceError e
     val _ = successful_step_count_ref := 1
     val _ = successful_prefix_end_ref := size (!active_tactic_text_ref)
+    val _ = failed_step_span_ref := old_failed_step_span
     val _ = failed_plan_position_ref := old_failed_plan_position
   in
     case result of TraceOk th => th | TraceError e => raise e
@@ -570,6 +585,7 @@ fun install ({checkpoint_enabled, tactic_timeout, timeout_marker, plan_theorem, 
    theorem_info_ref := NONE;
    context_info_ref := NONE;
    failed_step_end_ref := NONE;
+   failed_step_span_ref := NONE;
    failed_plan_position_ref := NONE;
    proving_with_goalfrag_ref := false;
    Tactical.set_prover goalfrag_prover)

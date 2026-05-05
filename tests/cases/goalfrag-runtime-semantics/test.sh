@@ -190,8 +190,48 @@ SML
   fi
 }
 
+run_repeated_label_source_location_project() {
+  local project=$tmpdir/repeated-label-source-location
+  make_project "$project"
+  cat > "$project/src/AScript.sml" <<'SML'
+open HolKernel Parse boolLib bossLib;
+val _ = new_theory "A";
+
+Theorem repeated_label:
+  !x:bool. T
+Proof
+  strip_tac >> strip_tac
+QED
+
+val _ = export_theory();
+SML
+  if (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --skip-checkpoints --tactic-timeout 60) > "$tmpdir/repeated-label.goalfrag.out" 2>&1; then
+    echo "expected repeated-label GoalFrag build to fail" >&2
+    exit 1
+  fi
+  require_grep "plan position: 01 tactic strip_tac" "$tmpdir/repeated-label.goalfrag.out"
+  require_grep "source: .*AScript.sml:7:16-25" "$tmpdir/repeated-label.goalfrag.out"
+  if grep -q "source: .*AScript.sml:7:3-12" "$tmpdir/repeated-label.goalfrag.out"; then
+    echo "GoalFrag failure source used first matching label instead of failed step span" >&2
+    exit 1
+  fi
+
+  rm -rf "$project/.holbuild"
+  if (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --new-ir --skip-checkpoints --tactic-timeout 60) > "$tmpdir/repeated-label.new-ir.out" 2>&1; then
+    echo "expected repeated-label new-IR build to fail" >&2
+    exit 1
+  fi
+  require_grep "plan position: 01 list_tactic >> strip_tac" "$tmpdir/repeated-label.new-ir.out"
+  require_grep "source: .*AScript.sml:7:16-25" "$tmpdir/repeated-label.new-ir.out"
+  if grep -q "source: .*AScript.sml:7:3-12" "$tmpdir/repeated-label.new-ir.out"; then
+    echo "new-IR failure source used first matching label instead of failed step span" >&2
+    exit 1
+  fi
+}
+
 run_new_ir_smoke_project
 run_goalfrag_success_project
+run_repeated_label_source_location_project
 
 expect_both_fail first_empty_then 'Theorem first_empty_then:
   T

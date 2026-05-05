@@ -743,7 +743,7 @@ if (cd "$close_paren_failure_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" buil
   exit 1
 fi
 require_grep "fragment: close_paren" "$close_paren_failure_log"
-require_grep "source: .*AScript.sml:[89]:" "$close_paren_failure_log"
+require_grep "source: .*AScript.sml:7:6-9:4" "$close_paren_failure_log"
 python3 - <<PY
 from pathlib import Path
 text = Path("$close_paren_failure_log").read_text()

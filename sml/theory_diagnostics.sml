@@ -219,41 +219,6 @@ fun static_error_summary source_path source_text lines =
              source_context])
         end
 
-fun drop_prefix prefix text =
-  if String.isPrefix prefix text then SOME (String.extract(text, size prefix, NONE)) else NONE
-
-fun strip_trailing_paren text =
-  if size text > 0 andalso String.sub(text, size text - 1) = #")" then
-    String.substring(text, 0, size text - 1)
-  else text
-
-fun select_then1_source_probes label =
-  case drop_prefix "Q.SELECT_GOALS_LT_THEN1 " label of
-      NONE => []
-    | SOME rest =>
-        case find_substring "] (" rest of
-            NONE => []
-          | SOME split =>
-              let
-                val pattern = String.substring(rest, 0, split + 1)
-                val body = strip_trailing_paren (String.extract(rest, split + 3, NONE))
-              in
-                [pattern, body]
-              end
-
-fun wrapped_source_probe prefix label =
-  case drop_prefix prefix label of
-      NONE => NONE
-    | SOME rest => if size rest > 0 andalso String.sub(rest, size rest - 1) = #")" then
-                     SOME (String.substring(rest, 0, size rest - 1))
-                   else NONE
-
-fun source_location_probes label =
-  label ::
-  select_then1_source_probes label @
-  (case drop_prefix "sg " label of NONE => [] | SOME term => [term]) @
-  (case wrapped_source_probe "Tactical.REVERSE (" label of NONE => [] | SOME inner => [inner])
-
 fun proof_unit_label (checkpoint : HolbuildTheoryCheckpoints.checkpoint) =
   if #kind checkpoint = "resume" then "resume" else "theorem"
 
@@ -288,21 +253,6 @@ fun checkpoint_source_summary source_path source_text (checkpoint : HolbuildTheo
        source_span_text source_path source_text offset end_offset]
   end
 
-fun failed_fragment_source_summary source_path source_text checkpoints label =
-  let
-    fun locate_with_probe (checkpoint : HolbuildTheoryCheckpoints.checkpoint) probe =
-      Option.map
-        (fn relative => {checkpoint = checkpoint,
-                         span = {offset = #tactic_start checkpoint + relative,
-                                 width = size probe}})
-        (find_substring probe (#tactic_text checkpoint))
-    fun locate checkpoint = first_some (locate_with_probe checkpoint) (source_location_probes label)
-  in
-    Option.map
-      (fn {checkpoint, span} => checkpoint_source_summary source_path source_text checkpoint label span)
-      (first_some locate checkpoints)
-  end
-
 fun quoted_after marker line =
   case find_substring marker line of
       NONE => NONE
@@ -330,31 +280,33 @@ fun find_failed_theorem_name lines =
       SOME name => SOME name
     | NONE => first_some (quoted_after "Failed to prove theorem \"") lines
 
-fun failed_theorem_source_summary source_path source_text checkpoints label theorem_name failed_end =
+fun clamp_relative checkpoint offset =
+  Int.max(0, Int.min(size (#tactic_text checkpoint), offset))
+
+fun explicit_span checkpoint (start_pos, end_pos) =
   let
-    fun locate_with_probe (checkpoint : HolbuildTheoryCheckpoints.checkpoint) probe =
-      Option.map
-        (fn relative => {offset = #tactic_start checkpoint + relative, width = size probe})
-        (find_substring probe (#tactic_text checkpoint))
-    fun locate checkpoint = first_some (locate_with_probe checkpoint) (source_location_probes label)
-    fun end_span checkpoint end_pos =
-      let
-        val relative = Int.max(0, Int.min(size (#tactic_text checkpoint) - 1, end_pos - 1))
-      in
-        {offset = #tactic_start checkpoint + relative, width = 1}
-      end
+    val start = clamp_relative checkpoint start_pos
+    val stop = clamp_relative checkpoint end_pos
+    val width = Int.max(1, stop - start)
   in
-    case List.find (fn (checkpoint : HolbuildTheoryCheckpoints.checkpoint) => #name checkpoint = theorem_name) checkpoints of
-        NONE => NONE
-      | SOME checkpoint =>
-          SOME (checkpoint_source_summary source_path source_text checkpoint label
-                  (case locate checkpoint of
-                       SOME span => span
-                     | NONE =>
-                         case failed_end of
-                             SOME end_pos => end_span checkpoint end_pos
-                           | NONE => {offset = #tactic_start checkpoint, width = 1}))
+    {offset = #tactic_start checkpoint + start, width = width}
   end
+
+fun end_span checkpoint end_pos =
+  let val relative = Int.max(0, Int.min(size (#tactic_text checkpoint) - 1, end_pos - 1))
+  in {offset = #tactic_start checkpoint + relative, width = 1} end
+
+fun failed_theorem_source_summary source_path source_text checkpoints label theorem_name failed_span failed_end =
+  case List.find (fn (checkpoint : HolbuildTheoryCheckpoints.checkpoint) => #name checkpoint = theorem_name) checkpoints of
+      NONE => NONE
+    | SOME checkpoint =>
+        SOME (checkpoint_source_summary source_path source_text checkpoint label
+                (case failed_span of
+                     SOME span => explicit_span checkpoint span
+                   | NONE =>
+                       case failed_end of
+                           SOME end_pos => end_span checkpoint end_pos
+                         | NONE => {offset = #tactic_start checkpoint, width = 1}))
 
 val goal_state_limit = 4096
 val goal_state_start_marker = "holbuild top goal:"
@@ -362,6 +314,7 @@ val goal_state_end_marker = "holbuild end top goal"
 val remaining_goals_marker = "holbuild remaining goals: "
 val failed_fragment_prefix = "holbuild goal state at failed fragment: "
 val failed_fragment_end_prefix = "holbuild failed fragment end: "
+val failed_fragment_span_prefix = "holbuild failed fragment span: "
 val plan_position_prefix = "holbuild plan position: "
 
 fun read_prefix path limit =
@@ -430,6 +383,22 @@ fun find_failed_fragment_end lines =
     (fn line =>
         if String.isPrefix failed_fragment_end_prefix line then
           Int.fromString (String.extract(line, size failed_fragment_end_prefix, NONE))
+        else NONE)
+    lines
+
+fun parse_span_line text =
+  case String.tokens Char.isSpace text of
+      [start, stop] =>
+        (case (Int.fromString start, Int.fromString stop) of
+             (SOME a, SOME b) => SOME (a, b)
+           | _ => NONE)
+    | _ => NONE
+
+fun find_failed_fragment_span lines =
+  first_some
+    (fn line =>
+        if String.isPrefix failed_fragment_span_prefix line then
+          parse_span_line (String.extract(line, size failed_fragment_span_prefix, NONE))
         else NONE)
     lines
 
@@ -502,13 +471,12 @@ fun summarize_failed_fragment_source source_path source_text checkpoints path =
     val lines = String.fields (fn c => c = #"\n") (read_text path)
     val label = find_failed_fragment_label lines
     val failed_end = find_failed_fragment_end lines
+    val failed_span = find_failed_fragment_span lines
   in
     case (label, find_failed_theorem_name lines) of
         (SOME label', SOME theorem_name) =>
-          (case failed_theorem_source_summary source_path source_text checkpoints label' theorem_name failed_end of
-               SOME summary => SOME summary
-             | NONE => failed_fragment_source_summary source_path source_text checkpoints label')
-      | _ => Option.mapPartial (failed_fragment_source_summary source_path source_text checkpoints) label
+          failed_theorem_source_summary source_path source_text checkpoints label' theorem_name failed_span failed_end
+      | _ => NONE
   end
   handle _ => NONE
 
