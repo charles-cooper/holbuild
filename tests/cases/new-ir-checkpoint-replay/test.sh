@@ -81,3 +81,59 @@ fixed_count=$(wc -c < "$counter" | tr -d ' ')
 require_grep "from: failed-prefix checkpoint in slow_prefix_failure" "$fixed_log"
 require_grep "ATheory built" "$fixed_log"
 require_file "$project/.holbuild/obj/src/ATheory.dat"
+
+shorten_project=$tmpdir/shorten-project
+shorten_counter=$tmpdir/shorten-count.txt
+mkdir -p "$shorten_project/src"
+touch "$shorten_counter"
+cp "$project/holproject.toml" "$shorten_project/holproject.toml"
+python3 - <<PY
+from pathlib import Path
+project = Path("$shorten_project")
+counter = Path("$shorten_counter")
+long_prefix = " >> ".join(["slow_tac"] + ["ALL_TAC"] * 20 + ['FAIL_TAC "long suffix failure"'])
+(project / "src" / "AScript.sml").write_text(f'''open HolKernel Parse boolLib bossLib;
+val _ = new_theory "A";
+val slow_prefix_counter = "{counter}";
+fun bump_counter () =
+  let val out = TextIO.openAppend slow_prefix_counter
+  in TextIO.output(out, "x"); TextIO.closeOut out end;
+fun slow_tac g = (bump_counter(); ALL_TAC g);
+Theorem shortened_replay:
+  T
+Proof
+  {long_prefix}
+QED
+val _ = export_theory();
+''')
+PY
+
+shorten_first_log=$tmpdir/shorten-first.log
+if (cd "$shorten_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --new-ir ATheory) > "$shorten_first_log" 2>&1; then
+  echo "expected shortened replay first build to fail" >&2
+  exit 1
+fi
+shorten_first_count=$(wc -c < "$shorten_counter" | tr -d ' ')
+[[ "$shorten_first_count" = "1" ]] || { echo "expected shortened replay first run to execute slow prefix once, got $shorten_first_count" >&2; exit 1; }
+require_grep "long suffix failure" "$shorten_first_log"
+
+python3 - <<PY
+from pathlib import Path
+path = Path("$shorten_project/src/AScript.sml")
+text = path.read_text()
+proof = text.index('Proof')
+start = text.index('slow_tac', proof)
+end = text.index('QED', start)
+path.write_text(text[:start] + 'slow_tac >> FAIL_TAC "short suffix failure"\n' + text[end:])
+PY
+shorten_edit_log=$tmpdir/shorten-edit.log
+if (cd "$shorten_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --new-ir ATheory) > "$shorten_edit_log" 2>&1; then
+  echo "expected shortened replay edited build to fail" >&2
+  exit 1
+fi
+require_grep "from: failed-prefix checkpoint in shortened_replay" "$shorten_edit_log"
+require_grep "short suffix failure" "$shorten_edit_log"
+if grep -q "CANT_BACKUP_ANYMORE" "$shorten_edit_log"; then
+  echo "failed-prefix replay could not rewind retained proof history" >&2
+  exit 1
+fi

@@ -137,9 +137,15 @@ fun save_failed_prefix_checkpoint () =
           let
             val prefix_end = !successful_prefix_end_ref
             val prefix_text = String.substring(!active_tactic_text_ref, 0, prefix_end)
+            val step_count = !successful_step_count_ref
             val meta_text =
-              String.concat ["step_count=", Int.toString (!successful_step_count_ref), "\n",
+              String.concat ["step_count=", Int.toString step_count, "\n",
                              "prefix_end=", Int.toString prefix_end, "\n"]
+            val _ =
+              (case !proof_history_ref of
+                   NONE => ()
+                 | SOME history =>
+                     proof_history_ref := SOME (History.set_limit history (Int.max(15, step_count + 1))))
             val _ = save_checkpoint "failed_prefix" false failed_prefix_path failed_prefix_ok depth
             val _ = write_text_file (failed_prefix_path ^ ".meta") meta_text
             val _ = write_text_file (failed_prefix_path ^ ".prefix") prefix_text
@@ -607,13 +613,19 @@ fun finish_failed_prefix name old_prefix_text old_step_count tactic_text failed_
         let
           val _ = active_tactic_text_ref := tactic_text
           val plan = HolbuildProofIr.steps tactic_text
-          val _ = ensure_history_limit (length plan + 1)
+          val _ = ensure_history_limit (Int.max(length plan + 1, old_step_count + 1))
           val _ = trace_plan name plan
           val _ = stop_after_plan_if_requested ()
           val common_bytes = common_prefix_size old_prefix_text tactic_text
           val skip_count = step_count_at_prefix common_bytes plan
           val backup_count = Int.max(0, old_step_count - skip_count)
-          val _ = backup_n backup_count
+          val _ =
+            (backup_n backup_count
+             handle History.CANT_BACKUP_ANYMORE =>
+               raise Fail (String.concat ["failed-prefix checkpoint cannot rewind ",
+                                          Int.toString backup_count,
+                                          " proof IR steps; checkpoint history retained fewer steps than its metadata step_count=",
+                                          Int.toString old_step_count]))
           val _ = successful_step_count_ref := skip_count
           val _ = successful_prefix_end_ref := common_bytes
           val _ = run_steps_from skip_count (display_index_at_count skip_count plan) (drop_steps skip_count plan)
