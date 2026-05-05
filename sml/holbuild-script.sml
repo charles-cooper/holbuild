@@ -78,9 +78,9 @@ use "sml/theory_diagnostics.sml";
 use "sml/project_lock.sml";
 use "sml/theory_spans.sml";
 use "sml/cache.sml";
-use "sml/proof_ir.sml";
 use "sml/build_exec.sml";
 use "sml/goalfrag_plan.sml";
+use "sml/proof_ir.sml";
 use "sml/commands.sml";
 
 fun main () = HolbuildCommands.main (CommandLine.arguments())
