@@ -115,9 +115,14 @@ fun take_static_error_block [] acc = rev acc
       if String.isPrefix "Uncaught exception" line then rev acc
       else take_static_error_block rest (line :: acc)
 
+fun static_error_marker line =
+  case find_substring ": error: " line of
+      SOME marker => SOME marker
+    | NONE => find_substring ": parse error: " line
+
 fun find_static_error_block [] = NONE
   | find_static_error_block (line :: rest) =
-      if Option.isSome (find_substring ": error: " line) then
+      if Option.isSome (static_error_marker line) then
         SOME (take_static_error_block rest [line])
       else find_static_error_block rest
 
@@ -164,7 +169,7 @@ fun split_first_char ch text =
     | SOME i => SOME (String.substring(text, 0, i), String.extract(text, i + 1, NONE))
 
 fun parse_static_error_location line =
-  case find_substring ": error: " line of
+  case static_error_marker line of
       NONE => NONE
     | SOME marker =>
         let

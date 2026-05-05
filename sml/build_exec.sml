@@ -1176,6 +1176,10 @@ fun theorem_failed_prefix_path project node deps_key proof_engine safe_name =
 fun discover_theorem_boundaries source_path source_text =
   HolbuildTheorySpans.scan source_path source_text
 
+fun discover_theorem_boundaries_strict source_path source_text =
+  HolbuildTheorySpans.scan_strict source_path source_text
+  handle HolbuildTheoryCheckpoints.Error msg => raise Error msg
+
 fun theorem_checkpoint_key {kind, name, safe_name, boundary, deps_key, proof_engine, prefix_hash} =
   HolbuildToolchain.hash_text
     (String.concatWith "\n"
@@ -1904,12 +1908,12 @@ fun theory_checkpoints_for_node policy project plan keys toolchain_key node sour
   else
     let
       val deps_key = dependency_context_key toolchain_key plan keys node
-      val boundaries = discover_theorem_boundaries (source_file node) source_text
+      val boundaries = discover_theorem_boundaries_strict (source_file node) source_text
     in
       theorem_checkpoint_specs (proof_engine policy) project node deps_key source_text boundaries
     end
     handle Error msg =>
-      (warn ("could not parse theorem boundaries for " ^ logical_name node ^
+      (warn ("could not safely instrument theorem boundaries for " ^ logical_name node ^
              "; building without goalfrag/checkpoints for this theory\n" ^ msg);
        [])
 

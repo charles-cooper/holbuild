@@ -782,6 +782,41 @@ if grep -q "theorem: first_same_prefix" "$same_fragment_log"; then
   exit 1
 fi
 
+malformed_project=$tmpdir/malformed-project
+mkdir -p "$malformed_project/src"
+cp "$project/holproject.toml" "$malformed_project/holproject.toml"
+cat > "$malformed_project/src/AScript.sml" <<'SML'
+open HolKernel Parse boolLib bossLib;
+val _ = new_theory "A";
+Theorem ok_thm:
+  T
+Proof
+  ACCEPT_TAC TRUTH
+QED
+Theorem broken_thm:
+  T
+Proof
+  ACCEPT_TAC TRUTH
+Theorem after_broken:
+  T
+Proof
+  ACCEPT_TAC TRUTH
+QED
+val _ = export_theory();
+SML
+malformed_log=$tmpdir/malformed.log
+(cd "$malformed_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$malformed_log" 2>&1
+require_grep "could not safely instrument theorem boundaries for ATheory; building without goalfrag/checkpoints" "$malformed_log"
+require_grep "HOL source parse error:" "$malformed_log"
+require_grep "expected 'QED'" "$malformed_log"
+require_grep "source: .*AScript.sml:" "$malformed_log"
+require_grep "ATheory built" "$malformed_log"
+require_file "$malformed_project/.holbuild/gen/src/ATheory.sig"
+if grep -q 'Fail "malformed"\|instrumented log:' "$malformed_log"; then
+  echo "parser-recovery fallback fell through to instrumented-script failure" >&2
+  exit 1
+fi
+
 timeout_project=$tmpdir/timeout-project
 mkdir -p "$timeout_project/src"
 cp "$project/holproject.toml" "$timeout_project/holproject.toml"
