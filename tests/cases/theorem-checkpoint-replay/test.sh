@@ -358,6 +358,7 @@ if (cd "$failure_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) >
 fi
 require_grep "expected failure" "$failure_log"
 require_grep "top goal at failed fragment:" "$failure_log"
+require_grep "plan position: 00 tactic FAIL_TAC" "$failure_log"
 require_grep "remaining goals at failed fragment: 1" "$failure_log"
 require_grep "top goal exceeded 4 KiB" "$failure_log"
 require_grep "full top goal is in the instrumented log above" "$failure_log"
@@ -369,6 +370,7 @@ require_grep "FAIL_TAC \"expected failure\"" "$failure_log"
 failure_child_log=$(find "$failure_project/.holbuild/logs" -name '*-ATheory-instrumented-failure.log' -print -quit)
 require_file "$failure_child_log"
 require_grep "holbuild goal state at failed fragment" "$failure_child_log"
+require_grep "holbuild plan position: 00 tactic FAIL_TAC" "$failure_child_log"
 require_grep "holbuild remaining goals: 1" "$failure_child_log"
 require_grep "holbuild top goal:" "$failure_child_log"
 require_grep "holbuild end top goal" "$failure_child_log"
@@ -384,6 +386,7 @@ fi
 require_grep "from: failed-prefix checkpoint in b_thm" "$failure_again_log"
 require_grep "replay starts at: .*AScript.sml:" "$failure_again_log"
 require_grep "top goal at failed fragment:" "$failure_again_log"
+require_grep "plan position: 00 tactic FAIL_TAC" "$failure_again_log"
 require_grep "remaining goals at failed fragment: 1" "$failure_again_log"
 require_file "$a_thm_context"
 require_file "$b_thm_failed_prefix"

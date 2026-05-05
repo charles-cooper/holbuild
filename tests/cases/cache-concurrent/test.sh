@@ -129,7 +129,9 @@ fi
 require_file "$parent_sensitive_a1/.holbuild/obj/src/BTheory.dat"
 require_file "$parent_sensitive_a2/.holbuild/obj/src/BTheory.dat"
 
-manifest=$(find "$HOLBUILD_CACHE/actions" -mindepth 2 -maxdepth 2 -name manifest -print -quit)
+input_key=$(awk -F= '/^input_key=/ { print $2; exit }' "${projects[0]}/.holbuild/dep/concurrent/src/AScript.sml.key")
+manifest="$HOLBUILD_CACHE/actions/$input_key/manifest"
+require_file "$manifest"
 sig_hash=$(awk '/^blob sig / { print $3 }' "$manifest")
 dat_hash=$(awk '/^blob dat / { print $3 }' "$manifest")
 python3 - <<PY

@@ -25,6 +25,7 @@ val active_tactic_text_ref = ref ""
 val successful_step_count_ref = ref 0
 val successful_prefix_end_ref = ref 0
 val failed_step_end_ref = ref NONE : int option ref
+val failed_plan_position_ref = ref NONE : (int * string * string) option ref
 val compiled_tactic_ref = ref Tactical.ALL_TAC
 val compiled_list_tactic_ref = ref Tactical.ALL_LT
 val proof_history_ref = ref (NONE : goalStack.gstk History.history option)
@@ -183,6 +184,16 @@ fun failed_step_end_line () =
       NONE => ""
     | SOME end_pos => "\nholbuild failed fragment end: " ^ Int.toString end_pos
 
+fun display_label label =
+  String.translate (fn #"\n" => "\\n" | #"\t" => "\\t" | c => String.str c) label
+
+fun failed_plan_position_line () =
+  case !failed_plan_position_ref of
+      NONE => ""
+    | SOME (index, kind, label) =>
+        String.concat ["\nholbuild plan position: ", HolbuildProofIr.format_index index,
+                       " ", kind, " ", display_label label]
+
 fun current_history () =
   case !proof_history_ref of
       SOME history => history
@@ -210,6 +221,7 @@ fun print_goal_state label =
       String.concat ["\nholbuild goal state at failed fragment: ", label,
                      failed_theorem_line (),
                      failed_step_end_line (),
+                     failed_plan_position_line (),
                      "\nholbuild remaining goals: ", Int.toString (length goals), "\n",
                      "holbuild top goal:\n",
                      top_goal_text goals,
@@ -317,9 +329,6 @@ fun current_goal_count () = length (history_top_goals()) handle _ => ~1
 fun trace_line parts =
   if trace_enabled () then TextIO.output(TextIO.stdErr, String.concat parts) else ()
 
-fun display_label label =
-  String.translate (fn #"\n" => "\\n" | #"\t" => "\\t" | c => String.str c) label
-
 fun trace_plan theorem_name plan =
   if plan_enabled () then
     (TextIO.output(TextIO.stdErr,
@@ -360,11 +369,16 @@ fun trace_after status elapsed index proof_step =
               " goals=", Int.toString (current_goal_count()),
               " label=", display_label (HolbuildProofIr.step_label proof_step), "\n"]
 
-fun run_maybe_traced_step index proof_step =
+fun run_maybe_traced_step index display_index proof_step =
   let
     val old_failed_step_end = !failed_step_end_ref
+    val old_failed_plan_position = !failed_plan_position_ref
     val _ = failed_step_end_ref := SOME (HolbuildProofIr.step_end proof_step)
-    fun restore () = failed_step_end_ref := old_failed_step_end
+    val _ = failed_plan_position_ref := SOME (display_index,
+                                              HolbuildProofIr.step_kind proof_step,
+                                              HolbuildProofIr.step_label proof_step)
+    fun restore () = (failed_step_end_ref := old_failed_step_end;
+                      failed_plan_position_ref := old_failed_plan_position)
   in
     if trace_enabled () then
       let
@@ -380,13 +394,17 @@ fun run_maybe_traced_step index proof_step =
     else (step proof_step; restore ())
   end
 
-fun run_steps_from _ [] = ()
-  | run_steps_from index (proof_step :: rest) =
+fun run_steps_from_at _ _ [] = ()
+  | run_steps_from_at index display_index (proof_step :: rest) =
       (successful_step_count_ref := index;
-       run_maybe_traced_step index proof_step;
+       run_maybe_traced_step index display_index proof_step;
        successful_step_count_ref := index + 1;
        successful_prefix_end_ref := HolbuildProofIr.step_end proof_step;
-       run_steps_from (index + 1) rest)
+       run_steps_from_at (index + 1)
+                         (display_index + HolbuildProofIr.display_line_count proof_step)
+                         rest)
+
+fun run_steps_from index display_index steps = run_steps_from_at index display_index steps
 
 fun drop_steps 0 steps = steps
   | drop_steps _ [] = []
@@ -395,8 +413,19 @@ fun drop_steps 0 steps = steps
 fun run_steps steps =
   (successful_step_count_ref := 0;
    successful_prefix_end_ref := 0;
-   run_steps_from 0 steps)
+   run_steps_from 0 0 steps)
 
+fun display_index_at_count count steps =
+  let
+    fun loop _ display_index [] = display_index
+      | loop remaining display_index (proof_step :: rest) =
+          if remaining <= 0 then display_index
+          else loop (remaining - 1)
+                    (display_index + HolbuildProofIr.display_line_count proof_step)
+                    rest
+  in
+    loop count 0 steps
+  end
 datatype 'a traced_result = TraceOk of 'a | TraceError of exn
 
 fun run_whole_tactic g label tac =
@@ -436,11 +465,20 @@ fun proof_ir_prove name end_path end_ok checkpoint_depth g tactic_text =
     val _ = stop_after_plan_if_requested ()
   in
     case plan of
-        [HolbuildProofIr.StepPlain {label, ...}] =>
+        [plain_step as HolbuildProofIr.StepPlain {label, ...}] =>
           let
-            val th = atomic_prove label g (compile_tactic label (HolbuildProofIr.step_program (hd plan)))
-            val _ = save_checkpoint "end_of_proof" false end_path end_ok checkpoint_depth
-          in th end
+            val old_failed_plan_position = !failed_plan_position_ref
+            val _ = failed_plan_position_ref := SOME (0, HolbuildProofIr.step_kind plain_step, label)
+            val result = TraceOk (atomic_prove label g (compile_tactic label (HolbuildProofIr.step_program plain_step)))
+                         handle e => TraceError e
+            val _ = failed_plan_position_ref := old_failed_plan_position
+          in
+            case result of
+                TraceError e => raise e
+              | TraceOk th =>
+                  let val _ = save_checkpoint "end_of_proof" false end_path end_ok checkpoint_depth
+                  in th end
+          end
       | _ =>
           let
             val _ = init_history g (length plan + 1)
@@ -494,7 +532,7 @@ fun finish_failed_prefix name old_prefix_text old_step_count tactic_text failed_
           val _ = backup_n backup_count
           val _ = successful_step_count_ref := skip_count
           val _ = successful_prefix_end_ref := common_bytes
-          val _ = run_steps_from skip_count (drop_steps skip_count plan)
+          val _ = run_steps_from skip_count (display_index_at_count skip_count plan) (drop_steps skip_count plan)
           val th = history_top_thm()
                    handle e => (print_goal_state (name ^ " finish"); raise e)
           val _ = drop_all()
@@ -547,6 +585,8 @@ fun install ({checkpoint_enabled, tactic_timeout, timeout_marker, plan_theorem, 
    trace_active_ref := false;
    theorem_info_ref := NONE;
    context_info_ref := NONE;
+   failed_step_end_ref := NONE;
+   failed_plan_position_ref := NONE;
    failed_prefix_resume_active_ref := false;
    proving_with_proof_ir_ref := false;
    Tactical.set_prover proof_ir_prover)

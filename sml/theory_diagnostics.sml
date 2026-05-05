@@ -362,6 +362,7 @@ val goal_state_end_marker = "holbuild end top goal"
 val remaining_goals_marker = "holbuild remaining goals: "
 val failed_fragment_prefix = "holbuild goal state at failed fragment: "
 val failed_fragment_end_prefix = "holbuild failed fragment end: "
+val plan_position_prefix = "holbuild plan position: "
 
 fun read_prefix path limit =
   let
@@ -395,6 +396,18 @@ fun top_goal_state_from_text text =
         end
 
 fun remaining_goals_from_text text = marker_line_after remaining_goals_marker text
+
+fun plan_position_from_text text =
+  case find_substring plan_position_prefix text of
+      NONE => NONE
+    | SOME start =>
+        let
+          val content_start = start + size plan_position_prefix
+          val rest = String.extract(text, content_start, NONE)
+          val line = hd (String.fields (fn c => c = #"\n") rest) handle _ => ""
+        in
+          if line = "" then NONE else SOME line
+        end
 
 fun read_goal_state path =
   let val text = read_prefix path 65536
@@ -446,6 +459,11 @@ fun goal_state_summary {remaining_goals, top_goal} =
 
 fun summarize_goal_state path =
   Option.map goal_state_summary (read_goal_state path)
+  handle _ => NONE
+
+fun plan_position_summary path =
+  Option.map (fn position => "plan position: " ^ position ^ "\n")
+             (plan_position_from_text (read_prefix path 65536))
   handle _ => NONE
 
 fun child_failure_line line =

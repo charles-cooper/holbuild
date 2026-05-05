@@ -1531,10 +1531,12 @@ fun build_theory cache_allowed policy tc project base_context plan keys toolchai
                (source_file node) source_text theorem_checkpoints)
             failure_log
         val goal_state = Option.mapPartial HolbuildTheoryDiagnostics.summarize_goal_state failure_log
+        val plan_position = Option.mapPartial HolbuildTheoryDiagnostics.plan_position_summary failure_log
         val child_failure = Option.mapPartial HolbuildTheoryDiagnostics.child_failure_summary failure_log
         val detail =
           String.concat
             [case source_context of NONE => "" | SOME text => text,
+             case plan_position of NONE => "" | SOME text => text,
              case goal_state of NONE => "" | SOME text => text,
              case child_failure of NONE => "" | SOME text => text,
              case failure_log of NONE => "" | SOME path => "instrumented log: " ^ path ^ "\n"]
@@ -1552,6 +1554,7 @@ fun build_theory cache_allowed policy tc project base_context plan keys toolchai
       let
         val failure_log = preserve_checkpoint_failure_log project node input_key stage
         val goal_state = Option.mapPartial HolbuildTheoryDiagnostics.summarize_goal_state failure_log
+        val plan_position = Option.mapPartial HolbuildTheoryDiagnostics.plan_position_summary failure_log
         val trace_context = if goalfrag_trace policy then Option.mapPartial HolbuildTheoryDiagnostics.summarize_goalfrag_trace failure_log else NONE
         val static_error = Option.mapPartial (fn path => HolbuildTheoryDiagnostics.static_error_summary (source_file node) source_text (String.fields (fn c => c = #"\n") (read_text path))) failure_log
         val source_context = Option.mapPartial (HolbuildTheoryDiagnostics.summarize_failed_fragment_source (source_file node) source_text theorem_checkpoints) failure_log
@@ -1570,6 +1573,7 @@ fun build_theory cache_allowed policy tc project base_context plan keys toolchai
             [case trace_context of NONE => "" | SOME text => text,
              case static_error of NONE => "" | SOME text => text,
              case source_context of NONE => "" | SOME text => text,
+             case plan_position of NONE => "" | SOME text => text,
              case goal_state of NONE => "" | SOME text => text,
              case child_failure of NONE => fallback | SOME text => text,
              case failure_log of NONE => "" | SOME path => "instrumented log: " ^ path ^ "\n"]
