@@ -195,6 +195,9 @@ fun acquire project command =
       let val owner = Option.getOpt(current_lock_owner lock, unavailable_owner fd)
       in close_fd fd; raise project_lock_error lock owner end
   end
+  handle OS.SysErr (msg, _) =>
+    raise Error ("could not acquire project lock for " ^ command ^ ": " ^
+                 project_lock_path project ^ ": " ^ msg)
 
 fun release (ProjectLock {fd, lock}) =
   (remove_file (project_lock_owner_path lock); close_fd fd)
