@@ -379,6 +379,18 @@ holbuild proof-ir plan ATheory:map_every_plan source=src/AScript.sml (1 steps)
 EXPECTED
 
 cat >> "$project/src/AScript.sml" <<'SML'
+Theorem map_every_lowercase_plan:
+  T
+Proof
+  map_every ACCEPT_TAC [TRUTH]
+QED
+SML
+check_plan map_every_lowercase_plan <<'EXPECTED'
+holbuild proof-ir plan ATheory:map_every_lowercase_plan source=src/AScript.sml (1 steps)
+  00 ACCEPT_TAC TRUTH
+EXPECTED
+
+cat >> "$project/src/AScript.sml" <<'SML'
 Theorem map_first_plan:
   T
 Proof

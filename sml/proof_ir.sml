@@ -242,6 +242,7 @@ and parse_tactic_app e =
     | SOME ("ADD_SGS_TAC", [goals, t]) => TacAddSgs (span e, span goals, parse_tactic_ast t)
     | SOME ("IF", [g, t, f]) => TacIf (span e, parse_tactic_ast g, parse_tactic_ast t, parse_tactic_ast f)
     | SOME ("MAP_EVERY", [f, xs]) => parse_map_every e f xs
+    | SOME ("map_every", [f, xs]) => parse_map_every e f xs
     | SOME ("MAP_FIRST", [f, xs]) => parse_map_first e f xs
     | SOME ("TRY", [t]) => TacTry (span e, parse_tactic_ast t)
     | SOME ("REPEAT", [t]) => TacRepeat (span e, parse_tactic_ast t)
