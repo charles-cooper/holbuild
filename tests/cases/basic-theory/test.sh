@@ -104,7 +104,8 @@ touch -d '1 minute ago' "$cache_hit_marker"
 
 rm -rf "$project/.holbuild"
 cache_log=$tmpdir/cache-restore.log
-(cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$cache_log"
+(cd "$project" && HOLBUILD_CACHE_TRACE=1 "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$cache_log"
+require_grep "cache hit: ATheory source/dependency key=$input_key" "$cache_log"
 require_grep "ATheory restored from cache" "$cache_log"
 require_file "$project/.holbuild/gen/src/ATheory.sig"
 require_file "$project/.holbuild/gen/src/ATheory.sml"

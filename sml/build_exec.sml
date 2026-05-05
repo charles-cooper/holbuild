@@ -655,6 +655,10 @@ fun child_log_detail path =
     "child log was not created: " ^ path
 
 fun echo_child_logs () = env_bool "HOLBUILD_ECHO_CHILD_LOGS" false
+fun cache_trace_enabled () = env_bool "HOLBUILD_CACHE_TRACE" false
+
+fun cache_trace line =
+  if cache_trace_enabled () then HolbuildStatus.message_stdout (line ^ "\n") else ()
 
 fun run_hol_files_to_log tc stage context files log_name error_message =
   let
@@ -1111,11 +1115,25 @@ fun remove_failed_cache_outputs project node =
     remove_checkpoint_family project node
   end
 
-fun materialize_theory_cache_key project plan cache_key node =
+fun cache_key_role project plan node input_key cache_key =
+  let
+    val context_key = parent_output_cache_key plan node input_key
+    val path_key = path_dependent_cache_key project context_key
+  in
+    if cache_key = input_key then "source/dependency key"
+    else if cache_key = context_key then "parent-output key"
+    else if cache_key = path_key then "path-dependent parent-output key"
+    else "cache key"
+  end
+
+fun materialize_theory_cache_key project plan input_key cache_key node =
   let
     val root = cache_root ()
     val manifest = HolbuildCache.action_manifest root cache_key
-    val _ = if file_exists manifest then () else raise Error "cache entry not found"
+    val role = cache_key_role project plan node input_key cache_key
+    val _ = if file_exists manifest then ()
+            else (cache_trace ("cache miss: " ^ logical_name node ^ " " ^ role ^ "=" ^ cache_key ^ " (no manifest)");
+                  raise Error "cache entry not found")
     val manifest_text = read_text manifest
     val _ =
       case transient_stage_mldep_in_manifest manifest_text of
@@ -1137,17 +1155,21 @@ fun materialize_theory_cache_key project plan cache_key node =
        write_local_theory_manifests plan node mldeps;
        remove_checkpoint_family project node;
        HolbuildCache.touch manifest;
+       cache_trace ("cache hit: " ^ logical_name node ^ " " ^ role ^ "=" ^ cache_key);
        true)
   in
     (install () before cleanup ()) handle e => (cleanup (); raise e)
   end
   handle Error "cache entry not found" => false
        | e => (remove_failed_cache_outputs project node;
+               cache_trace ("cache miss: " ^ logical_name node ^ " " ^
+                            cache_key_role project plan node input_key cache_key ^ "=" ^ cache_key ^
+                            " (" ^ General.exnMessage e ^ ")");
                warn ("cache entry unusable for " ^ logical_name node ^ ": " ^ General.exnMessage e);
                false)
 
 fun materialize_theory_cache _ project plan input_key node =
-  List.exists (fn cache_key => materialize_theory_cache_key project plan cache_key node)
+  List.exists (fn cache_key => materialize_theory_cache_key project plan input_key cache_key node)
               (theory_cache_keys project plan node input_key)
 
 fun metadata_path (project : HolbuildProject.t) node =
