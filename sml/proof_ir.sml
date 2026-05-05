@@ -698,11 +698,15 @@ fun unsafe_then1_chain source exp =
   (then1_chain_count exp >= 3 orelse
    (then1_chain_count exp >= 2 andalso String.isSubstring "impl_tac" source))
 
+fun plain_program source exp =
+  if String.isSubstring ";" source then tactic_program source (parse_tactic_ast exp)
+  else parenthesize source
+
 fun steps source =
   let val exp = parse_tactic_expr source
   in
     if unsafe_then1_chain source exp then
-      [StepPlain {start_pos = 0, end_pos = size source, label = source, program = tactic_program source (parse_tactic_ast exp)}]
+      [StepPlain {start_pos = 0, end_pos = size source, label = source, program = plain_program source exp}]
     else plan_tactic source (parse_tactic_ast exp)
   end
 

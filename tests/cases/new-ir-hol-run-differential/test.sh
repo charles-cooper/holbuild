@@ -406,6 +406,12 @@ Proof
   MAP_EVERY (fn th => ACCEPT_TAC th) [TRUTH]
 QED
 
+Theorem map_every_lowercase_success:
+  T
+Proof
+  map_every (fn th => ACCEPT_TAC th) [TRUTH]
+QED
+
 Theorem map_first_success:
   T
 Proof
@@ -443,6 +449,14 @@ Proof
   >- ACCEPT_TAC TRUTH
   >- ACCEPT_TAC TRUTH
   >- ACCEPT_TAC TRUTH
+QED
+
+Theorem unsafe_then1_suffix_precedence:
+  (T ==> T) ∧ T
+Proof
+  CONJ_TAC
+  >- (impl_tac >- ACCEPT_TAC TRUTH >> ACCEPT_TAC TRUTH)
+  >> ACCEPT_TAC TRUTH
 QED
 
 Theorem invalid_intermediate:

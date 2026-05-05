@@ -470,7 +470,7 @@ fun with_theorem_trace name f =
     case result of TraceOk value => value | TraceError e => raise e
   end
 
-fun proof_ir_prove name end_path end_ok checkpoint_depth g tactic_text =
+fun proof_ir_prove name end_path end_ok checkpoint_depth g original_tac tactic_text =
   let
     val _ = active_tactic_text_ref := tactic_text
     val plan = HolbuildProofIr.steps tactic_text
@@ -485,7 +485,7 @@ fun proof_ir_prove name end_path end_ok checkpoint_depth g tactic_text =
             val _ = failed_step_span_ref := SOME (HolbuildProofIr.step_start plain_step,
                                                   HolbuildProofIr.step_end plain_step)
             val _ = failed_plan_position_ref := SOME (0, HolbuildProofIr.step_kind plain_step, label)
-            val result = TraceOk (atomic_prove label g (compile_tactic label (HolbuildProofIr.step_program plain_step)))
+            val result = TraceOk (atomic_prove label g original_tac)
                          handle e => TraceError e
             val _ = failed_step_span_ref := old_failed_step_span
             val _ = failed_plan_position_ref := old_failed_plan_position
@@ -568,7 +568,7 @@ fun prove_outer_theorem (g, tac) (_, name, tactic_text, _, _, end_path, end_ok, 
     val th =
       with_theorem_trace name (fn () =>
         if atomic then atomic_prove name g tac
-        else proof_ir_prove name end_path end_ok checkpoint_depth g tactic_text)
+        else proof_ir_prove name end_path end_ok checkpoint_depth g tac tactic_text)
       handle e => (proving_with_proof_ir_ref := false; raise e)
     val _ = proving_with_proof_ir_ref := false
     val _ = theorem_info_ref := NONE
