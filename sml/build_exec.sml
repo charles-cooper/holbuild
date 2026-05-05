@@ -1479,9 +1479,13 @@ fun failed_prefix_resume_message node source_text checkpoint prefix_text =
     val replay_tactic_offset = skip_tactic_resume_prefix (#tactic_text checkpoint) tactic_offset
     val replay_source_offset = #tactic_start checkpoint + replay_tactic_offset
   in
-    checkpoint_resume_message node
-      ["from: failed-prefix checkpoint in " ^ #safe_name checkpoint,
-       "replay starts at: " ^ source_location_text (source_file node) source_text replay_source_offset]
+    let val resume_location = source_location_text (source_file node) source_text replay_source_offset
+    in
+      checkpoint_resume_message node
+        ["from: failed-prefix checkpoint in " ^ #safe_name checkpoint,
+         "matched proof prefix through: " ^ resume_location,
+         "replaying remaining proof from: " ^ resume_location]
+    end
   end
 
 fun failed_prefix_resume_source policy timeout_marker plan_only_marker source checkpoints checkpoint step_count prefix_text =

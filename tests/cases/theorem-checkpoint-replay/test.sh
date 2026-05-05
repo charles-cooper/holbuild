@@ -384,7 +384,8 @@ if (cd "$failure_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) >
   exit 1
 fi
 require_grep "from: failed-prefix checkpoint in b_thm" "$failure_again_log"
-require_grep "replay starts at: .*AScript.sml:" "$failure_again_log"
+require_grep "matched proof prefix through: .*AScript.sml:" "$failure_again_log"
+require_grep "replaying remaining proof from: .*AScript.sml:" "$failure_again_log"
 require_grep "top goal at failed fragment:" "$failure_again_log"
 require_grep "plan position: 00 tactic FAIL_TAC" "$failure_again_log"
 require_grep "remaining goals at failed fragment: 1" "$failure_again_log"
