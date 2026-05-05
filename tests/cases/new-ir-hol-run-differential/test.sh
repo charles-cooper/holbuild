@@ -187,6 +187,40 @@ check_case() {
   fi
 }
 
+check_plain_fallback_case() {
+  local name=$1
+  local body=$2
+  local project=$tmpdir/$name
+  local hol_log=$tmpdir/$name.hol-run.log
+  local ir_log=$tmpdir/$name.new-ir.log
+  local hol_artifacts=$tmpdir/$name.hol-run-artifacts
+  make_project "$project" "$body"
+
+  run_hol_run "$project" "$hol_log"
+  copy_hol_run_artifacts "$project" "$hol_artifacts"
+  rm -rf "$project/.hol" "$project/.holbuild" "$project"/src/ATheory.{sig,sml,dat,ui,uo}
+  run_new_ir "$project" "$ir_log"
+  compare_success_artifacts "$name" "$hol_artifacts" "$project"
+
+  if grep -R "HolbuildProofRuntime.install" "$project/.holbuild/stage" >/dev/null; then
+    echo "expected unsafe plain-step theory to fall back to plain execution" >&2
+    exit 1
+  fi
+}
+
+check_plain_fallback_case unsafe_plain_theory_fallback 'Theorem decomposable_prefix:
+  T ∧ T
+Proof
+  CONJ_TAC >> ACCEPT_TAC TRUTH >> ACCEPT_TAC TRUTH
+QED
+
+Theorem unsafe_then1_chain:
+  T ∧ T ∧ T
+Proof
+  rpt CONJ_TAC >- ACCEPT_TAC TRUTH >- ACCEPT_TAC TRUTH >- ACCEPT_TAC TRUTH
+QED
+'
+
 check_case success_suite 'val bad_tac = fn g => ([g], fn _ => TRUTH);
 
 Theorem sequence_success:

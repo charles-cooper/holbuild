@@ -1403,8 +1403,21 @@ fun plain_source_from_checkpoint source_text start_offset =
   if start_offset <= 0 then source_text
   else "val _ = Tactical.restore_prover();\n" ^ String.extract(source_text, start_offset, NONE)
 
+fun proof_ir_plain_step tactic_text =
+  case HolbuildProofIr.steps tactic_text of
+      [HolbuildProofIr.StepPlain _] => true
+    | _ => false
+  handle _ => false
+
+fun proof_ir_theory_needs_plain checkpoints =
+  List.exists (fn ({tactic_text, has_proof_attrs, ...} : HolbuildTheoryCheckpoints.checkpoint) =>
+                 (not has_proof_attrs) andalso proof_ir_plain_step tactic_text)
+              checkpoints
+
 fun instrumented_source policy timeout_marker plan_only_marker source_text start_offset checkpoints =
-  if goalfrag_enabled policy then
+  if proof_ir_enabled policy andalso proof_ir_theory_needs_plain checkpoints then
+    plain_source_from_checkpoint source_text start_offset
+  else if goalfrag_enabled policy then
     HolbuildTheoryCheckpoints.instrument
       {source = source_text, start_offset = start_offset, checkpoints = checkpoints,
        save_checkpoints = checkpoint_enabled policy,
@@ -1916,7 +1929,7 @@ fun checkpoint_policy_for_node ({skip_checkpoints, goalfrag, new_ir, tactic_time
                     goalfrag_trace = goalfrag andalso goalfrag_trace}
 
 fun proof_engine (CheckpointPolicy {goalfrag = false, ...}) = "plain_v1"
-  | proof_engine (CheckpointPolicy {new_ir = true, ...}) = "proof_ir_v3"
+  | proof_engine (CheckpointPolicy {new_ir = true, ...}) = "proof_ir_v4"
   | proof_engine _ = "goalfrag_failed_fragment_span_v6"
 
 fun build_config_lines_for_node options project node =
