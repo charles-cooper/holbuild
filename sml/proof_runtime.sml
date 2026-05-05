@@ -30,6 +30,7 @@ val failed_plan_position_ref = ref NONE : (int * string * string) option ref
 val compiled_tactic_ref = ref Tactical.ALL_TAC
 val compiled_list_tactic_ref = ref Tactical.ALL_LT
 val proof_history_ref = ref (NONE : goalStack.gstk History.history option)
+val branch_tail_count_ref = ref (NONE : int option)
 
 fun env_bool name =
   case OS.Process.getEnv name of
@@ -314,6 +315,60 @@ fun apply_gentle_then1_step label false first_program second_program =
         handle e => report_step_failure label e
       end
 
+fun current_goal_total () = length (history_top_goals()) handle _ => 0
+
+fun current_branch_generated_count label =
+  case !branch_tail_count_ref of
+      NONE => raise Fail ("branch suffix without active branch: " ^ label)
+    | SOME tail_count => current_goal_total () - tail_count
+
+fun apply_branch_start_step label program =
+  let
+    val before_count = current_goal_total ()
+    val tactic = compile_tactic label program
+    val tail_count = before_count - 1
+  in
+    if before_count <= 0 then raise Fail ("branch start with no open goals: " ^ label) else ();
+    with_tactic_timeout label
+      (fn () => append_history (goalStack.expand_listf (Tactical.NTH_GOAL tactic 1))) ();
+    branch_tail_count_ref := SOME tail_count
+  end
+  handle e => report_step_failure label e
+
+fun apply_branch_suffix_step label program =
+  let
+    val total_count = current_goal_total ()
+    val generated_count = current_branch_generated_count label
+    val tactic = compile_tactic label program
+    val list_tactic = Tactical.SPLIT_LT generated_count (Tactical.ALLGOALS tactic, Tactical.ALL_LT)
+  in
+    if generated_count = 0 then
+      (if total_count = 0 then () else append_history (goalStack.expand_listf Tactical.ALL_LT))
+    else
+      with_tactic_timeout label
+        (fn () => append_history (goalStack.expand_listf list_tactic)) ()
+  end
+  handle e => report_step_failure label e
+
+fun apply_branch_close_step label =
+  let
+    val total_count = current_goal_total ()
+    val generated_count = current_branch_generated_count label
+  in
+    if generated_count = 0 then
+      (if total_count = 0 then () else append_history (goalStack.expand_listf Tactical.ALL_LT);
+       branch_tail_count_ref := NONE)
+    else
+      raise Fail "THEN1 first subgoal not solved by branch tactic"
+  end
+  handle e => report_step_failure label e
+
+fun apply_branch_step label program phase =
+  case phase of
+      HolbuildProofIr.BranchStart => apply_branch_start_step label program
+    | HolbuildProofIr.BranchSuffix => apply_branch_suffix_step label program
+    | HolbuildProofIr.BranchClose => apply_branch_close_step label
+
 fun step proof_step =
   case proof_step of
       HolbuildProofIr.StepTactic {label, program, ...} => apply_tactic_step label program
@@ -322,6 +377,7 @@ fun step proof_step =
     | HolbuildProofIr.StepListChoice {label, program, ...} => apply_list_tactic_step label program
     | HolbuildProofIr.StepGentleThen1 {label, list_suffix, first_program, second_program, ...} =>
         apply_gentle_then1_step label list_suffix first_program second_program
+    | HolbuildProofIr.StepBranch {label, program, phase, ...} => apply_branch_step label program phase
     | HolbuildProofIr.StepPlain _ => raise Fail "plain proof step must cover the whole theorem"
 
 fun inspection_matches wanted name =
@@ -426,6 +482,7 @@ fun drop_steps 0 steps = steps
 fun run_steps steps =
   (successful_step_count_ref := 0;
    successful_prefix_end_ref := 0;
+   branch_tail_count_ref := NONE;
    run_steps_from 0 0 steps)
 
 fun display_index_at_count count steps =
