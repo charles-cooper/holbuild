@@ -189,6 +189,18 @@ check_case() {
 
 check_case success_suite 'val bad_tac = fn g => ([g], fn _ => TRUTH);
 
+Theorem existential_name_provider:
+  ?sab:bool. sab
+Proof
+  qexists_tac `T` >> simp[]
+QED
+
+Theorem existential_name_consumer:
+  T
+Proof
+  mp_tac existential_name_provider >> strip_tac >> Cases_on `sab` >> gvs[]
+QED
+
 Theorem sequence_success:
   T ∧ T
 Proof

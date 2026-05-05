@@ -221,7 +221,17 @@ fun append_history f = set_history (History.apply f (current_history()))
 fun ensure_history_limit limit = set_history (History.set_limit (current_history()) (Int.max(15, limit)))
 
 fun history_top_goals () = project_history goalStack.top_goals
-fun history_top_thm () = project_history goalStack.extract_thm
+
+fun alpha_convert_to_goal g th =
+  let
+    val goal_concl = #2 g
+    val th_concl = Thm.concl th
+  in
+    if Term.identical th_concl goal_concl then th
+    else Thm.EQ_MP (Thm.ALPHA th_concl goal_concl) th
+  end
+
+fun history_top_thm g = alpha_convert_to_goal g (project_history goalStack.extract_thm)
 
 fun print_goal_state label =
   let val goals = history_top_goals()
@@ -557,7 +567,7 @@ fun proof_ir_prove name end_path end_ok checkpoint_depth g original_tac tactic_t
           let
             val _ = init_history g (length plan + 1)
             val _ = run_steps plan
-            val th = history_top_thm()
+            val th = history_top_thm g
                      handle e => (print_goal_state (name ^ " finish"); raise e)
             val _ = save_checkpoint "end_of_proof" false end_path end_ok checkpoint_depth
             val _ = drop_all()
@@ -607,7 +617,7 @@ fun finish_failed_prefix name old_prefix_text old_step_count tactic_text failed_
           val _ = successful_step_count_ref := skip_count
           val _ = successful_prefix_end_ref := common_bytes
           val _ = run_steps_from skip_count (display_index_at_count skip_count plan) (drop_steps skip_count plan)
-          val th = history_top_thm()
+          val th = history_top_thm (project_history goalStack.initial_goal)
                    handle e => (print_goal_state (name ^ " finish"); raise e)
           val _ = drop_all()
           val _ = theorem_info_ref := NONE
