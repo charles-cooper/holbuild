@@ -294,7 +294,7 @@ path.write_text(path.read_text().replace('FAIL_TAC "expected replay seed failure
 PY
 plain_replay_log=$tmpdir/plain-replay.log
 (cd "$plain_replay_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --skip-goalfrag --no-cache ATheory) > "$plain_replay_log" 2>&1
-if grep -q "resuming ATheory from checkpoint a_thm" "$plain_replay_log"; then
+if grep -q "from: theorem-context checkpoint after a_thm" "$plain_replay_log"; then
   echo "--skip-goalfrag reused goalfrag theorem checkpoint" >&2
   exit 1
 fi
@@ -331,7 +331,8 @@ path.write_text(path.read_text().replace('raise Fail "expected resume replay see
 PY
 resume_replay_log=$tmpdir/resume-replay.log
 (cd "$resume_replay_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$resume_replay_log" 2>&1
-require_grep "resuming ATheory from checkpoint partial_right_" "$resume_replay_log"
+require_grep "from: theorem-context checkpoint after partial_right_" "$resume_replay_log"
+require_grep "continuing at: .*AScript.sml:" "$resume_replay_log"
 require_grep "ATheory built" "$resume_replay_log"
 
 failure_project=$tmpdir/failure-project
@@ -380,7 +381,8 @@ if (cd "$failure_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) >
   echo "expected repeated failing proof to fail build" >&2
   exit 1
 fi
-require_grep "resuming ATheory from checkpoint b_thm failed_prefix" "$failure_again_log"
+require_grep "from: failed-prefix checkpoint in b_thm" "$failure_again_log"
+require_grep "replay starts at: .*AScript.sml:" "$failure_again_log"
 require_grep "top goal at failed fragment:" "$failure_again_log"
 require_grep "remaining goals at failed fragment: 1" "$failure_again_log"
 require_file "$a_thm_context"
@@ -400,7 +402,7 @@ path.write_text(path.read_text().replace('FAIL_TAC "expected failure"', 'cheat')
 PY
 failure_fixed_log=$tmpdir/failure-fixed.log
 (cd "$failure_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$failure_fixed_log" 2>&1
-require_grep "resuming ATheory from checkpoint b_thm failed_prefix" "$failure_fixed_log"
+require_grep "from: failed-prefix checkpoint in b_thm" "$failure_fixed_log"
 require_grep "ATheory built" "$failure_fixed_log"
 if [[ -e "$failure_project/.holbuild/checkpoints/replay/src/AScript.sml.b_thm_context.save" || \
       -e "$failure_project/.holbuild/checkpoints/replay/src/AScript.sml.b_thm_context.save.ok" || \
@@ -444,7 +446,7 @@ if (cd "$stale_prefix_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheo
   echo "expected second stale-prefix build to fail" >&2
   exit 1
 fi
-require_grep "resuming ATheory from checkpoint first_failure failed_prefix" "$stale_second_log"
+require_grep "from: failed-prefix checkpoint in first_failure" "$stale_second_log"
 require_grep "theorem: second_failure (line " "$stale_second_log"
 require_grep "top goal at failed fragment:" "$stale_second_log"
 require_file "$(find "$stale_prefix_project/.holbuild/checkpoints" -name '*second_failure_failed_prefix.save' -print -quit)"
@@ -453,8 +455,8 @@ if (cd "$stale_prefix_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheo
   echo "expected third stale-prefix build to fail" >&2
   exit 1
 fi
-require_grep "resuming ATheory from checkpoint second_failure failed_prefix" "$stale_third_log"
-if grep -q "resuming ATheory from checkpoint first_failure failed_prefix" "$stale_third_log"; then
+require_grep "from: failed-prefix checkpoint in second_failure" "$stale_third_log"
+if grep -q "from: failed-prefix checkpoint in first_failure" "$stale_third_log"; then
   echo "stale earlier failed_prefix was selected over later failure" >&2
   exit 1
 fi
@@ -496,7 +498,7 @@ if (cd "$slow_prefix_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheor
 fi
 second_slow_count=$(wc -c < "$slow_prefix_counter" | tr -d ' ')
 [[ "$second_slow_count" = "2" ]] || { echo "failed-prefix replay reran slow prefix; count $second_slow_count" >&2; exit 1; }
-require_grep "resuming ATheory from checkpoint slow_prefix_failure failed_prefix" "$slow_prefix_again_log"
+require_grep "from: failed-prefix checkpoint in slow_prefix_failure" "$slow_prefix_again_log"
 require_grep "top goal at failed fragment:" "$slow_prefix_again_log"
 require_grep "remaining goals at failed fragment: 1" "$slow_prefix_again_log"
 
@@ -548,7 +550,7 @@ fi
 second_dep_count=$(wc -c < "$failed_root_counter" | tr -d ' ')
 [[ "$second_dep_count" = "1" ]] || { echo "no-change rebuild reran completed dependency; count $second_dep_count" >&2; exit 1; }
 require_grep "ATheory is up to date" "$failed_root_again_log"
-require_grep "resuming BTheory from checkpoint b_thm failed_prefix" "$failed_root_again_log"
+require_grep "from: failed-prefix checkpoint in b_thm" "$failed_root_again_log"
 
 changed_prefix_project=$tmpdir/changed-prefix-project
 mkdir -p "$changed_prefix_project/src"
@@ -597,7 +599,7 @@ PY
 changed_prefix_fixed_log=$tmpdir/changed-prefix-fixed.log
 (cd "$changed_prefix_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --force --no-cache --tactic-timeout 0 --goalfrag-trace ATheory) > "$changed_prefix_fixed_log" 2>&1
 require_grep "ATheory built" "$changed_prefix_fixed_log"
-if grep -q "resuming ATheory from checkpoint changed_prefix failed_prefix" "$changed_prefix_fixed_log"; then
+if grep -q "from: failed-prefix checkpoint in changed_prefix" "$changed_prefix_fixed_log"; then
   echo "changed failed-prefix checkpoint was reused after proof text changed before the saved prefix" >&2
   exit 1
 fi
@@ -650,7 +652,7 @@ if (cd "$priority_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" -j2 build BTheo
 fi
 priority_count=$(wc -c < "$priority_counter" | tr -d ' ')
 [[ "$priority_count" = "0" ]] || { echo "scheduler ran unrelated always-reexecute target before failed_prefix; count $priority_count" >&2; exit 1; }
-require_grep "resuming BTheory from checkpoint b_fail failed_prefix" "$priority_again_log"
+require_grep "from: failed-prefix checkpoint in b_fail" "$priority_again_log"
 
 branch_failure_project=$tmpdir/branch-failure-project
 mkdir -p "$branch_failure_project/src"

@@ -116,7 +116,7 @@ if (cd "$root_timeout_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --tac
   echo "expected repeated root project tactic to time out" >&2
   exit 1
 fi
-require_grep "resuming ATheory from checkpoint root_slow_thm failed_prefix" "$root_timeout_again_log"
+require_grep "from: failed-prefix checkpoint in root_slow_thm" "$root_timeout_again_log"
 require_grep "top goal at failed fragment:" "$root_timeout_again_log"
 require_grep "remaining goals at failed fragment: 1" "$root_timeout_again_log"
 

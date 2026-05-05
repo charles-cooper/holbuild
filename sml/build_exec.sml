@@ -1326,9 +1326,69 @@ fun replay_candidate project node checkpoints =
   if always_reexecute node then NONE
   else best_replay_candidate project node checkpoints
 
-fun checkpoint_resume_message node label =
+fun common_prefix_size old_text new_text =
+  let
+    val old_n = size old_text
+    val new_n = size new_text
+    val limit = Int.min(old_n, new_n)
+    fun loop i =
+      if i >= limit then i
+      else if String.sub(old_text, i) = String.sub(new_text, i) then loop (i + 1)
+      else i
+  in
+    loop 0
+  end
+
+fun skip_tactic_resume_prefix text offset =
+  let
+    val n = size text
+    fun is_ws c = c = #" " orelse c = #"\n" orelse c = #"\t" orelse c = #"\r"
+    fun skip_ws i = if i < n andalso is_ws (String.sub(text, i)) then skip_ws (i + 1) else i
+    fun starts_with i token =
+      let val m = size token
+      in i + m <= n andalso String.substring(text, i, m) = token end
+    fun skip_separator i =
+      let val j = skip_ws i
+      in
+        if starts_with j ">>" then skip_ws (j + 2)
+        else if starts_with j ">-" then skip_ws (j + 2)
+        else j
+      end
+  in
+    skip_separator (Int.min(n, Int.max(0, offset)))
+  end
+
+fun source_location_text source_path source_text offset =
+  let
+    val bounded = Int.min(size source_text, Int.max(0, offset))
+    val line = HolbuildTheoryDiagnostics.line_number_at source_text bounded
+    val col = HolbuildTheoryDiagnostics.column_number_at source_text bounded
+  in
+    String.concat [source_path, ":", Int.toString line, ":", Int.toString col]
+  end
+
+fun checkpoint_resume_message node lines =
   HolbuildStatus.message_stdout
-    (String.concat ["resuming ", logical_name node, " from checkpoint ", label, "\n"])
+    (String.concat ("resuming " ^ logical_name node ^ "\n" :: map (fn line => "  " ^ line ^ "\n") lines))
+
+fun deps_loaded_resume_message node =
+  checkpoint_resume_message node ["from: deps-loaded checkpoint"]
+
+fun theorem_context_resume_message node source_text safe_name boundary =
+  checkpoint_resume_message node
+    ["from: theorem-context checkpoint after " ^ safe_name,
+     "continuing at: " ^ source_location_text (source_file node) source_text boundary]
+
+fun failed_prefix_resume_message node source_text checkpoint prefix_text =
+  let
+    val tactic_offset = common_prefix_size prefix_text (#tactic_text checkpoint)
+    val replay_tactic_offset = skip_tactic_resume_prefix (#tactic_text checkpoint) tactic_offset
+    val replay_source_offset = #tactic_start checkpoint + replay_tactic_offset
+  in
+    checkpoint_resume_message node
+      ["from: failed-prefix checkpoint in " ^ #safe_name checkpoint,
+       "replay starts at: " ^ source_location_text (source_file node) source_text replay_source_offset]
+  end
 
 fun failed_prefix_resume_source policy timeout_marker plan_only_marker source checkpoints checkpoint step_count prefix_text =
   let
@@ -1388,7 +1448,7 @@ fun write_theory_script policy project base_context plan keys input_key toolchai
       val deps_ok = deps_checkpoint_ok_text deps_key
       fun run_from_deps_checkpoint () =
         (write_text staged_script (instrumented_source policy (SOME timeout_marker) plan_only_marker source_text 0 checkpoints);
-         checkpoint_resume_message node "deps_loaded";
+         deps_loaded_resume_message node;
          {context = HolState deps_loaded, files = [staged_script], failure_checkpoints = [deps_loaded]})
       fun run_from_fresh_preload () =
         (write_preload plan node deps_loaded deps_ok preload;
@@ -1400,7 +1460,7 @@ fun write_theory_script policy project base_context plan keys input_key toolchai
             let
               val path = #failed_prefix_path checkpoint
               val _ = write_text staged_script (failed_prefix_resume_source policy timeout_marker plan_only_marker source_text checkpoints checkpoint step_count prefix_text)
-              val _ = checkpoint_resume_message node (#safe_name checkpoint ^ " failed_prefix")
+              val _ = failed_prefix_resume_message node source_text checkpoint prefix_text
             in
               {context = HolState path, files = [staged_script], failure_checkpoints = [path, deps_loaded]}
             end
@@ -1409,7 +1469,7 @@ fun write_theory_script policy project base_context plan keys input_key toolchai
                 SOME {boundary, path, safe_name, failure_checkpoints} =>
                   let
                     val _ = write_text staged_script (instrumented_source policy (SOME timeout_marker) plan_only_marker source_text boundary checkpoints)
-                    val _ = checkpoint_resume_message node safe_name
+                    val _ = theorem_context_resume_message node source_text safe_name boundary
                   in
                     {context = HolState path, files = [staged_script], failure_checkpoints = failure_checkpoints @ [deps_loaded]}
                   end

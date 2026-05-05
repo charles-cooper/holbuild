@@ -63,7 +63,7 @@ if (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --new-ir ATheory) 
 fi
 edited_count=$(wc -c < "$counter" | tr -d ' ')
 [[ "$edited_count" = "2" ]] || { echo "new-ir failed-prefix replay reran unchanged slow prefix after suffix edit; count $edited_count" >&2; exit 1; }
-require_grep "resuming ATheory from checkpoint slow_prefix_failure failed_prefix" "$edited_log"
+require_grep "from: failed-prefix checkpoint in slow_prefix_failure" "$edited_log"
 require_grep "edited suffix failure" "$edited_log"
 require_grep "remaining goals at failed fragment: 1" "$edited_log"
 
@@ -76,6 +76,6 @@ fixed_log=$tmpdir/fixed.log
 (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --new-ir ATheory) > "$fixed_log" 2>&1
 fixed_count=$(wc -c < "$counter" | tr -d ' ')
 [[ "$fixed_count" = "2" ]] || { echo "new-ir failed-prefix replay reran unchanged slow prefix after suffix fix; count $fixed_count" >&2; exit 1; }
-require_grep "resuming ATheory from checkpoint slow_prefix_failure failed_prefix" "$fixed_log"
+require_grep "from: failed-prefix checkpoint in slow_prefix_failure" "$fixed_log"
 require_grep "ATheory built" "$fixed_log"
 require_file "$project/.holbuild/obj/src/ATheory.dat"

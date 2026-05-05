@@ -170,7 +170,7 @@ write_good_source
 force_rebuild
 fixed_log=$tmpdir/fixed.log
 (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$fixed_log" 2>&1
-require_grep "resuming ATheory from checkpoint second failed_prefix" "$fixed_log"
+require_grep "from: failed-prefix checkpoint in second" "$fixed_log"
 if grep -q "parent for this saved state\|goalfrag/checkpoint run failed" "$fixed_log"; then
   echo "suffix recovery hit checkpoint parent mismatch/instrumentation failure" >&2
   exit 1
@@ -186,8 +186,8 @@ write_good_source
 force_rebuild
 missing_ok_log=$tmpdir/missing-ok.log
 (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$missing_ok_log" 2>&1
-require_grep "resuming ATheory from checkpoint deps_loaded" "$missing_ok_log"
-if grep -q "resuming ATheory from checkpoint first" "$missing_ok_log"; then
+require_grep "from: deps-loaded checkpoint" "$missing_ok_log"
+if grep -q "from: theorem-context checkpoint after first" "$missing_ok_log"; then
   echo "missing checkpoint .ok was treated as replayable" >&2
   exit 1
 fi
@@ -202,8 +202,8 @@ force_rebuild
 missing_save_log=$tmpdir/missing-save.log
 (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$missing_save_log" 2>&1
 require_grep "checkpoint metadata exists without checkpoint file; discarding metadata:" "$missing_save_log"
-require_grep "resuming ATheory from checkpoint deps_loaded" "$missing_save_log"
-if grep -q "resuming ATheory from checkpoint first\|selected HOL base-state checkpoint is missing\|Couldn't load HOL base-state\|instrumented log:" "$missing_save_log"; then
+require_grep "from: deps-loaded checkpoint" "$missing_save_log"
+if grep -q "from: theorem-context checkpoint after first\|selected HOL base-state checkpoint is missing\|Couldn't load HOL base-state\|instrumented log:" "$missing_save_log"; then
   echo "orphan checkpoint .ok/.save mismatch was treated as replayable" >&2
   exit 1
 fi
@@ -221,7 +221,7 @@ force_rebuild
 backup_log=$tmpdir/backup-restore.log
 (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$backup_log" 2>&1
 require_grep "checkpoint save was interrupted; restoring previous checkpoint:" "$backup_log"
-require_grep "resuming ATheory from checkpoint first" "$backup_log"
+require_grep "from: theorem-context checkpoint after first" "$backup_log"
 assert_no_checkpoints "clean rebuild after restored checkpoint backup retained checkpoint files"
 
 run_expect_suffix_failure "$tmpdir/corrupt-seed.log"
@@ -236,7 +236,7 @@ if (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$corru
   echo "corrupt checkpoint replay should fail the build, not retry plain source" >&2
   exit 1
 fi
-require_grep "resuming ATheory from checkpoint first" "$corrupt_log"
+require_grep "from: theorem-context checkpoint after first" "$corrupt_log"
 require_grep "instrumented log:" "$corrupt_log"
 if grep -q -- "--- child log tail ---" "$corrupt_log"; then
   echo "checkpoint failure duplicated full child log tail" >&2
@@ -266,7 +266,7 @@ if (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$corru
   echo "corrupt deps checkpoint replay should fail the build" >&2
   exit 1
 fi
-require_grep "resuming ATheory from checkpoint deps_loaded" "$corrupt_deps_log"
+require_grep "from: deps-loaded checkpoint" "$corrupt_deps_log"
 if [[ -e "$corrupt_deps" || -e "$corrupt_deps.ok" ]]; then
   echo "failed replay did not discard corrupt deps checkpoint" >&2
   exit 1
@@ -282,7 +282,7 @@ write_changed_prefix_source
 force_rebuild
 prefix_log=$tmpdir/prefix-change.log
 (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$prefix_log" 2>&1
-if grep -q "resuming ATheory from checkpoint first" "$prefix_log"; then
+if grep -q "from: theorem-context checkpoint after first" "$prefix_log"; then
   echo "prefix-changing edit reused stale theorem checkpoint" >&2
   exit 1
 fi
