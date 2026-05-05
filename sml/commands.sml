@@ -20,7 +20,7 @@ fun usage () = print
   \  holbuild [--json] [--source-dir PATH] [--holdir PATH] [--maxheap MB] [-jN] heap NAME\n\
   \  holbuild [--json] [--source-dir PATH] [--holdir PATH] [--maxheap MB] run [ARG ...]\n\
   \  holbuild [--json] [--source-dir PATH] [--holdir PATH] [--maxheap MB] repl [ARG ...]\n\
-  \  holbuild gc [--retention-days DAYS] [--cache-dir PATH] [--clean-only|--cache-only]\n\n\
+  \  holbuild gc [--retention-days DAYS] [--max-checkpoints-gb GB] [--cache-dir PATH] [--clean-only|--cache-only]\n\n\
   \HOLDIR is found from --holdir, HOLBUILD_HOLDIR, or HOLDIR for HOL commands.\n\
   \Project sources are found from --source-dir, HOLBUILD_SOURCE_DIR, or cwd.\n\
   \-j/--jobs controls build parallelism. Default is .holconfig.toml [build].jobs,\n\
@@ -440,37 +440,43 @@ fun dispatch tc jobs args =
 
 fun parse_gc_args args =
   let
-    fun result root days clean_only cache_only =
+    fun result root days max_checkpoints_gb clean_only cache_only =
       case (clean_only, cache_only) of
           (true, true) => raise Error "--clean-only and --cache-only are mutually exclusive"
-        | (true, false) => (root, days, true, false)
-        | (false, true) => (root, days, false, true)
-        | (false, false) => (root, days, true, true)
-    fun loop root days clean_only cache_only rest =
+        | (true, false) => (root, days, max_checkpoints_gb, true, false)
+        | (false, true) => (root, days, max_checkpoints_gb, false, true)
+        | (false, false) => (root, days, max_checkpoints_gb, true, true)
+    fun loop root days max_checkpoints_gb clean_only cache_only rest =
       case rest of
-          [] => result root days clean_only cache_only
-        | "--cache-dir" :: path :: xs => loop (SOME path) days clean_only cache_only xs
-        | "--retention-days" :: n :: xs => loop root (HolbuildCache.parse_days n) clean_only cache_only xs
-        | "--days" :: n :: xs => loop root (HolbuildCache.parse_days n) clean_only cache_only xs
-        | "--clean-only" :: xs => loop root days true cache_only xs
-        | "--cache-only" :: xs => loop root days clean_only true xs
+          [] => result root days max_checkpoints_gb clean_only cache_only
+        | "--cache-dir" :: path :: xs => loop (SOME path) days max_checkpoints_gb clean_only cache_only xs
+        | "--retention-days" :: n :: xs => loop root (HolbuildCache.parse_days n) max_checkpoints_gb clean_only cache_only xs
+        | "--days" :: n :: xs => loop root (HolbuildCache.parse_days n) max_checkpoints_gb clean_only cache_only xs
+        | "--max-checkpoints-gb" :: n :: xs =>
+            (case Int.fromString n of
+                 SOME gb => if gb >= 0 then loop root days gb clean_only cache_only xs
+                            else raise Error "--max-checkpoints-gb must be non-negative"
+               | NONE => raise Error "--max-checkpoints-gb requires an integer")
+        | "--max-checkpoints-gb" :: [] => raise Error "--max-checkpoints-gb requires GB"
+        | "--clean-only" :: xs => loop root days max_checkpoints_gb true cache_only xs
+        | "--cache-only" :: xs => loop root days max_checkpoints_gb clean_only true xs
         | arg :: _ => raise Error ("unknown gc option: " ^ arg)
   in
-    loop NONE HolbuildCache.default_retention_days false false args
+    loop NONE HolbuildCache.default_retention_days HolbuildBuildExec.default_max_checkpoints_gb false false args
   end
 
-fun run_project_gc days =
+fun run_project_gc (days, max_checkpoints_gb) =
   let
     val project = load_project ()
-    fun clean_project () = HolbuildBuildExec.clean_project project days
+    fun clean_project () = HolbuildBuildExec.clean_project project days max_checkpoints_gb
   in
     HolbuildBuildExec.with_project_lock project "gc" clean_project
   end
 
 fun gc args =
   let
-    val (cache_root, days, clean_project, clean_cache) = parse_gc_args args
-    val _ = if clean_project then run_project_gc days else ()
+    val (cache_root, days, max_checkpoints_gb, clean_project, clean_cache) = parse_gc_args args
+    val _ = if clean_project then run_project_gc (days, max_checkpoints_gb) else ()
     val _ = if clean_cache then HolbuildCache.gc_root (Option.getOpt(cache_root, HolbuildCache.cache_root ())) days else ()
   in
     ()

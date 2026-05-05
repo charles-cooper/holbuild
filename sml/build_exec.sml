@@ -525,16 +525,84 @@ fun remove_stale_checkpoint_artifacts cutoff dir =
       clean_dir dir 0
     end
 
-fun clean_project project days =
+val default_max_checkpoints_gb = 5
+
+fun gb_to_bytes gb = IntInf.fromInt gb * 1073741824
+
+fun file_size path = FS.fileSize path handle OS.SysErr _ => 0
+
+fun collect_checkpoint_artifacts dir =
+  if not (path_exists dir) then []
+  else
+    let
+      fun collect path acc =
+        if FS.isDir path handle OS.SysErr _ => false then
+          List.foldl (fn (child, acc') => collect child acc') acc (children path)
+        else if checkpoint_clean_artifact path then
+          (path, FS.modTime path handle OS.SysErr _ => Time.zeroTime, file_size path) :: acc
+        else acc
+    in
+      collect dir []
+    end
+
+fun total_checkpoint_bytes artifacts =
+  List.foldl (fn ((_, _, size), total) => total + size) (0 : Position.int) artifacts
+
+fun sort_by_mtime_ascending artifacts =
+  let
+    fun insert x [] = [x]
+      | insert x ((p, mt, s) :: rest) =
+          if Time.<= (#2 x, mt) then x :: (p, mt, s) :: rest
+          else (p, mt, s) :: insert x rest
+  in
+    List.foldl (fn (artifact, sorted) => insert artifact sorted) [] artifacts
+  end
+
+fun evict_oldest_checkpoints dir max_bytes =
+  if max_bytes <= 0 then 0
+  else
+    let
+      val artifacts = collect_checkpoint_artifacts dir
+      val total = total_checkpoint_bytes artifacts
+    in
+      if total <= max_bytes then 0
+      else
+        let
+          val sorted = sort_by_mtime_ascending artifacts
+          fun evict remaining freed removed =
+            case remaining of
+                [] => removed
+              | (path, _, size) :: rest =>
+                  if total - freed - size < max_bytes then
+                    (remove_file path; removed + 1)
+                  else
+                    (remove_file path; evict rest (freed + size) (removed + 1))
+          val evicted = evict sorted 0 0
+          val _ = remove_empty_dirs dir
+        in
+          evicted
+        end
+    end
+
+and remove_empty_dirs dir =
+  if not (path_exists dir) orelse not (FS.isDir dir handle OS.SysErr _ => false) then ()
+  else
+    (List.app remove_empty_dirs (children dir);
+     FS.rmDir dir handle OS.SysErr _ => ())
+
+fun clean_project project days max_checkpoints_gb =
   let
     val cutoff = retention_cutoff days
     val stage_removed = remove_stale_children cutoff (project_state_dir project "stage")
     val log_removed = remove_stale_children cutoff (project_state_dir project "logs")
     val checkpoint_removed = remove_stale_checkpoint_artifacts cutoff (project_state_dir project "checkpoints")
+    val evicted = evict_oldest_checkpoints (project_state_dir project "checkpoints")
+                                       (gb_to_bytes max_checkpoints_gb)
   in
     print ("project clean: removed stage=" ^ Int.toString stage_removed ^
            " logs=" ^ Int.toString log_removed ^
-           " checkpoints=" ^ Int.toString checkpoint_removed ^ "\n")
+           " checkpoints=" ^ Int.toString checkpoint_removed ^
+           " evicted=" ^ Int.toString evicted ^ "\n")
   end
 
 fun file_exists path = FS.access(path, [FS.A_READ]) handle OS.SysErr _ => false
@@ -1861,6 +1929,7 @@ fun build_theory_node (options : build_options) tc project base_context plan key
     if not force andalso not (always_reexecute node) andalso
        up_to_date policy project plan keys input_key toolchain_key node metadata_checkpoints then
       (remove_tree_if_exists stage;
+       remove_checkpoint_family project node;
        HolbuildStatus.UpToDate)
     else if cache_restore_allowed andalso materialize_valid_cache () then
       (remove_tree stage;
