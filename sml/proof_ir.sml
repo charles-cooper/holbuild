@@ -683,56 +683,8 @@ and list_tactic_label source lt =
 
 fun span_text source (start, stop) = String.substring(source, start, stop - start)
 
-fun expr_contains_try e =
-  case e of
-      Infix {left, right, ...} => expr_contains_try left orelse expr_contains_try right
-    | App _ =>
-        (case app_name e of
-             SOME ("TRY", [_]) => true
-           | SOME ("TRY_LT", [_]) => true
-           | SOME (_, args) => List.exists expr_contains_try args
-           | NONE => false)
-    | Parens {exp, ...} => expr_contains_try exp
-    | Tuple {elems = {args, ...}, ...} => List.exists expr_contains_try args
-    | List {elems = {args, ...}, ...} => List.exists expr_contains_try args
-    | _ => false
-
-fun branch_expr (Infix {id = (_, ">-"), ...}) = true
-  | branch_expr (Infix {id = (_, "THEN1"), ...}) = true
-  | branch_expr (Parens {exp, ...}) = branch_expr exp
-  | branch_expr _ = false
-
-fun then1_chain_count (Infix {left, id = (_, opn), right}) =
-      then1_chain_count left + then1_chain_count right +
-      (if opn = ">-" orelse opn = "THEN1" then 1 else 0)
-  | then1_chain_count (Parens {exp, ...}) = then1_chain_count exp
-  | then1_chain_count _ = 0
-
-fun unsafe_then1_chain source exp =
-  (* Keep sibling THEN1 chains atomic when they have the shape
-
-       prefix_tac >- branch1 >- branch2 >- branch3
-
-     or a shorter chain with impl_tac in a branch.  Plain HOL executes the
-     whole Tactical.THEN1 chain and validation at once; decomposing the branches
-     as separate history boundaries can change the observable intermediate
-     goal/validation shape.  TRY-containing chains remain decomposed because
-     failed-prefix replay tests rely on their real failure boundary. *)
-  not (expr_contains_try exp) andalso
-  (then1_chain_count exp >= 3 orelse
-   (then1_chain_count exp >= 2 andalso String.isSubstring "impl_tac" source))
-
-fun plain_program source exp =
-  if String.isSubstring ";" source then tactic_program source (parse_tactic_ast exp)
-  else parenthesize source
-
 fun steps source =
-  let val exp = parse_tactic_expr source
-  in
-    if unsafe_then1_chain source exp then
-      [StepPlain {start_pos = 0, end_pos = size source, label = source, program = plain_program source exp}]
-    else plan_tactic source (parse_tactic_ast exp)
-  end
+  plan_tactic source (parse_tactic_ast (parse_tactic_expr source))
 
 fun display_line_count (StepChoice {alternatives, ...}) = 1 + Int.max(0, 2 * length alternatives - 1)
   | display_line_count (StepListChoice {alternatives, ...}) = 1 + Int.max(0, 2 * length alternatives - 1)

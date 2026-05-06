@@ -213,6 +213,25 @@ Proof
   CONJ_TAC >- ACCEPT_TAC TRUTH >- ACCEPT_TAC TRUTH
 QED
 
+Theorem sibling_then1_chain_success:
+  T ∧ T ∧ T ∧ T
+Proof
+  rpt CONJ_TAC
+  >- ACCEPT_TAC TRUTH
+  >- ACCEPT_TAC TRUTH
+  >- ACCEPT_TAC TRUTH
+  >- ACCEPT_TAC TRUTH
+QED
+
+Theorem sibling_then1_branch_sequence_success:
+  T ∧ T ∧ T
+Proof
+  rpt CONJ_TAC
+  >- (ALL_TAC >> ACCEPT_TAC TRUTH)
+  >- ACCEPT_TAC TRUTH
+  >- ACCEPT_TAC TRUTH
+QED
+
 Theorem thenl_success:
   T ∧ T
 Proof
