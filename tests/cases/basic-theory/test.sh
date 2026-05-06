@@ -47,6 +47,10 @@ require_grep "holbuild checkpoint kind=final_context share=false" "$first_log"
 require_file "$project/.holbuild/gen/src/ATheory.sig"
 require_file "$project/.holbuild/gen/src/ATheory.sml"
 require_file "$project/.holbuild/obj/src/ATheory.dat"
+if strings -a "$project/.holbuild/obj/src/ATheory.dat" | grep -q '\.holbuild.*stage'; then
+  echo "theory dat should not record transient holbuild stage paths" >&2
+  exit 1
+fi
 require_file "$project/.holbuild/dep/basic/src/AScript.sml.key"
 if find "$project/.holbuild/checkpoints" \( -name '*.save' -o -name '*.save.ok' \) -print -quit 2>/dev/null | grep -q .; then
   echo "successful build retained checkpoint files" >&2
@@ -68,12 +72,14 @@ require_grep "artifact-root: $tmpdir" "$source_dir_context_log"
 
 source_dir_env_log=$tmpdir/source-dir-env.log
 rm -rf "$tmpdir/.holbuild"
-(cd "$tmpdir" && HOLBUILD_SOURCE_DIR="$project" "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$source_dir_env_log"
-if ! grep -q "ATheory restored from cache\|ATheory built" "$source_dir_env_log"; then
-  echo "source-dir build did not create cwd artifact tree" >&2
+(cd "$tmpdir" && HOLBUILD_CACHE_TRACE=1 HOLBUILD_SOURCE_DIR="$project" "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$source_dir_env_log"
+require_grep "cache hit: ATheory source/dependency key=" "$source_dir_env_log"
+require_grep "ATheory restored from cache" "$source_dir_env_log"
+require_file "$tmpdir/.holbuild/obj/src/ATheory.dat"
+if strings -a "$tmpdir/.holbuild/obj/src/ATheory.dat" | grep -q '\.holbuild.*stage'; then
+  echo "cache-restored theory dat should not contain transient holbuild stage paths" >&2
   exit 1
 fi
-require_file "$tmpdir/.holbuild/obj/src/ATheory.dat"
 
 : > "$project/.holbuild/gen/src/ATheory.sml"
 : > "$project/.holbuild/gen/src/ATheory.sig"

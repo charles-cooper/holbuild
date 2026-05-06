@@ -660,12 +660,16 @@ fun cache_trace_enabled () = env_bool "HOLBUILD_CACHE_TRACE" false
 fun cache_trace line =
   if cache_trace_enabled () then HolbuildStatus.message_stdout (line ^ "\n") else ()
 
+fun hol_run_file_arg stage file =
+  if canonical_path (Path.dir file) = canonical_path stage then Path.file file else file
+
 fun run_hol_files_to_log tc stage context files log_name error_message =
   let
     val log = Path.concat(stage, log_name)
+    val file_args = map (hol_run_file_arg stage) files
     val status =
       HolbuildToolchain.run_in_dir_to_file stage
-        (HolbuildToolchain.hol_subcommand_argv tc "run" @ ["--noconfig"] @ hol_context_args context @ files)
+        (HolbuildToolchain.hol_subcommand_argv tc "run" @ ["--noconfig"] @ hol_context_args context @ file_args)
         log
   in
     if HolbuildToolchain.success status then
