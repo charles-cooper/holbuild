@@ -119,6 +119,7 @@ datatype step =
   | StepList of {start_pos : int, end_pos : int, label : string, program : string}
   | StepChoice of {start_pos : int, end_pos : int, label : string, program : string, alternatives : string list}
   | StepListChoice of {start_pos : int, end_pos : int, label : string, program : string, alternatives : string list}
+  | StepThen1 of {start_pos : int, end_pos : int, first_label : string, label : string, list_suffix : bool, first_program : string, second_program : string}
   | StepGentleThen1 of {start_pos : int, end_pos : int, label : string, list_suffix : bool, first_program : string, second_program : string}
   | StepBranch of {start_pos : int, end_pos : int, label : string, program : string, phase : branch_phase}
   | StepPlain of {start_pos : int, end_pos : int, label : string, program : string}
@@ -127,6 +128,7 @@ fun step_start (StepTactic {start_pos, ...}) = start_pos
   | step_start (StepList {start_pos, ...}) = start_pos
   | step_start (StepChoice {start_pos, ...}) = start_pos
   | step_start (StepListChoice {start_pos, ...}) = start_pos
+  | step_start (StepThen1 {start_pos, ...}) = start_pos
   | step_start (StepGentleThen1 {start_pos, ...}) = start_pos
   | step_start (StepBranch {start_pos, ...}) = start_pos
   | step_start (StepPlain {start_pos, ...}) = start_pos
@@ -135,6 +137,7 @@ fun step_end (StepTactic {end_pos, ...}) = end_pos
   | step_end (StepList {end_pos, ...}) = end_pos
   | step_end (StepChoice {end_pos, ...}) = end_pos
   | step_end (StepListChoice {end_pos, ...}) = end_pos
+  | step_end (StepThen1 {end_pos, ...}) = end_pos
   | step_end (StepGentleThen1 {end_pos, ...}) = end_pos
   | step_end (StepBranch {end_pos, ...}) = end_pos
   | step_end (StepPlain {end_pos, ...}) = end_pos
@@ -143,6 +146,7 @@ fun step_label (StepTactic {label, ...}) = label
   | step_label (StepList {label, ...}) = label
   | step_label (StepChoice {label, ...}) = label
   | step_label (StepListChoice {label, ...}) = label
+  | step_label (StepThen1 {label, ...}) = label
   | step_label (StepGentleThen1 {label, ...}) = label
   | step_label (StepBranch {label, ...}) = label
   | step_label (StepPlain {label, ...}) = label
@@ -151,6 +155,9 @@ fun step_program (StepTactic {program, ...}) = program
   | step_program (StepList {program, ...}) = program
   | step_program (StepChoice {program, ...}) = program
   | step_program (StepListChoice {program, ...}) = program
+  | step_program (StepThen1 {list_suffix, first_program, second_program, ...}) =
+      let val tactic = "Tactical.THEN1(" ^ first_program ^ ", " ^ second_program ^ ")"
+      in if list_suffix then "Tactical.ALLGOALS (" ^ tactic ^ ")" else tactic end
   | step_program (StepGentleThen1 {list_suffix, first_program, second_program, ...}) =
       let val tactic = "HolbuildProofRuntime.gentle_then1 (" ^ first_program ^ ") (" ^ second_program ^ ")"
       in if list_suffix then "Tactical.ALLGOALS (" ^ tactic ^ ")" else tactic end
@@ -161,6 +168,8 @@ fun step_kind (StepTactic _) = "tactic"
   | step_kind (StepList _) = "list_tactic"
   | step_kind (StepChoice _) = "choice"
   | step_kind (StepListChoice _) = "list_choice"
+  | step_kind (StepThen1 {list_suffix = true, ...}) = "list_then1"
+  | step_kind (StepThen1 _) = "then1"
   | step_kind (StepGentleThen1 {list_suffix = true, ...}) = "list_gentle_then1"
   | step_kind (StepGentleThen1 _) = "gentle_then1"
   | step_kind (StepBranch {phase = BranchStart, ...}) = "branch_start"
@@ -533,6 +542,10 @@ fun choice_step sp label program alternatives =
 fun list_choice_step sp label program alternatives =
   StepListChoice {start_pos = #1 sp, end_pos = #2 sp, label = label, program = program, alternatives = alternatives}
 
+fun then1_step sp first_label label list_suffix first_program second_program =
+  StepThen1 {start_pos = #1 sp, end_pos = #2 sp, first_label = first_label, label = label,
+             list_suffix = list_suffix, first_program = first_program, second_program = second_program}
+
 fun gentle_then1_step sp label list_suffix first_program second_program =
   StepGentleThen1 {start_pos = #1 sp, end_pos = #2 sp, label = label, list_suffix = list_suffix,
                    first_program = first_program, second_program = second_program}
@@ -554,9 +567,18 @@ fun suffices_branch_step source q rhs list_suffix =
     (suffices_tactic_program source q)
     ("Tactical.THEN(" ^ tactic_program source rhs ^ ", Tactical.NO_TAC)")
 
+fun suffix_then1_step source lhs rhs =
+  then1_step (tactic_span (TacThen1 (lhs, rhs)))
+    (">> " ^ tactic_label source lhs)
+    ("  >- " ^ tactic_label source rhs)
+    true
+    (tactic_program source lhs)
+    (tactic_program source rhs)
+
 fun suffix_steps source tactic =
   case tactic of
-      TacSufficesBy (q, rhs) =>
+      TacThen1 (lhs, rhs) => [suffix_then1_step source lhs rhs]
+    | TacSufficesBy (q, rhs) =>
         [suffices_branch_step source q rhs true]
     | TacOrelse xs => [allgoals_choice_step source ">> ORELSE" tactic (map (tactic_label source) xs)]
     | TacTry (_, t) => [allgoals_choice_step source ">> TRY" tactic [tactic_label source t, "ALL_TAC"]]
@@ -695,6 +717,7 @@ fun steps source =
 
 fun display_line_count (StepChoice {alternatives, ...}) = 1 + Int.max(0, 2 * length alternatives - 1)
   | display_line_count (StepListChoice {alternatives, ...}) = 1 + Int.max(0, 2 * length alternatives - 1)
+  | display_line_count (StepThen1 _) = 2
   | display_line_count (StepGentleThen1 _) = 2
   | display_line_count _ = 1
 
@@ -716,6 +739,9 @@ fun format_step (i, step) =
   case step of
       StepChoice {label, alternatives, ...} => format_choice_lines i label alternatives
     | StepListChoice {label, alternatives, ...} => format_choice_lines i label alternatives
+    | StepThen1 {first_label, label, ...} =>
+        "  " ^ format_index i ^ " " ^ first_label ^ "\n" ^
+        "  " ^ format_index (i + 1) ^ " " ^ label ^ "\n"
     | StepGentleThen1 {first_program, label, ...} =>
         "  " ^ format_index i ^ " >> " ^ first_program ^ "\n" ^
         "  " ^ format_index (i + 1) ^ " " ^ label ^ "\n"

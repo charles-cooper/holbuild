@@ -405,6 +405,12 @@ Proof
   >> ACCEPT_TAC TRUTH
 QED
 
+Theorem suffix_by_success:
+  T
+Proof
+  ALL_TAC >> `T` by ACCEPT_TAC TRUTH >> ACCEPT_TAC TRUTH
+QED
+
 Theorem suffices_by_success:
   F ==> (T ∧ T)
 Proof

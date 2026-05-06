@@ -312,6 +312,25 @@ fun gentle_then1 tac1 tac2 goal =
           end
   end
 
+fun apply_then1_step label false first_program second_program =
+      let
+        val first_tactic = compile_tactic label first_program
+        val second_tactic = compile_tactic label second_program
+      in
+        with_tactic_timeout label
+          (fn () => append_history (goalStack.expandf (Tactical.THEN1(first_tactic, second_tactic)))) ()
+        handle e => report_step_failure label e
+      end
+  | apply_then1_step label true first_program second_program =
+      let
+        val first_tactic = compile_tactic label first_program
+        val second_tactic = compile_tactic label second_program
+      in
+        with_tactic_timeout label
+          (fn () => append_history (goalStack.expand_listf (Tactical.ALLGOALS (Tactical.THEN1(first_tactic, second_tactic))))) ()
+        handle e => report_step_failure label e
+      end
+
 fun apply_gentle_then1_step label false first_program second_program =
       let
         val first_tactic = compile_tactic label first_program
@@ -402,6 +421,8 @@ fun step proof_step =
     | HolbuildProofIr.StepList {label, program, ...} => apply_list_tactic_step label program
     | HolbuildProofIr.StepChoice {label, program, ...} => apply_tactic_step label program
     | HolbuildProofIr.StepListChoice {label, program, ...} => apply_list_tactic_step label program
+    | HolbuildProofIr.StepThen1 {label, list_suffix, first_program, second_program, ...} =>
+        apply_then1_step label list_suffix first_program second_program
     | HolbuildProofIr.StepGentleThen1 {label, list_suffix, first_program, second_program, ...} =>
         apply_gentle_then1_step label list_suffix first_program second_program
     | HolbuildProofIr.StepBranch {label, program, phase, ...} => apply_branch_step label program phase

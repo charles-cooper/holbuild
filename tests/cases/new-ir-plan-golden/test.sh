@@ -209,6 +209,21 @@ holbuild proof-ir plan ATheory:sibling_then1_branch_sequence_plan source=src/ASc
 EXPECTED
 
 cat >> "$project/src/AScript.sml" <<'SML'
+Theorem suffix_by_plan:
+  T
+Proof
+  ALL_TAC >> `T` by ACCEPT_TAC TRUTH >> ACCEPT_TAC TRUTH
+QED
+SML
+check_plan suffix_by_plan <<'EXPECTED'
+holbuild proof-ir plan ATheory:suffix_by_plan source=src/AScript.sml (4 steps)
+  00 ALL_TAC
+  01 >> `T`
+  02   >- ACCEPT_TAC TRUTH
+  03 >> ACCEPT_TAC TRUTH
+EXPECTED
+
+cat >> "$project/src/AScript.sml" <<'SML'
 Theorem nested_branch_by_plan:
   T /\ T
 Proof
