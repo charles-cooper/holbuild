@@ -565,13 +565,20 @@ fun suffix_steps source tactic =
     | TacMapFirst (_, xs) => [allgoals_choice_step source ">> FIRST" tactic (map (tactic_label source) xs)]
     | _ => [allgoals_step source tactic]
 
-fun branch_steps source rhs =
+fun branch_suffix_step source tactic =
+  branch_step (tactic_span tactic) ("   >> " ^ tactic_label source tactic) BranchSuffix (tactic_program source tactic)
+
+fun branch_start_steps source tactic =
+  case tactic of
+      TacThen1 (lhs, rhs) => branch_start_steps source lhs @ branch_steps source rhs
+    | _ => [branch_step (tactic_span tactic) (">- " ^ tactic_label source tactic) BranchStart (tactic_program source tactic)]
+and branch_steps source rhs =
   case rhs of
       TacThen (first :: rest) =>
         let val sp = tactic_span rhs
         in
-          branch_step (tactic_span first) (">- " ^ tactic_label source first) BranchStart (tactic_program source first) ::
-          map (fn tactic => branch_step (tactic_span tactic) ("   >> " ^ tactic_label source tactic) BranchSuffix (tactic_program source tactic)) rest @
+          branch_start_steps source first @
+          map (branch_suffix_step source) rest @
           [branch_step sp "   >- solved" BranchClose "Tactical.ALL_TAC"]
         end
     | _ =>

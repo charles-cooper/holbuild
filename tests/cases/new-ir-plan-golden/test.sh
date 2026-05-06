@@ -209,6 +209,28 @@ holbuild proof-ir plan ATheory:sibling_then1_branch_sequence_plan source=src/ASc
 EXPECTED
 
 cat >> "$project/src/AScript.sml" <<'SML'
+Theorem nested_branch_by_plan:
+  T /\ T
+Proof
+  CONJ_TAC
+  >- (`T` by ACCEPT_TAC TRUTH >> ACCEPT_TAC TRUTH)
+  \\ `T` suffices_by simp[]
+  \\ ACCEPT_TAC TRUTH
+QED
+SML
+check_plan nested_branch_by_plan <<'EXPECTED'
+holbuild proof-ir plan ATheory:nested_branch_by_plan source=src/AScript.sml (8 steps)
+  00 CONJ_TAC
+  01 >- `T`
+  02 >- ACCEPT_TAC TRUTH
+  03    >> ACCEPT_TAC TRUTH
+  04    >- solved
+  05 >> Q_TAC SUFF_TAC `T`
+  06   >- simp[]
+  07 >> ACCEPT_TAC TRUTH
+EXPECTED
+
+cat >> "$project/src/AScript.sml" <<'SML'
 Theorem try_repeat_reverse_lt_plan:
   T /\ T
 Proof

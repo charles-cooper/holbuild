@@ -431,6 +431,15 @@ Proof
   >> ACCEPT_TAC TRUTH
 QED
 
+Theorem nested_branch_by_success:
+  T /\ T
+Proof
+  CONJ_TAC
+  >- (`T` by ACCEPT_TAC TRUTH >> ACCEPT_TAC TRUTH)
+  \\ `T` suffices_by simp[]
+  \\ ACCEPT_TAC TRUTH
+QED
+
 Theorem map_every_success:
   T
 Proof

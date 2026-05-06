@@ -30,7 +30,7 @@ val failed_plan_position_ref = ref NONE : (int * string * string) option ref
 val compiled_tactic_ref = ref Tactical.ALL_TAC
 val compiled_list_tactic_ref = ref Tactical.ALL_LT
 val proof_history_ref = ref (NONE : goalStack.gstk History.history option)
-val branch_tail_count_ref = ref (NONE : int option)
+val branch_tail_count_ref = ref ([] : int list)
 
 fun env_bool name =
   case OS.Process.getEnv name of
@@ -333,10 +333,21 @@ fun apply_gentle_then1_step label false first_program second_program =
 
 fun current_goal_total () = length (history_top_goals()) handle _ => 0
 
-fun current_branch_generated_count label =
+fun current_branch_tail_count label =
   case !branch_tail_count_ref of
-      NONE => raise Fail ("branch suffix without active branch: " ^ label)
-    | SOME tail_count => current_goal_total () - tail_count
+      [] => raise Fail ("branch suffix without active branch: " ^ label)
+    | tail_count :: _ => tail_count
+
+fun current_branch_generated_count label =
+  current_goal_total () - current_branch_tail_count label
+
+fun push_branch_tail_count tail_count =
+  branch_tail_count_ref := tail_count :: !branch_tail_count_ref
+
+fun pop_branch_tail_count label =
+  case !branch_tail_count_ref of
+      [] => raise Fail ("branch close without active branch: " ^ label)
+    | _ :: rest => branch_tail_count_ref := rest
 
 fun apply_branch_start_step label program =
   let
@@ -347,7 +358,7 @@ fun apply_branch_start_step label program =
     if before_count <= 0 then raise Fail ("branch start with no open goals: " ^ label) else ();
     with_tactic_timeout label
       (fn () => append_history (goalStack.expand_listf (Tactical.NTH_GOAL tactic 1))) ();
-    branch_tail_count_ref := SOME tail_count
+    push_branch_tail_count tail_count
   end
   handle e => report_step_failure label e
 
@@ -373,7 +384,7 @@ fun apply_branch_close_step label =
   in
     if generated_count = 0 then
       (if total_count = 0 then () else append_history (goalStack.expand_listf Tactical.ALL_LT);
-       branch_tail_count_ref := NONE)
+       pop_branch_tail_count label)
     else
       raise Fail "THEN1 first subgoal not solved by branch tactic"
   end
@@ -498,7 +509,7 @@ fun drop_steps 0 steps = steps
 fun run_steps steps =
   (successful_step_count_ref := 0;
    successful_prefix_end_ref := 0;
-   branch_tail_count_ref := NONE;
+   branch_tail_count_ref := [];
    run_steps_from 0 0 steps)
 
 fun display_index_at_count count steps =
