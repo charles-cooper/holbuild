@@ -97,6 +97,7 @@ bin/holbuild --maxheap 4096 build MyTheory
 bin/holbuild --source-dir /path/to/project build MyTheory
 bin/holbuild build --skip-checkpoints MyTheory
 bin/holbuild build --tactic-timeout 5 MyTheory
+bin/holbuild build --repl-on-failure MyTheory
 bin/holbuild execution-plan MyTheory:my_theorem
 bin/holbuild goalfrag-plan MyTheory:my_theorem
 bin/holbuild build --force --goalfrag-trace MyTheory
@@ -151,6 +152,10 @@ indentation and body text are formatting only. `--goalfrag-trace`
 runs a build, records runtime traces for all instrumented proofs in the child log,
 and prints the failed theorem's trace excerpt on failure. Use trace with `--force`
 when you need to force source execution for proof-performance/debug inspection.
+`--repl-on-failure` serializes the build and, after a theory failure, starts
+`hol repl` from the newest failed-prefix checkpoint when available, falling back
+to the replay/deps-loaded checkpoint; it requires checkpoints and is not
+supported with `--json`.
 Combining `--skip-goalfrag` with
 `--new-ir`, `--tactic-timeout`, `--goalfrag-plan`, or `--goalfrag-trace` is an error because
 all four are implemented by the theorem instrumentation runtime. Goalfrag/checkpoint/timeout

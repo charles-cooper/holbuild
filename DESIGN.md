@@ -637,7 +637,11 @@ trace lines for all instrumented proofs in the child log. On failure, holbuild
 prints the failed theorem's trace excerpt with per-fragment elapsed time and
 open-goal counts. Use `--force` with trace when the artifact is already up to date
 and you need source execution; `--force` bypasses local up-to-date checks and
-global cache restore without disabling cache publication. Planning/tracing are not action-key inputs. Because
+global cache restore without disabling cache publication. `--repl-on-failure`
+serializes the build and starts `hol repl` from the newest failed-prefix
+checkpoint when a theory action fails, falling back to the replay/deps-loaded
+checkpoint if no failed-prefix state is available; it requires checkpoints and is
+not an action-key input. Planning/tracing are not action-key inputs. Because
 timeouts, planning, and tracing only exist in the goalfrag runtime,
 `--skip-goalfrag --new-ir ...`, `--skip-goalfrag --tactic-timeout ...`,
 `--skip-goalfrag --goalfrag-plan ...`, and `--skip-goalfrag --goalfrag-trace ...`

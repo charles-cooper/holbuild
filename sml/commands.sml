@@ -16,7 +16,7 @@ fun usage () = print
   \  holbuild [--json] [--source-dir PATH] [--holdir PATH] [--maxheap MB] [-jN] context\n\
   \  holbuild [--json] [--source-dir PATH] [--holdir PATH] [--maxheap MB] [-jN] execution-plan THEORY:THEOREM\n\
   \  holbuild [--json] [--source-dir PATH] [--holdir PATH] [--maxheap MB] [-jN] goalfrag-plan [--new-ir] THEORY:THEOREM\n\
-  \  holbuild [--json] [--source-dir PATH] [--holdir PATH] [--maxheap MB] [-jN] build [--dry-run] [--force] [--no-cache] [--skip-checkpoints] [--skip-goalfrag] [--new-ir] [--tactic-timeout SECONDS] [--goalfrag-plan THEORY:THEOREM] [--goalfrag-trace] [TARGET ...]\n\
+  \  holbuild [--json] [--source-dir PATH] [--holdir PATH] [--maxheap MB] [-jN] build [--dry-run] [--force] [--no-cache] [--skip-checkpoints] [--skip-goalfrag] [--new-ir] [--tactic-timeout SECONDS] [--goalfrag-plan THEORY:THEOREM] [--goalfrag-trace] [--repl-on-failure] [TARGET ...]\n\
   \  holbuild [--json] [--source-dir PATH] [--holdir PATH] [--maxheap MB] [-jN] heap NAME\n\
   \  holbuild [--json] [--source-dir PATH] [--holdir PATH] [--maxheap MB] run [ARG ...]\n\
   \  holbuild [--json] [--source-dir PATH] [--holdir PATH] [--maxheap MB] repl [ARG ...]\n\
@@ -41,7 +41,7 @@ fun tactic_timeout_value text =
 
 fun split_flags args =
   let
-    fun loop dry force use_cache skip_checkpoints goalfrag new_ir tactic_timeout tactic_timeout_set goalfrag_plan goalfrag_trace rest =
+    fun loop dry force use_cache skip_checkpoints goalfrag new_ir tactic_timeout tactic_timeout_set goalfrag_plan goalfrag_trace repl_on_failure rest =
       case rest of
           [] => ({dry_run = dry, force = force, use_cache = use_cache,
                   skip_checkpoints = skip_checkpoints,
@@ -49,42 +49,45 @@ fun split_flags args =
                   tactic_timeout = tactic_timeout,
                   tactic_timeout_set = tactic_timeout_set,
                   goalfrag_plan = goalfrag_plan,
-                  goalfrag_trace = goalfrag_trace}, [])
+                  goalfrag_trace = goalfrag_trace,
+                  repl_on_failure = repl_on_failure}, [])
         | "--dry-run" :: xs =>
-            loop true force use_cache skip_checkpoints goalfrag new_ir tactic_timeout tactic_timeout_set goalfrag_plan goalfrag_trace xs
+            loop true force use_cache skip_checkpoints goalfrag new_ir tactic_timeout tactic_timeout_set goalfrag_plan goalfrag_trace repl_on_failure xs
         | "--force" :: xs =>
-            loop dry true use_cache skip_checkpoints goalfrag new_ir tactic_timeout tactic_timeout_set goalfrag_plan goalfrag_trace xs
+            loop dry true use_cache skip_checkpoints goalfrag new_ir tactic_timeout tactic_timeout_set goalfrag_plan goalfrag_trace repl_on_failure xs
         | "--no-cache" :: xs =>
-            loop dry force false skip_checkpoints goalfrag new_ir tactic_timeout tactic_timeout_set goalfrag_plan goalfrag_trace xs
+            loop dry force false skip_checkpoints goalfrag new_ir tactic_timeout tactic_timeout_set goalfrag_plan goalfrag_trace repl_on_failure xs
         | "--skip-checkpoints" :: xs =>
-            loop dry force use_cache true goalfrag new_ir tactic_timeout tactic_timeout_set goalfrag_plan goalfrag_trace xs
+            loop dry force use_cache true goalfrag new_ir tactic_timeout tactic_timeout_set goalfrag_plan goalfrag_trace repl_on_failure xs
         | "--skip-goalfrag" :: xs =>
-            loop dry force use_cache skip_checkpoints false new_ir tactic_timeout tactic_timeout_set goalfrag_plan goalfrag_trace xs
+            loop dry force use_cache skip_checkpoints false new_ir tactic_timeout tactic_timeout_set goalfrag_plan goalfrag_trace repl_on_failure xs
         | "--new-ir" :: xs =>
-            loop dry force use_cache skip_checkpoints goalfrag true tactic_timeout tactic_timeout_set goalfrag_plan goalfrag_trace xs
+            loop dry force use_cache skip_checkpoints goalfrag true tactic_timeout tactic_timeout_set goalfrag_plan goalfrag_trace repl_on_failure xs
         | "--goalfrag-plan" :: theorem :: xs =>
-            loop dry force use_cache skip_checkpoints goalfrag new_ir tactic_timeout tactic_timeout_set (SOME theorem) goalfrag_trace xs
+            loop dry force use_cache skip_checkpoints goalfrag new_ir tactic_timeout tactic_timeout_set (SOME theorem) goalfrag_trace repl_on_failure xs
         | "--goalfrag-plan" :: [] => raise Error "--goalfrag-plan requires THEORY:THEOREM"
         | "--goalfrag-trace" :: xs =>
-            loop dry force use_cache skip_checkpoints goalfrag new_ir tactic_timeout tactic_timeout_set goalfrag_plan true xs
+            loop dry force use_cache skip_checkpoints goalfrag new_ir tactic_timeout tactic_timeout_set goalfrag_plan true repl_on_failure xs
+        | "--repl-on-failure" :: xs =>
+            loop dry force use_cache skip_checkpoints goalfrag new_ir tactic_timeout tactic_timeout_set goalfrag_plan goalfrag_trace true xs
         | "--tactic-timeout" :: seconds :: xs =>
-            loop dry force use_cache skip_checkpoints goalfrag new_ir (tactic_timeout_value seconds) true goalfrag_plan goalfrag_trace xs
+            loop dry force use_cache skip_checkpoints goalfrag new_ir (tactic_timeout_value seconds) true goalfrag_plan goalfrag_trace repl_on_failure xs
         | "--tactic-timeout" :: [] => raise Error "--tactic-timeout requires SECONDS"
         | x :: xs =>
             if String.isPrefix "--tactic-timeout=" x then
               loop dry force use_cache skip_checkpoints goalfrag new_ir
                    (tactic_timeout_value (String.extract (x, size "--tactic-timeout=", NONE)))
-                   true goalfrag_plan goalfrag_trace xs
+                   true goalfrag_plan goalfrag_trace repl_on_failure xs
             else if String.isPrefix "--goalfrag-plan=" x then
               loop dry force use_cache skip_checkpoints goalfrag new_ir tactic_timeout tactic_timeout_set
-                   (SOME (String.extract (x, size "--goalfrag-plan=", NONE))) goalfrag_trace xs
+                   (SOME (String.extract (x, size "--goalfrag-plan=", NONE))) goalfrag_trace repl_on_failure xs
             else if String.isPrefix "--goalfrag-trace=" x then
               raise Error "--goalfrag-trace does not take a theorem; use --goalfrag-trace TARGET"
             else
-              let val (flags, ys) = loop dry force use_cache skip_checkpoints goalfrag new_ir tactic_timeout tactic_timeout_set goalfrag_plan goalfrag_trace xs
+              let val (flags, ys) = loop dry force use_cache skip_checkpoints goalfrag new_ir tactic_timeout tactic_timeout_set goalfrag_plan goalfrag_trace repl_on_failure xs
               in (flags, x :: ys) end
   in
-    loop false false true false true false NONE false NONE false args
+    loop false false true false true false NONE false NONE false false args
   end
 
 fun has_suffix suffix s =
@@ -294,8 +297,8 @@ fun timed_phase name f = HolbuildToolchain.time_phase name f
 fun build tc cli_jobs args =
   let
     val project = timed_phase "project.discover" load_project
-    val jobs = effective_jobs project cli_jobs
-    val ({dry_run, force, use_cache, skip_checkpoints, goalfrag, new_ir, tactic_timeout, tactic_timeout_set, goalfrag_plan, goalfrag_trace}, targets) = split_flags args
+    val ({dry_run, force, use_cache, skip_checkpoints, goalfrag, new_ir, tactic_timeout, tactic_timeout_set, goalfrag_plan, goalfrag_trace, repl_on_failure}, targets) = split_flags args
+    val jobs = if repl_on_failure then 1 else effective_jobs project cli_jobs
     val _ =
       if HolbuildStatus.json_mode () andalso dry_run then
         raise Error "--json does not support build --dry-run yet"
@@ -305,6 +308,12 @@ fun build tc cli_jobs args =
         raise Error "--goalfrag-plan and --goalfrag-trace are separate modes"
       else if dry_run andalso goalfrag_trace then
         raise Error "--goalfrag-trace requires build execution; use --force to inspect up-to-date targets"
+      else if dry_run andalso repl_on_failure then
+        raise Error "--repl-on-failure requires build execution"
+      else if HolbuildStatus.json_mode () andalso repl_on_failure then
+        raise Error "--json does not support --repl-on-failure"
+      else if skip_checkpoints andalso repl_on_failure then
+        raise Error "--repl-on-failure requires checkpoints; remove --skip-checkpoints"
       else if not goalfrag andalso new_ir then
         raise Error "--new-ir requires goalfrag; remove --skip-goalfrag"
       else if not goalfrag andalso tactic_timeout_set then
@@ -323,7 +332,8 @@ fun build tc cli_jobs args =
                                    NONE => SOME 2.5
                                  | some => some),
                          goalfrag_plan = goalfrag_plan,
-                         goalfrag_trace = goalfrag_trace}
+                         goalfrag_trace = goalfrag_trace,
+                         repl_on_failure = repl_on_failure}
     fun prepare_plan () =
       let
         val index = timed_phase "source.discover" (fn () => HolbuildSourceIndex.discover project)
@@ -380,7 +390,7 @@ fun build_heap tc cli_jobs target =
         val toolchain_key = timed_phase "toolchain.key" (fn () => HolbuildToolchain.toolchain_key tc)
         val output_path = HolbuildProject.abs_under (#root project) output
       in
-        HolbuildBuildExec.build {use_cache = true, force = false, skip_checkpoints = false, goalfrag = true, new_ir = false, tactic_timeout = SOME 2.5, goalfrag_plan = NONE, goalfrag_trace = false}
+        HolbuildBuildExec.build {use_cache = true, force = false, skip_checkpoints = false, goalfrag = true, new_ir = false, tactic_timeout = SOME 2.5, goalfrag_plan = NONE, goalfrag_trace = false, repl_on_failure = false}
                                tc project plan toolchain_key jobs;
         HolbuildBuildExec.export_heap tc project plan output_path
       end
