@@ -523,6 +523,7 @@ and list_tactic_span lt =
 
 fun tactic_label source (TacThen []) = "ALL_TAC"
   | tactic_label source (TacApply (f, arg)) = source_text source f ^ " " ^ source_text source arg
+  | tactic_label source (TacRepairGroup (_, inner)) = tactic_label source inner
   | tactic_label source tactic = source_text source (tactic_span tactic)
 
 fun tactic_step source tactic =
@@ -618,6 +619,8 @@ fun plan_tactic source tactic =
         [list_step (tactic_span tactic) ">| [...]"
            ("Tactical.NULL_OK_LT (Tactical.TACS_TO_LT [" ^ String.concatWith ", " (map (tactic_program source) branches) ^ "])")]
     | TacThenLT (lhs, lt) => plan_tactic source lhs @ plan_list_tactic source ">>>" lt
+    | TacReverse (sp, inner) =>
+        plan_tactic source inner @ plan_list_tactic source ">>>" (LtReverse sp)
     | TacOrelse xs => [choice_step (tactic_span tactic) "ORELSE" (tactic_program source tactic) (map (tactic_label source) xs)]
     | TacTry (_, t) => [choice_step (tactic_span tactic) "TRY" (tactic_program source tactic) [tactic_label source t, "ALL_TAC"]]
     | TacFirst (_, xs) => [choice_step (tactic_span tactic) "FIRST" (tactic_program source tactic) (map (tactic_label source) xs)]
@@ -708,6 +711,7 @@ and list_tactic_label source lt =
     | LtTry _ => source_text source (list_tactic_span lt)
     | LtRepeat _ => source_text source (list_tactic_span lt)
     | LtFirstLT t => "FIRST_LT " ^ tactic_label source t
+    | LtRepairGroup (_, inner) => list_tactic_label source inner
     | _ => source_text source (list_tactic_span lt)
 
 fun span_text source (start, stop) = String.substring(source, start, stop - start)

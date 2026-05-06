@@ -146,10 +146,11 @@ Proof
 QED
 SML
 check_plan reverse_plan <<'EXPECTED'
-holbuild proof-ir plan ATheory:reverse_plan source=src/AScript.sml (3 steps)
-  00 REVERSE CONJ_TAC
-  01 >- ACCEPT_TAC TRUTH
+holbuild proof-ir plan ATheory:reverse_plan source=src/AScript.sml (4 steps)
+  00 CONJ_TAC
+  01 >> list_tac REVERSE_LT
   02 >- ACCEPT_TAC TRUTH
+  03 >- ACCEPT_TAC TRUTH
 EXPECTED
 
 cat >> "$project/src/AScript.sml" <<'SML'
@@ -243,6 +244,23 @@ holbuild proof-ir plan ATheory:nested_branch_by_plan source=src/AScript.sml (8 s
   05 >> Q_TAC SUFF_TAC `T`
   06   >- simp[]
   07 >> ACCEPT_TAC TRUTH
+EXPECTED
+
+cat >> "$project/src/AScript.sml" <<'SML'
+Theorem qed_closes_branch_plan:
+  T /\ T
+Proof
+  CONJ_TAC
+  >- ACCEPT_TAC TRUTH
+  >> (
+    ACCEPT_TAC TRUTH
+QED
+SML
+check_plan qed_closes_branch_plan <<'EXPECTED'
+holbuild proof-ir plan ATheory:qed_closes_branch_plan source=src/AScript.sml (3 steps)
+  00 CONJ_TAC
+  01 >- ACCEPT_TAC TRUTH
+  02 >> ACCEPT_TAC TRUTH
 EXPECTED
 
 cat >> "$project/src/AScript.sml" <<'SML'
