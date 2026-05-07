@@ -561,6 +561,12 @@ fun allgoals_step source tactic =
 fun allgoals_choice_step source label tactic alternatives =
   list_choice_step (tactic_span tactic) label ("Tactical.ALLGOALS(" ^ tactic_program source tactic ^ ")") alternatives
 
+fun allgoals_reverse_steps source sp inner =
+  [list_step (tactic_span inner)
+     (">> " ^ tactic_label source inner)
+     ("HolbuildProofRuntime.recording_allgoals(" ^ tactic_program source inner ^ ")"),
+   list_step sp ">> list_tac REVERSE_LT" "HolbuildProofRuntime.reverse_recorded_groups"]
+
 fun suffices_tactic_program source q = "Q_TAC SUFF_TAC " ^ source_text source q
 
 fun suffices_branch_step source q rhs list_suffix =
@@ -586,6 +592,7 @@ fun suffix_steps source tactic =
     | TacFirst (_, xs) => [allgoals_choice_step source ">> FIRST" tactic (map (tactic_label source) xs)]
     | TacFirstProve (_, xs) => [allgoals_choice_step source ">> FIRST_PROVE" tactic (map (tactic_label source) xs)]
     | TacMapFirst (_, xs) => [allgoals_choice_step source ">> FIRST" tactic (map (tactic_label source) xs)]
+    | TacReverse (sp, inner) => allgoals_reverse_steps source sp inner
     | _ => [allgoals_step source tactic]
 
 fun branch_suffix_step source tactic =

@@ -386,6 +386,12 @@ Proof
   reverse CONJ_TAC >- ACCEPT_TAC TRUTH >- ACCEPT_TAC TRUTH
 QED
 
+Theorem reverse_suffix_branch_success:
+  (T ∧ T) ∧ (T ∧ T)
+Proof
+  CONJ_TAC >> reverse CONJ_TAC >- ACCEPT_TAC TRUTH >> ACCEPT_TAC TRUTH
+QED
+
 Theorem try_first_repeat_success:
   T ∧ T ∧ T
 Proof

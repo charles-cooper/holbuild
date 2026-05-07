@@ -31,6 +31,7 @@ val compiled_tactic_ref = ref Tactical.ALL_TAC
 val compiled_list_tactic_ref = ref Tactical.ALL_LT
 val proof_history_ref = ref (NONE : goalStack.gstk History.history option)
 val branch_tail_count_ref = ref ([] : int list)
+val reverse_group_lengths_ref = ref (NONE : int list option)
 
 fun env_bool name =
   case OS.Process.getEnv name of
@@ -312,6 +313,50 @@ fun gentle_then1 tac1 tac2 goal =
           end
   end
 
+fun recording_allgoals tactic goals =
+  let
+    val results = map tactic goals
+    val goal_groups = map (fn (generated, _) => generated) results
+    val validators = map (fn (_, validate) => validate) results
+    val lengths = map length goal_groups
+    val _ = reverse_group_lengths_ref := SOME lengths
+  in
+    (List.concat goal_groups, Lib.mapshape lengths validators)
+  end
+
+fun split_by_lengths lengths xs =
+  let
+    fun loop [] rest = ([], rest)
+      | loop (n :: ns) rest =
+          let
+            val (group, tail) = Lib.split_after n rest
+            val (groups, final_tail) = loop ns tail
+          in
+            (group :: groups, final_tail)
+          end
+  in
+    loop lengths xs
+  end
+
+fun reverse_recorded_groups goals =
+  case !reverse_group_lengths_ref of
+      NONE => raise Fail "reverse_recorded_groups without recorded ALLGOALS groups"
+    | SOME lengths =>
+        let
+          val (goal_groups, remaining_goals) = split_by_lengths lengths goals
+          val _ = if null remaining_goals then () else raise Fail "reverse_recorded_groups saw unexpected extra goals"
+          val _ = reverse_group_lengths_ref := NONE
+          fun validate thms =
+            let
+              val (thm_groups, remaining_thms) = split_by_lengths lengths thms
+              val _ = if null remaining_thms then () else raise Fail "reverse_recorded_groups validation saw unexpected extra theorems"
+            in
+              List.concat (map rev thm_groups)
+            end
+        in
+          (List.concat (map rev goal_groups), validate)
+        end
+
 fun apply_then1_step label false first_program second_program =
       let
         val first_tactic = compile_tactic label first_program
@@ -531,6 +576,7 @@ fun run_steps steps =
   (successful_step_count_ref := 0;
    successful_prefix_end_ref := 0;
    branch_tail_count_ref := [];
+   reverse_group_lengths_ref := NONE;
    run_steps_from 0 0 steps)
 
 fun display_index_at_count count steps =
