@@ -16,6 +16,11 @@ type checkpoint = {kind : string, name : string, safe_name : string, theorem_sta
                    failed_prefix_path : string, failed_prefix_ok : string,
                    deps_key : string, checkpoint_key : string}
 
+type termination = {name : string, safe_name : string, definition_start : int,
+                    definition_stop : int, boundary : int,
+                    quote_start : int, quote_end : int, quote_text : string,
+                    tactic_start : int, tactic_end : int, tactic_text : string}
+
 fun is_ident c = Char.isAlphaNum c orelse c = #"_" orelse c = #"'"
 
 fun starts_with text i needle =
@@ -119,6 +124,14 @@ fun begin_theorem_line ({kind, name, tactic_text, context_path, context_ok,
      if has_proof_attrs then "true" else "false",
      ");\n"]
 
+fun begin_termination_line ({name, definition_start, quote_text, ...} : termination) =
+  String.concat
+    ["val _ = HolbuildTerminationDiagnosticsRuntime.report ",
+     HolbuildToolchain.sml_string name, " ",
+     Int.toString definition_start, " ",
+     HolbuildToolchain.sml_string quote_text,
+     ";\n"]
+
 fun runtime_lines lines =
   String.concat (map (fn line => line ^ "\n") lines)
 
@@ -127,6 +140,39 @@ val runtime_load_lines =
    "load \"TacticParse\";",
    "load \"smlExecute\";",
    "load \"smlTimeout\";"]
+
+val termination_runtime_lines =
+  ["load \"Defn\";",
+   "load \"proofManagerLib\";",
+   "structure HolbuildTerminationDiagnosticsRuntime = struct",
+   "exception Rollback",
+   "fun print_line text = (TextIO.output(TextIO.stdOut, text ^ \"\\n\"); TextIO.flushOut TextIO.stdOut)",
+   "fun cleanup_goals () = ((proofManagerLib.drop_all(); ()) handle _ => ())",
+   "fun assumptions_text [] = \"\"",
+   "  | assumptions_text asms = String.concat (map (fn tm => \"asm: \" ^ Parse.term_to_string tm ^ \"\\n\") asms)",
+   "fun goal_text (asms, concl) = assumptions_text asms ^ \"goal: \" ^ Parse.term_to_string concl",
+   "fun marker name start = String.concat [\"holbuild termination condition goal for \", name, \" at \", Int.toString start, \":\"]",
+   "fun print_goal name start text = (print_line (marker name start); print_line text; print_line \"holbuild termination condition goal end\")",
+   "fun extract start body =",
+   "  let",
+   "    val result = ref NONE",
+   "    fun inner () =",
+   "      let",
+   "        val defn = Defn.Hol_defn (\"holbuild_tc_extract_\" ^ Int.toString start) [QUOTE body]",
+   "        val _ = Defn.tgoal defn",
+   "        val text = case proofManagerLib.top_goals() of [] => \"<no termination condition goals>\" | goal :: _ => goal_text goal",
+   "        val _ = result := SOME text",
+   "        val _ = cleanup_goals ()",
+   "      in raise Rollback end",
+   "    val _ = (Parse.try_grammar_extension (fn () => Theory.try_theory_extension inner ()) ()) handle Rollback => ()",
+   "  in !result end",
+   "fun report name start body =",
+   "  (case extract start body of SOME text => print_goal name start text | NONE => ())",
+   "  handle e => (cleanup_goals (); print_line (String.concat [\"holbuild termination condition goal extraction failed for \", name, \" at \", Int.toString start, \": \", General.exnMessage e]))",
+   "end;"]
+
+fun termination_runtime_prelude [] = ""
+  | termination_runtime_prelude _ = runtime_lines termination_runtime_lines
 
 fun option_real_sml NONE = "NONE : real option"
   | option_real_sml (SOME r) = "SOME " ^ Real.toString r
@@ -207,20 +253,47 @@ fun runtime_reinstall_prelude {checkpoint_enabled, tactic_timeout, timeout_marke
     runtime_lines install
   end
 
-fun instrument ({source, start_offset, checkpoints, save_checkpoints, tactic_timeout, timeout_marker, plan_theorem, trace_all, plan_only_marker, new_ir} :
+datatype instrument_event =
+  CheckpointEvent of checkpoint
+| TerminationEvent of termination
+
+fun instrument ({source, start_offset, checkpoints, terminations, save_checkpoints, tactic_timeout, timeout_marker, plan_theorem, trace_all, plan_only_marker, new_ir} :
                 {source : string, start_offset : int, checkpoints : checkpoint list,
-                 save_checkpoints : bool, tactic_timeout : real option,
-                 timeout_marker : string option, plan_theorem : string option,
-                 trace_all : bool, plan_only_marker : string option, new_ir : bool}) =
+                 terminations : termination list, save_checkpoints : bool,
+                 tactic_timeout : real option, timeout_marker : string option,
+                 plan_theorem : string option, trace_all : bool,
+                 plan_only_marker : string option, new_ir : bool}) =
   let
     val n = size source
     fun source_slice i j = String.substring(source, i, j - i)
-    fun active ({boundary, ...} : checkpoint) = boundary > start_offset
-    val active_checkpoints = List.filter active checkpoints
-    fun loop pos entries acc =
-      case entries of
+    fun active_checkpoint ({boundary, ...} : checkpoint) = boundary > start_offset
+    fun active_termination ({definition_start, ...} : termination) = definition_start >= start_offset
+    val active_checkpoints = List.filter active_checkpoint checkpoints
+    val active_terminations = List.filter active_termination terminations
+    fun event_start (CheckpointEvent ({theorem_start, ...} : checkpoint)) = theorem_start
+      | event_start (TerminationEvent ({definition_start, ...} : termination)) = definition_start
+    fun insert_event event [] = [event]
+      | insert_event event (current :: rest) =
+          if event_start event <= event_start current then event :: current :: rest
+          else current :: insert_event event rest
+    fun sorted_events () =
+      List.foldl (fn (event, events) => insert_event event events) []
+        (map CheckpointEvent active_checkpoints @ map TerminationEvent active_terminations)
+    fun runtime_config () =
+      {checkpoint_enabled = save_checkpoints,
+       tactic_timeout = tactic_timeout,
+       timeout_marker = timeout_marker,
+       plan_theorem = plan_theorem,
+       trace_all = trace_all,
+       plan_only_marker = plan_only_marker,
+       new_ir = new_ir}
+    fun prelude () =
+      runtime_prelude (runtime_config ()) active_checkpoints ^
+      termination_runtime_prelude active_terminations
+    fun loop pos events acc =
+      case events of
           [] => String.concat (rev (source_slice pos n :: acc))
-        | (checkpoint as {theorem_start, boundary, context_path, ...}) :: rest =>
+        | CheckpointEvent (checkpoint as {theorem_start, boundary, ...}) :: rest =>
             if boundary <= start_offset then loop pos rest acc
             else
               loop boundary rest
@@ -230,16 +303,15 @@ fun instrument ({source, start_offset, checkpoints, save_checkpoints, tactic_tim
                  begin_theorem_line checkpoint ::
                  source_slice pos theorem_start ::
                  acc)
+        | TerminationEvent (termination as {definition_start, ...}) :: rest =>
+            if definition_start < pos then loop pos rest acc
+            else
+              loop definition_start rest
+                (begin_termination_line termination ::
+                 source_slice pos definition_start ::
+                 acc)
   in
-    runtime_prelude {checkpoint_enabled = save_checkpoints,
-                     tactic_timeout = tactic_timeout,
-                     timeout_marker = timeout_marker,
-                     plan_theorem = plan_theorem,
-                     trace_all = trace_all,
-                     plan_only_marker = plan_only_marker,
-                     new_ir = new_ir}
-                    active_checkpoints ^
-    loop start_offset checkpoints []
+    prelude () ^ loop start_offset (sorted_events ()) []
   end
 
 end

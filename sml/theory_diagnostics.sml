@@ -258,6 +258,85 @@ fun checkpoint_source_summary source_path source_text (checkpoint : HolbuildTheo
        source_span_text source_path source_text offset end_offset]
   end
 
+val termination_goal_prefix = "holbuild termination condition goal for "
+val termination_goal_end = "holbuild termination condition goal end"
+
+fun has_suffix suffix text =
+  let val n = size text
+      val m = size suffix
+  in n >= m andalso String.substring(text, n - m, m) = suffix end
+
+fun drop_suffix suffix text =
+  if has_suffix suffix text then String.substring(text, 0, size text - size suffix) else text
+
+fun parse_termination_goal_marker line =
+  if not (String.isPrefix termination_goal_prefix line) then NONE
+  else
+    let
+      val rest = drop_suffix ":" (String.extract(line, size termination_goal_prefix, NONE))
+    in
+      case find_substring " at " rest of
+          NONE => NONE
+        | SOME at_pos =>
+            let
+              val name = String.substring(rest, 0, at_pos)
+              val start_text = String.extract(rest, at_pos + size " at ", NONE)
+            in
+              Option.map (fn definition_start => {name = name, definition_start = definition_start})
+                         (Int.fromString start_text)
+            end
+    end
+
+datatype termination_goal_record =
+  TerminationGoal of {name : string, definition_start : int, lines : string list}
+
+fun last_termination_goal lines =
+  let
+    fun finish NONE best = best
+      | finish (SOME {name, definition_start, lines}) _ =
+          SOME (TerminationGoal {name = name, definition_start = definition_start, lines = rev lines})
+    fun loop [] current best = finish current best
+      | loop (line :: rest) current best =
+          case current of
+              SOME {name, definition_start, lines} =>
+                if line = termination_goal_end then
+                  loop rest NONE (SOME (TerminationGoal {name = name, definition_start = definition_start, lines = rev lines}))
+                else loop rest (SOME {name = name, definition_start = definition_start, lines = line :: lines}) best
+            | NONE =>
+                case parse_termination_goal_marker line of
+                    SOME {name, definition_start} =>
+                      loop rest (SOME {name = name, definition_start = definition_start, lines = []}) best
+                  | NONE => loop rest NONE best
+  in
+    loop lines NONE NONE
+  end
+
+fun termination_by_start definition_start terminations =
+  List.find (fn (termination : HolbuildTheoryCheckpoints.termination) =>
+               #definition_start termination = definition_start)
+            terminations
+
+fun termination_source_summary source_path source_text (termination : HolbuildTheoryCheckpoints.termination) goal_lines =
+  let
+    val definition_line = line_number_at source_text (#definition_start termination)
+    val proof_line = line_number_at source_text (#tactic_start termination)
+    val goal_text = String.concat (map (fn line => line ^ "\n") goal_lines)
+  in
+    String.concat
+      ["termination: ", #name termination, " (line ", Int.toString definition_line, ")\n",
+       "proof: line ", Int.toString proof_line, "\n",
+       source_span_text source_path source_text (#tactic_start termination) (#tactic_end termination),
+       "termination condition goal:\n",
+       goal_text]
+  end
+
+fun summarize_termination_goal_source source_path source_text terminations path =
+  case last_termination_goal (source_lines (read_text path)) of
+      NONE => NONE
+    | SOME (TerminationGoal {definition_start, lines, ...}) =>
+        Option.map (fn termination => termination_source_summary source_path source_text termination lines)
+                   (termination_by_start definition_start terminations)
+
 fun quoted_after marker line =
   case find_substring marker line of
       NONE => NONE
