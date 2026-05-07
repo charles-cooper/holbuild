@@ -207,6 +207,12 @@ Proof
   CONJ_TAC >> ACCEPT_TAC TRUTH
 QED
 
+Theorem solved_before_suffix_then1_success:
+  T
+Proof
+  rw[] >> `T` by ACCEPT_TAC TRUTH
+QED
+
 Theorem then1_success:
   T ∧ T
 Proof
