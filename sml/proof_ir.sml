@@ -122,6 +122,7 @@ datatype step =
   | StepThen1 of {start_pos : int, end_pos : int, first_label : string, label : string, list_suffix : bool, first_program : string, second_program : string}
   | StepGentleThen1 of {start_pos : int, end_pos : int, label : string, list_suffix : bool, first_program : string, second_program : string}
   | StepBranch of {start_pos : int, end_pos : int, label : string, program : string, phase : branch_phase}
+  | StepBranchList of {start_pos : int, end_pos : int, label : string, program : string}
   | StepPlain of {start_pos : int, end_pos : int, label : string, program : string}
 
 fun step_start (StepTactic {start_pos, ...}) = start_pos
@@ -131,6 +132,7 @@ fun step_start (StepTactic {start_pos, ...}) = start_pos
   | step_start (StepThen1 {start_pos, ...}) = start_pos
   | step_start (StepGentleThen1 {start_pos, ...}) = start_pos
   | step_start (StepBranch {start_pos, ...}) = start_pos
+  | step_start (StepBranchList {start_pos, ...}) = start_pos
   | step_start (StepPlain {start_pos, ...}) = start_pos
 
 fun step_end (StepTactic {end_pos, ...}) = end_pos
@@ -140,6 +142,7 @@ fun step_end (StepTactic {end_pos, ...}) = end_pos
   | step_end (StepThen1 {end_pos, ...}) = end_pos
   | step_end (StepGentleThen1 {end_pos, ...}) = end_pos
   | step_end (StepBranch {end_pos, ...}) = end_pos
+  | step_end (StepBranchList {end_pos, ...}) = end_pos
   | step_end (StepPlain {end_pos, ...}) = end_pos
 
 fun step_label (StepTactic {label, ...}) = label
@@ -149,6 +152,7 @@ fun step_label (StepTactic {label, ...}) = label
   | step_label (StepThen1 {label, ...}) = label
   | step_label (StepGentleThen1 {label, ...}) = label
   | step_label (StepBranch {label, ...}) = label
+  | step_label (StepBranchList {label, ...}) = label
   | step_label (StepPlain {label, ...}) = label
 
 fun step_program (StepTactic {program, ...}) = program
@@ -162,6 +166,7 @@ fun step_program (StepTactic {program, ...}) = program
       let val tactic = "HolbuildProofRuntime.gentle_then1 (" ^ first_program ^ ") (" ^ second_program ^ ")"
       in if list_suffix then "Tactical.ALLGOALS (" ^ tactic ^ ")" else tactic end
   | step_program (StepBranch {program, ...}) = program
+  | step_program (StepBranchList {program, ...}) = program
   | step_program (StepPlain {program, ...}) = program
 
 fun step_kind (StepTactic _) = "tactic"
@@ -175,6 +180,7 @@ fun step_kind (StepTactic _) = "tactic"
   | step_kind (StepBranch {phase = BranchStart, ...}) = "branch_start"
   | step_kind (StepBranch {phase = BranchSuffix, ...}) = "branch_suffix"
   | step_kind (StepBranch {phase = BranchClose, ...}) = "branch_close"
+  | step_kind (StepBranchList _) = "branch_list_suffix"
   | step_kind (StepPlain _) = "plain"
 
 fun tactic_end (TacThen []) = 0
@@ -554,6 +560,9 @@ fun gentle_then1_step sp label list_suffix first_program second_program =
 fun branch_step sp label phase program =
   StepBranch {start_pos = #1 sp, end_pos = #2 sp, label = label, program = program, phase = phase}
 
+fun branch_list_step sp label program =
+  StepBranchList {start_pos = #1 sp, end_pos = #2 sp, label = label, program = program}
+
 fun allgoals_step source tactic =
   let val label = ">> " ^ tactic_label source tactic
   in list_step (tactic_span tactic) label ("Tactical.ALLGOALS(" ^ tactic_program source tactic ^ ")") end
@@ -595,8 +604,16 @@ fun suffix_steps source tactic =
     | TacReverse (sp, inner) => allgoals_reverse_steps source sp inner
     | _ => [allgoals_step source tactic]
 
-fun branch_suffix_step source tactic =
-  branch_step (tactic_span tactic) ("   >> " ^ tactic_label source tactic) BranchSuffix (tactic_program source tactic)
+fun branch_suffix_reverse_steps source sp inner =
+  [branch_list_step (tactic_span inner)
+     ("   >> " ^ tactic_label source inner)
+     ("HolbuildProofRuntime.recording_allgoals(" ^ tactic_program source inner ^ ")"),
+   branch_list_step sp "   >> list_tac REVERSE_LT" "HolbuildProofRuntime.reverse_recorded_groups"]
+
+fun branch_suffix_steps source tactic =
+  case tactic of
+      TacReverse (sp, inner) => branch_suffix_reverse_steps source sp inner
+    | _ => [branch_step (tactic_span tactic) ("   >> " ^ tactic_label source tactic) BranchSuffix (tactic_program source tactic)]
 
 fun branch_start_steps source tactic =
   case tactic of
@@ -608,7 +625,7 @@ and branch_steps source rhs =
         let val sp = tactic_span rhs
         in
           branch_start_steps source first @
-          map (branch_suffix_step source) rest @
+          List.concat (map (branch_suffix_steps source) rest) @
           [branch_step sp "   >- solved" BranchClose "Tactical.ALL_TAC"]
         end
     | _ =>

@@ -238,6 +238,14 @@ Proof
   >- ACCEPT_TAC TRUTH
 QED
 
+Theorem branch_suffix_reverse_success:
+  ((T ∧ T) ∧ (T ∧ T)) ∧ T
+Proof
+  CONJ_TAC
+  >- (CONJ_TAC >> reverse CONJ_TAC >> simp[])
+  >- ACCEPT_TAC TRUTH
+QED
+
 Theorem thenl_success:
   T ∧ T
 Proof

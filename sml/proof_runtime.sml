@@ -430,20 +430,27 @@ fun apply_branch_start_step label program =
   end
   handle e => report_step_failure label e
 
-fun apply_branch_suffix_step label program =
+fun apply_branch_suffix_list_tactic label list_tactic =
   let
     val total_count = current_goal_total ()
     val generated_count = current_branch_generated_count label
-    val tactic = compile_tactic label program
-    val list_tactic = Tactical.SPLIT_LT generated_count (Tactical.ALLGOALS tactic, Tactical.ALL_LT)
+    val scoped_list_tactic = Tactical.SPLIT_LT generated_count (list_tactic, Tactical.ALL_LT)
   in
     if generated_count = 0 then
       (if total_count = 0 then () else append_history (goalStack.expand_listf Tactical.ALL_LT))
     else
       with_tactic_timeout label
-        (fn () => append_history (goalStack.expand_listf list_tactic)) ()
+        (fn () => append_history (goalStack.expand_listf scoped_list_tactic)) ()
   end
   handle e => report_step_failure label e
+
+fun apply_branch_suffix_step label program =
+  let val tactic = compile_tactic label program
+  in apply_branch_suffix_list_tactic label (Tactical.ALLGOALS tactic) end
+
+fun apply_branch_list_suffix_step label program =
+  let val list_tactic = compile_list_tactic label program
+  in apply_branch_suffix_list_tactic label list_tactic end
 
 fun apply_branch_close_step label =
   let
@@ -475,6 +482,7 @@ fun step proof_step =
     | HolbuildProofIr.StepGentleThen1 {label, list_suffix, first_program, second_program, ...} =>
         apply_gentle_then1_step label list_suffix first_program second_program
     | HolbuildProofIr.StepBranch {label, program, phase, ...} => apply_branch_step label program phase
+    | HolbuildProofIr.StepBranchList {label, program, ...} => apply_branch_list_suffix_step label program
     | HolbuildProofIr.StepPlain _ => raise Fail "plain proof step must cover the whole theorem"
 
 fun inspection_matches wanted name =
