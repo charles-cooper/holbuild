@@ -2378,6 +2378,19 @@ fun build_parallel status options tc project base_context plan keys toolchain_ke
     wait_workers ()
   end
 
+fun enforce_checkpoint_budget project =
+  let
+    val evicted =
+      evict_oldest_checkpoints (project_state_dir project "checkpoints")
+                              (gb_to_bytes default_max_checkpoints_gb)
+  in
+    if evicted > 0 then
+      warn ("evicted " ^ Int.toString evicted ^
+            " checkpoint artifact(s) to keep .holbuild/checkpoints under " ^
+            Int.toString default_max_checkpoints_gb ^ "GB")
+    else ()
+  end
+
 fun build (options : build_options) tc project plan toolchain_key jobs =
   let
     val base_context = toolchain_base_context tc
@@ -2389,8 +2402,8 @@ fun build (options : build_options) tc project plan toolchain_key jobs =
         if jobs <= 1 then build_serial status options tc project base_context plan keys toolchain_key
         else build_parallel status options tc project base_context plan keys toolchain_key jobs
     in
-      (run (); HolbuildStatus.finish status)
-      handle e => (HolbuildStatus.finish status; raise e)
+      (run (); HolbuildStatus.finish status; enforce_checkpoint_budget project)
+      handle e => (HolbuildStatus.finish status; enforce_checkpoint_budget project; raise e)
     end
   end
 

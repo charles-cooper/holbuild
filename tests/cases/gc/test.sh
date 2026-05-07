@@ -78,6 +78,29 @@ fi
 [[ ! -e "$clean_only_project/.holbuild/stage/old" ]] || { echo "--clean-only left project stage" >&2; exit 1; }
 [[ -e "$clean_only_cache/tmp/old" ]] || { echo "--clean-only removed cache state" >&2; exit 1; }
 
+budget_project=$tmpdir/budget-project
+mkdir -p "$budget_project/src" "$budget_project/.holbuild/checkpoints/old"
+cat > "$budget_project/holproject.toml" <<'TOML'
+[project]
+name = "checkpoint-budget"
+
+[build]
+members = ["src"]
+TOML
+cat > "$budget_project/src/BadScript.sml" <<'SML'
+open HolKernel Parse boolLib bossLib;
+val _ = new_theory "Bad";
+val _ = raise Fail "forced failure after stale checkpoint budget fixture";
+SML
+truncate -s 6G "$budget_project/.holbuild/checkpoints/old/stale.save"
+touch -d '2 days ago' "$budget_project/.holbuild/checkpoints/old/stale.save"
+if (cd "$budget_project" && "$HOLBUILD_BIN" --holdir "$_HOLDIR" build BadTheory) > "$tmpdir/budget.log" 2>&1; then
+  echo "checkpoint budget failure fixture unexpectedly succeeded" >&2
+  exit 1
+fi
+require_grep "evicted .* checkpoint artifact" "$tmpdir/budget.log"
+[[ ! -e "$budget_project/.holbuild/checkpoints/old/stale.save" ]] || { echo "build failure left checkpoint residue over budget" >&2; exit 1; }
+
 if (cd "$project" && "$HOLBUILD_BIN" gc --clean-only --cache-only) > "$tmpdir/bad-flags.log" 2>&1; then
   echo "gc accepted mutually exclusive flags" >&2
   exit 1
