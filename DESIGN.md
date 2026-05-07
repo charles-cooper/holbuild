@@ -591,28 +591,28 @@ nearest valid theorem-context checkpoint and replay only the suffix to
 `export_theory()`. End-of-proof checkpoints are proof-navigation states, not
 successor-ready contexts, and are not used for dependency replay.
 
-Goal-fragment execution is separable from PolyML checkpoint creation and
+Proof instrumentation is separable from PolyML checkpoint creation and
 retention. By default, holbuild may create several local checkpoint classes while
 executing a theory action, then removes them after successful artifact/metadata
 writes: `deps_loaded` after loading resolved dependencies, theorem proof states
 for modern AST `Theorem ... Proof ... QED` declarations, failed-prefix
-proof-navigation state after goalfrag failures, and a final post-export context.
+proof-navigation state after instrumented proof failures, and a final post-export context.
 `--skip-checkpoints` disables all `.save`/`.ok` creation while still running
-modern theorem proofs through the goalfrag/proof-manager path. `--skip-goalfrag`
-opts out only of theorem goalfrag instrumentation: with checkpoints still enabled,
-the build can still save and consult `deps_loaded` and save the final context, but
-there are no theorem-context/end-of-proof/failed-prefix proof-navigation
-checkpoints and no tactic timeout enforcement for that build. The final context is
-currently a transient debug/successor breadcrumb, not a downstream canonical load
-context.
+modern theorem proofs through the selected instrumentation runtime. `--skip-goalfrag`
+opts out of theorem instrumentation: with checkpoints still enabled, the build can
+still save and consult `deps_loaded` and save the final context, but there are no
+theorem-context/end-of-proof/failed-prefix proof-navigation checkpoints and no tactic
+timeout enforcement for that build. The final context is currently a transient
+debug/successor breadcrumb, not a downstream canonical load context.
 
-When goalfrag is enabled, holbuild applies a tactic timeout to each goalfrag
-step, and to the conservative whole-tactic path used for attributed/opaque proof
-cases. `--new-ir` is an experimental alternate theorem instrumentation engine:
-it still uses HOLSource parser recovery, but lowers `HOLSourceAST.exp` directly to
-a holbuild proof IR instead of using `TacticParse`/`goalFrag` as the executable
-semantics. Default builds continue to use the existing GoalFrag path until the
-new runtime boundaries are stabilized. The CLI default is 2.5 seconds per tactic step for the root package;
+When theorem instrumentation is enabled, holbuild applies a tactic timeout to each
+executable proof step, and to the conservative whole-tactic path used for
+attributed/opaque proof cases. The default theorem instrumentation engine is holbuild's
+proof IR: it still uses HOLSource parser recovery, but lowers `HOLSourceAST.exp`
+directly instead of using `TacticParse`/`goalFrag` as the executable semantics.
+`--goalfrag` selects the legacy GoalFrag/proof-manager path for comparison/debugging.
+The old `--new-ir` build flag is accepted as a deprecated no-op because proof IR is
+now the default. The CLI default is 2.5 seconds per tactic step for the root package;
 `--tactic-timeout SECONDS` changes that root-package timeout, and
 `--tactic-timeout 0` disables it. Dependency package builds use no tactic timeout,
 so a consumer's proof-debug timeout does not make dependency builds fail.
@@ -622,9 +622,9 @@ THEORY:THEOREM` is static inspection for the proof IR: it discovers sources,
 finds the named theorem in the named theory script, pretty-prints the executable
 proof-IR step plan, and exits without acquiring the project build lock, planning
 dependencies, consulting cache/up-to-date state, or executing the proof.
-`holbuild goalfrag-plan THEORY:THEOREM` remains the legacy GoalFrag equivalent;
-`goalfrag-plan --new-ir THEORY:THEOREM` is a compatibility alias for
-`execution-plan`. The pretty form must remain faithful to the IR: each
+`holbuild goalfrag-plan THEORY:THEOREM` remains the legacy GoalFrag equivalent.
+`goalfrag-plan --new-ir THEORY:THEOREM` is a deprecated alias for `execution-plan`.
+Use `holbuild execution-plan THEORY:THEOREM` for proof IR. The pretty form must remain faithful to the IR: each
 numbered line is one executable tactic/list-tactic/GoalFrag operation; indentation
 and parenthesized body text are formatting only. For example, a `>>~-` source
 fragment may display as one numbered `list_tac Q.SELECT_GOALS_LT_THEN1 ...` step
@@ -635,18 +635,18 @@ HOL tactic combinator semantics.
 `--goalfrag-trace` executes the build and records runtime plans plus before/after
 trace lines for all instrumented proofs in the child log. On failure, holbuild
 prints the failed theorem's trace excerpt with per-fragment elapsed time and
-open-goal counts. Use `--force` with trace when the artifact is already up to date
+open-goal counts. Use `--goalfrag --goalfrag-trace` to force the legacy GoalFrag
+trace shape; otherwise tracing follows the default proof IR runtime. Use `--force` with trace when the artifact is already up to date
 and you need source execution; `--force` bypasses local up-to-date checks and
 global cache restore without disabling cache publication. `--repl-on-failure`
 serializes the build and starts `hol repl` from the newest failed-prefix
 checkpoint when a theory action fails, falling back to the replay/deps-loaded
 checkpoint if no failed-prefix state is available; it requires checkpoints and is
 not an action-key input. Planning/tracing are not action-key inputs. Because
-timeouts, planning, and tracing only exist in the goalfrag runtime,
-`--skip-goalfrag --new-ir ...`, `--skip-goalfrag --tactic-timeout ...`,
-`--skip-goalfrag --goalfrag-plan ...`, and `--skip-goalfrag --goalfrag-trace ...`
-are rejected instead of silently ignoring
-the request. Goalfrag, checkpoint creation, tactic timeout, planning, and tracing are execution/debug policy,
+timeouts, planning, and tracing only exist in the theorem instrumentation runtime,
+`--skip-goalfrag --tactic-timeout ...`, `--skip-goalfrag --goalfrag-plan ...`, and
+`--skip-goalfrag --goalfrag-trace ...` are rejected instead of silently ignoring
+the request. Proof engine, checkpoint creation, tactic timeout, planning, and tracing are execution/debug policy,
 not final artifact semantics. They must not be included in the final theory
 action key or local metadata comparison for `.uo/.ui/.dat`: switching
 `--skip-goalfrag`, `--skip-checkpoints`, or root tactic timeout should not rebuild

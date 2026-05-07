@@ -51,7 +51,7 @@ QED
 
 val _ = export_theory();
 SML
-  (cd "$project" && HOLBUILD_ECHO_CHILD_LOGS=1 "$HOLBUILD_BIN" --holdir "$HOLDIR" build --new-ir --skip-checkpoints --tactic-timeout 60) > "$tmpdir/new-ir.out" 2>&1
+  (cd "$project" && HOLBUILD_ECHO_CHILD_LOGS=1 "$HOLBUILD_BIN" --holdir "$HOLDIR" build --skip-checkpoints --tactic-timeout 60) > "$tmpdir/new-ir.out" 2>&1
   require_grep "parse error: expected closing parenthesis" "$tmpdir/new-ir.out"
   require_file "$project/.holbuild/obj/src/ATheory.dat"
 }
@@ -155,7 +155,7 @@ QED
 
 val _ = export_theory();
 SML
-  (cd "$project" && HOLBUILD_ECHO_CHILD_LOGS=1 "$HOLBUILD_BIN" --holdir "$HOLDIR" build --skip-checkpoints --tactic-timeout 60) > "$tmpdir/success.goalfrag.out" 2>&1
+  (cd "$project" && HOLBUILD_ECHO_CHILD_LOGS=1 "$HOLBUILD_BIN" --holdir "$HOLDIR" build --goalfrag --skip-checkpoints --tactic-timeout 60) > "$tmpdir/success.goalfrag.out" 2>&1
   require_grep "parse error: expected closing parenthesis" "$tmpdir/success.goalfrag.out"
   require_file "$project/.holbuild/gen/src/ATheory.sig"
   require_file "$project/.holbuild/gen/src/ATheory.sml"
@@ -180,7 +180,7 @@ $proof
 
 val _ = export_theory();
 SML
-  if (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --skip-checkpoints --tactic-timeout 60) > "$tmpdir/$name.goalfrag.out" 2>&1; then
+  if (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --goalfrag --skip-checkpoints --tactic-timeout 60) > "$tmpdir/$name.goalfrag.out" 2>&1; then
     echo "expected goalfrag build to fail for $name" >&2
     exit 1
   fi
@@ -205,7 +205,7 @@ QED
 
 val _ = export_theory();
 SML
-  if (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --skip-checkpoints --tactic-timeout 60) > "$tmpdir/repeated-label.goalfrag.out" 2>&1; then
+  if (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --goalfrag --skip-checkpoints --tactic-timeout 60) > "$tmpdir/repeated-label.goalfrag.out" 2>&1; then
     echo "expected repeated-label GoalFrag build to fail" >&2
     exit 1
   fi
@@ -217,7 +217,7 @@ SML
   fi
 
   rm -rf "$project/.holbuild"
-  if (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --new-ir --skip-checkpoints --tactic-timeout 60) > "$tmpdir/repeated-label.new-ir.out" 2>&1; then
+  if (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --skip-checkpoints --tactic-timeout 60) > "$tmpdir/repeated-label.new-ir.out" 2>&1; then
     echo "expected repeated-label new-IR build to fail" >&2
     exit 1
   fi

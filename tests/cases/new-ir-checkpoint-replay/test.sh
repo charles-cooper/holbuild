@@ -40,7 +40,7 @@ val _ = export_theory();
 SML
 
 first_log=$tmpdir/first.log
-if (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --new-ir ATheory) > "$first_log" 2>&1; then
+if (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$first_log" 2>&1; then
   echo "expected first new-ir proof to fail" >&2
   exit 1
 fi
@@ -58,7 +58,7 @@ path = Path("$project/src/AScript.sml")
 path.write_text(path.read_text().replace('FAIL_TAC "first suffix failure"', 'FAIL_TAC "edited suffix failure"'))
 PY
 edited_log=$tmpdir/edited.log
-if (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --new-ir ATheory) > "$edited_log" 2>&1; then
+if (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$edited_log" 2>&1; then
   echo "expected edited suffix new-ir proof to fail" >&2
   exit 1
 fi
@@ -75,7 +75,7 @@ path = Path("$project/src/AScript.sml")
 path.write_text(path.read_text().replace('FAIL_TAC "edited suffix failure"', 'ACCEPT_TAC TRUTH'))
 PY
 fixed_log=$tmpdir/fixed.log
-(cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --new-ir ATheory) > "$fixed_log" 2>&1
+(cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$fixed_log" 2>&1
 fixed_count=$(wc -c < "$counter" | tr -d ' ')
 [[ "$fixed_count" = "2" ]] || { echo "new-ir failed-prefix replay reran unchanged slow prefix after suffix fix; count $fixed_count" >&2; exit 1; }
 require_grep "from: failed-prefix checkpoint in slow_prefix_failure" "$fixed_log"
@@ -109,7 +109,7 @@ val _ = export_theory();
 PY
 
 shorten_first_log=$tmpdir/shorten-first.log
-if (cd "$shorten_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --new-ir ATheory) > "$shorten_first_log" 2>&1; then
+if (cd "$shorten_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$shorten_first_log" 2>&1; then
   echo "expected shortened replay first build to fail" >&2
   exit 1
 fi
@@ -127,7 +127,7 @@ end = text.index('QED', start)
 path.write_text(text[:start] + 'slow_tac >> FAIL_TAC "short suffix failure"\n' + text[end:])
 PY
 shorten_edit_log=$tmpdir/shorten-edit.log
-if (cd "$shorten_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --new-ir ATheory) > "$shorten_edit_log" 2>&1; then
+if (cd "$shorten_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$shorten_edit_log" 2>&1; then
   echo "expected shortened replay edited build to fail" >&2
   exit 1
 fi

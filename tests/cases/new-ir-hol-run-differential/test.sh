@@ -40,7 +40,7 @@ run_hol_run() {
 run_new_ir() {
   local project=$1
   local log=$2
-  (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --force --no-cache --new-ir --skip-checkpoints --tactic-timeout 60 ATheory) > "$log" 2>&1
+  (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --force --no-cache --skip-checkpoints --tactic-timeout 60 ATheory) > "$log" 2>&1
 }
 
 copy_hol_run_artifacts() {

@@ -51,6 +51,11 @@ holbuild proof-ir plan ATheory:thenl_literal_plan source=src/AScript.sml (2 step
   01 >| [...]
 EXPECTED
 
+deprecated_plan_alias_log=$tmpdir/deprecated-plan-alias.log
+(cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" goalfrag-plan --new-ir ATheory:thenl_literal_plan) > "$deprecated_plan_alias_log" 2>&1
+require_grep "goalfrag-plan --new-ir is deprecated; use holbuild execution-plan THEORY:THEOREM" "$deprecated_plan_alias_log"
+require_grep "holbuild proof-ir plan ATheory:thenl_literal_plan source=src/AScript.sml" "$deprecated_plan_alias_log"
+
 cat >> "$project/src/AScript.sml" <<'SML'
 Theorem allgoals_plan:
   T /\ T

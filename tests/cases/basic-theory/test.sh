@@ -254,4 +254,9 @@ if (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --skip-goalfrag --
   echo "--skip-goalfrag --tactic-timeout should fail" >&2
   exit 1
 fi
-require_grep "requires goalfrag" "$bad_flags_log"
+require_grep "requires theorem instrumentation" "$bad_flags_log"
+
+deprecated_new_ir_log=$tmpdir/deprecated-new-ir.log
+(cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --new-ir ATheory) > "$deprecated_new_ir_log" 2>&1
+require_grep "new-ir is deprecated and has no effect; proof IR is the default" "$deprecated_new_ir_log"
+require_grep "ATheory is up to date" "$deprecated_new_ir_log"

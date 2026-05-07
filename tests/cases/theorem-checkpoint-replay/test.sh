@@ -225,7 +225,7 @@ if grep -q "holbuild goalfrag before theorem=b_thm\|elapsed_ms=\|ATheory built\|
   exit 1
 fi
 trace_log=$tmpdir/goalfrag-trace.log
-(cd "$trace_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --force --goalfrag-trace ATheory) > "$trace_log" 2>&1
+(cd "$trace_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --force --goalfrag --goalfrag-trace ATheory) > "$trace_log" 2>&1
 require_grep "ATheory built" "$trace_log"
 if grep -q "holbuild goalfrag plan theorem=\|holbuild goalfrag before theorem=" "$trace_log"; then
   echo "--goalfrag-trace should not dump successful proof traces to stdout" >&2
@@ -392,7 +392,7 @@ require_grep "remaining goals at failed fragment: 1" "$failure_again_log"
 require_file "$a_thm_context"
 require_file "$b_thm_failed_prefix"
 failed_prefix_plan_log=$tmpdir/failed-prefix-plan.log
-(cd "$failure_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --goalfrag-plan ATheory:b_thm) > "$failed_prefix_plan_log" 2>&1
+(cd "$failure_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --goalfrag --goalfrag-plan ATheory:b_thm) > "$failed_prefix_plan_log" 2>&1
 require_grep "holbuild goalfrag plan ATheory:b_thm source=src/AScript.sml (" "$failed_prefix_plan_log"
 require_grep "FAIL_TAC \"expected failure\"" "$failed_prefix_plan_log"
 if grep -q "resuming ATheory\|ATheory inspected\|top goal at failed fragment" "$failed_prefix_plan_log"; then
@@ -601,7 +601,7 @@ s = s.replace('>- (FAIL_TAC "intentional")', '>- (rpt strip_tac >> simp[])')
 path.write_text(s)
 PY
 changed_prefix_fixed_log=$tmpdir/changed-prefix-fixed.log
-(cd "$changed_prefix_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --force --no-cache --tactic-timeout 0 --goalfrag-trace ATheory) > "$changed_prefix_fixed_log" 2>&1
+(cd "$changed_prefix_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --force --no-cache --goalfrag --tactic-timeout 0 --goalfrag-trace ATheory) > "$changed_prefix_fixed_log" 2>&1
 require_grep "ATheory built" "$changed_prefix_fixed_log"
 if grep -q "from: failed-prefix checkpoint in changed_prefix" "$changed_prefix_fixed_log"; then
   echo "changed failed-prefix checkpoint was reused after proof text changed before the saved prefix" >&2
@@ -673,7 +673,7 @@ QED
 val _ = export_theory();
 SML
 branch_failure_log=$tmpdir/branch-failure.log
-if (cd "$branch_failure_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --goalfrag-trace ATheory) > "$branch_failure_log" 2>&1; then
+if (cd "$branch_failure_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --goalfrag --goalfrag-trace ATheory) > "$branch_failure_log" 2>&1; then
   echo "expected branch proof to fail build" >&2
   exit 1
 fi
@@ -700,7 +700,7 @@ QED
 val _ = export_theory();
 SML
 grouped_failure_log=$tmpdir/grouped-failure.log
-if (cd "$grouped_failure_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$grouped_failure_log" 2>&1; then
+if (cd "$grouped_failure_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --goalfrag ATheory) > "$grouped_failure_log" 2>&1; then
   echo "expected grouped proof to fail build" >&2
   exit 1
 fi
@@ -739,7 +739,7 @@ QED
 val _ = export_theory();
 SML
 close_paren_failure_log=$tmpdir/close-paren-failure.log
-if (cd "$close_paren_failure_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$close_paren_failure_log" 2>&1; then
+if (cd "$close_paren_failure_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --goalfrag ATheory) > "$close_paren_failure_log" 2>&1; then
   echo "expected close-paren branch proof to fail build" >&2
   exit 1
 fi
@@ -872,7 +872,7 @@ val _ = export_theory();
 PY
 
 goalfrag_shorten_first_log=$tmpdir/goalfrag-shorten-first.log
-if (cd "$goalfrag_shorten_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$goalfrag_shorten_first_log" 2>&1; then
+if (cd "$goalfrag_shorten_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --goalfrag ATheory) > "$goalfrag_shorten_first_log" 2>&1; then
   echo "expected goalfrag shortened replay first build to fail" >&2
   exit 1
 fi
@@ -897,7 +897,7 @@ end = text.index('QED', start)
 path.write_text(text[:start] + 'slow_tac >> FAIL_TAC "goalfrag short suffix failure"\n' + text[end:])
 PY
 goalfrag_shorten_edit_log=$tmpdir/goalfrag-shorten-edit.log
-if (cd "$goalfrag_shorten_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$goalfrag_shorten_edit_log" 2>&1; then
+if (cd "$goalfrag_shorten_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --goalfrag ATheory) > "$goalfrag_shorten_edit_log" 2>&1; then
   echo "expected goalfrag shortened replay edited build to fail" >&2
   exit 1
 fi
