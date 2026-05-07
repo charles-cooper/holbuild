@@ -3,7 +3,7 @@ struct
 
 datatype outcome = Built | UpToDate | Restored | Inspected
 
-type active_node = {key : string, label : string}
+type active_node = {key : string, label : string, started_at : Time.time}
 
 type t = {
   enabled : bool,
@@ -23,12 +23,15 @@ type t = {
 
 val current_status : t option ref = ref NONE
 val json_mode_ref = ref false
+val verbose_mode_ref = ref false
 val json_mutex = Mutex.mutex ()
 
 val clear_to_eol = "\027[0K"
 
 fun set_json_mode enabled = json_mode_ref := enabled
 fun json_mode () = !json_mode_ref
+fun set_verbose_mode enabled = verbose_mode_ref := enabled
+fun verbose_mode () = !verbose_mode_ref
 
 fun hex_digit n =
   String.sub("0123456789abcdef", n)
@@ -199,7 +202,14 @@ fun elapsed_ms status = Real.round (Time.toReal (elapsed status) * 1000.0)
 
 fun remove_active key active = List.filter (fn {key = k, ...} => k <> key) active
 
+fun find_active key active = List.find (fn {key = k, ...} => k = key) active
+
 fun active_labels active = map (fn {label, ...} => label) active
+
+fun active_elapsed_text NONE = ""
+  | active_elapsed_text (SOME {started_at, ...}) =
+      " in " ^ Real.fmt (StringCvt.FIX (SOME 3))
+        (Time.toReal (Time.-(Time.now (), started_at))) ^ "s"
 
 fun line ({total, jobs, finished, built, up_to_date, restored, active, ...} : t) =
   let
@@ -280,17 +290,22 @@ fun start_node status key label =
         in
           if !ended then ()
           else
-            (active := {key = key, label = label} :: remove_active key (!active);
+            (active := {key = key, label = label, started_at = Time.now ()} :: remove_active key (!active);
              if json_mode () then
                emit_json TextIO.stdOut "node_started" (json_node_fields key label)
              else if enabled then redraw status
+             else if verbose_mode () then
+               (TextIO.output (TextIO.stdOut, label ^ " started\n");
+                TextIO.flushOut TextIO.stdOut)
              else ())
         end)
 
 fun finish_node status key label outcome =
   with_lock status
     (fn () =>
-        let val {enabled, total, finished, active, ended, ...} = status
+        let
+          val {enabled, total, finished, active, ended, ...} = status
+          val elapsed = active_elapsed_text (find_active key (!active))
         in
           if !ended then ()
           else
@@ -304,7 +319,11 @@ fun finish_node status key label outcome =
                    json_int_field "finished" (!finished),
                    json_int_field "total" total])
              else if enabled then redraw status
-             else print (label ^ " " ^ outcome_text outcome ^ "\n"))
+             else
+               (TextIO.output (TextIO.stdOut,
+                  label ^ " " ^ outcome_text outcome ^
+                  (if verbose_mode () then elapsed else "") ^ "\n");
+                TextIO.flushOut TextIO.stdOut))
         end)
 
 fun finish status =

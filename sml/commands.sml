@@ -13,20 +13,21 @@ fun warn msg = HolbuildStatus.message_stderr ("holbuild: warning: " ^ msg ^ "\n"
 fun usage () = print
   "holbuild: experimental project-aware build frontend for HOL4\n\n\
   \Usage:\n\
-  \  holbuild [--json] [--source-dir PATH] [--holdir PATH] [--maxheap MB] [-jN] context\n\
-  \  holbuild [--json] [--source-dir PATH] [--holdir PATH] [--maxheap MB] [-jN] execution-plan THEORY:THEOREM\n\
-  \  holbuild [--json] [--source-dir PATH] [--holdir PATH] [--maxheap MB] [-jN] goalfrag-plan [--new-ir] THEORY:THEOREM\n\
-  \  holbuild [--json] [--source-dir PATH] [--holdir PATH] [--maxheap MB] [-jN] build [--dry-run] [--force] [--no-cache] [--skip-checkpoints] [--skip-goalfrag] [--new-ir] [--tactic-timeout SECONDS] [--goalfrag-plan THEORY:THEOREM] [--goalfrag-trace] [--repl-on-failure] [TARGET ...]\n\
-  \  holbuild [--json] [--source-dir PATH] [--holdir PATH] [--maxheap MB] [-jN] heap NAME\n\
-  \  holbuild [--json] [--source-dir PATH] [--holdir PATH] [--maxheap MB] run [ARG ...]\n\
-  \  holbuild [--json] [--source-dir PATH] [--holdir PATH] [--maxheap MB] repl [ARG ...]\n\
+  \  holbuild [--json] [--verbose] [--source-dir PATH] [--holdir PATH] [--maxheap MB] [-jN] context\n\
+  \  holbuild [--json] [--verbose] [--source-dir PATH] [--holdir PATH] [--maxheap MB] [-jN] execution-plan THEORY:THEOREM\n\
+  \  holbuild [--json] [--verbose] [--source-dir PATH] [--holdir PATH] [--maxheap MB] [-jN] goalfrag-plan [--new-ir] THEORY:THEOREM\n\
+  \  holbuild [--json] [--verbose] [--source-dir PATH] [--holdir PATH] [--maxheap MB] [-jN] build [--dry-run] [--force] [--no-cache] [--skip-checkpoints] [--skip-goalfrag] [--new-ir] [--tactic-timeout SECONDS] [--goalfrag-plan THEORY:THEOREM] [--goalfrag-trace] [--repl-on-failure] [TARGET ...]\n\
+  \  holbuild [--json] [--verbose] [--source-dir PATH] [--holdir PATH] [--maxheap MB] [-jN] heap NAME\n\
+  \  holbuild [--json] [--verbose] [--source-dir PATH] [--holdir PATH] [--maxheap MB] run [ARG ...]\n\
+  \  holbuild [--json] [--verbose] [--source-dir PATH] [--holdir PATH] [--maxheap MB] repl [ARG ...]\n\
   \  holbuild gc [--retention-days DAYS] [--max-checkpoints-gb GB] [--cache-dir PATH] [--clean-only|--cache-only]\n\n\
   \HOLDIR is found from --holdir, HOLBUILD_HOLDIR, or HOLDIR for HOL commands.\n\
   \Project sources are found from --source-dir, HOLBUILD_SOURCE_DIR, or cwd.\n\
   \-j/--jobs controls build parallelism. Default is .holconfig.toml [build].jobs,\n\
   \or max(1, detected processor count / 2). --maxheap/--max-heap passes Poly/ML\n\
   \maximum heap size in MB to child HOL processes. --json emits newline-delimited\n\
-  \JSON for build status, messages, and errors.\n"
+  \JSON for build status, messages, and errors. --verbose logs node starts and\n\
+  \per-node elapsed times in non-TTY build output.\n"
 
 fun nonnegative_real label text =
   case Real.fromString text of
@@ -213,16 +214,17 @@ fun positive_int label text =
 
 fun parse_global_options args =
   let
-    fun loop holdir source_dir jobs maxheap json rest =
+    fun loop holdir source_dir jobs maxheap json verbose rest =
       case rest of
-          [] => ({holdir = holdir, source_dir = source_dir, jobs = jobs, maxheap = maxheap, json = json}, [])
-        | "--json" :: xs => loop holdir source_dir jobs maxheap true xs
-        | "--holdir" :: path :: xs => loop (SOME path) source_dir jobs maxheap json xs
-        | "--source-dir" :: path :: xs => loop holdir (SOME path) jobs maxheap json xs
-        | "--jobs" :: n :: xs => loop holdir source_dir (SOME (positive_int "--jobs" n)) maxheap json xs
-        | "-j" :: n :: xs => loop holdir source_dir (SOME (positive_int "-j" n)) maxheap json xs
-        | "--maxheap" :: n :: xs => loop holdir source_dir jobs (SOME (positive_int "--maxheap" n)) json xs
-        | "--max-heap" :: n :: xs => loop holdir source_dir jobs (SOME (positive_int "--max-heap" n)) json xs
+          [] => ({holdir = holdir, source_dir = source_dir, jobs = jobs, maxheap = maxheap, json = json, verbose = verbose}, [])
+        | "--json" :: xs => loop holdir source_dir jobs maxheap true verbose xs
+        | "--verbose" :: xs => loop holdir source_dir jobs maxheap json true xs
+        | "--holdir" :: path :: xs => loop (SOME path) source_dir jobs maxheap json verbose xs
+        | "--source-dir" :: path :: xs => loop holdir (SOME path) jobs maxheap json verbose xs
+        | "--jobs" :: n :: xs => loop holdir source_dir (SOME (positive_int "--jobs" n)) maxheap json verbose xs
+        | "-j" :: n :: xs => loop holdir source_dir (SOME (positive_int "-j" n)) maxheap json verbose xs
+        | "--maxheap" :: n :: xs => loop holdir source_dir jobs (SOME (positive_int "--maxheap" n)) json verbose xs
+        | "--max-heap" :: n :: xs => loop holdir source_dir jobs (SOME (positive_int "--max-heap" n)) json verbose xs
         | "--holdir" :: [] => raise Error "--holdir requires PATH"
         | "--source-dir" :: [] => raise Error "--source-dir requires PATH"
         | "--jobs" :: [] => raise Error "--jobs requires N"
@@ -231,21 +233,21 @@ fun parse_global_options args =
         | "--max-heap" :: [] => raise Error "--max-heap requires MB"
         | arg :: xs =>
             if String.isPrefix "--holdir=" arg then
-              loop (SOME (String.extract (arg, size "--holdir=", NONE))) source_dir jobs maxheap json xs
+              loop (SOME (String.extract (arg, size "--holdir=", NONE))) source_dir jobs maxheap json verbose xs
             else if String.isPrefix "--source-dir=" arg then
-              loop holdir (SOME (String.extract (arg, size "--source-dir=", NONE))) jobs maxheap json xs
+              loop holdir (SOME (String.extract (arg, size "--source-dir=", NONE))) jobs maxheap json verbose xs
             else if String.isPrefix "--jobs=" arg then
-              loop holdir source_dir (SOME (positive_int "--jobs" (String.extract (arg, size "--jobs=", NONE)))) maxheap json xs
+              loop holdir source_dir (SOME (positive_int "--jobs" (String.extract (arg, size "--jobs=", NONE)))) maxheap json verbose xs
             else if String.isPrefix "--maxheap=" arg then
-              loop holdir source_dir jobs (SOME (positive_int "--maxheap" (String.extract (arg, size "--maxheap=", NONE)))) json xs
+              loop holdir source_dir jobs (SOME (positive_int "--maxheap" (String.extract (arg, size "--maxheap=", NONE)))) json verbose xs
             else if String.isPrefix "--max-heap=" arg then
-              loop holdir source_dir jobs (SOME (positive_int "--max-heap" (String.extract (arg, size "--max-heap=", NONE)))) json xs
+              loop holdir source_dir jobs (SOME (positive_int "--max-heap" (String.extract (arg, size "--max-heap=", NONE)))) json verbose xs
             else if String.isPrefix "-j" arg andalso size arg > 2 then
-              loop holdir source_dir (SOME (positive_int "-j" (String.extract (arg, 2, NONE)))) maxheap json xs
+              loop holdir source_dir (SOME (positive_int "-j" (String.extract (arg, 2, NONE)))) maxheap json verbose xs
             else
-              let val (opts, args') = loop holdir source_dir jobs maxheap json xs in (opts, arg :: args') end
+              let val (opts, args') = loop holdir source_dir jobs maxheap json verbose xs in (opts, arg :: args') end
   in
-    loop NONE NONE NONE NONE false args
+    loop NONE NONE NONE NONE false false args
   end
 
 fun with_input path f =
@@ -492,8 +494,9 @@ fun gc args =
     ()
   end
 
-fun dispatch_with_options {holdir, source_dir, jobs, maxheap, json} args =
+fun dispatch_with_options {holdir, source_dir, jobs, maxheap, json, verbose} args =
   (HolbuildStatus.set_json_mode json;
+   HolbuildStatus.set_verbose_mode verbose;
    Option.app HolbuildProject.set_source_dir source_dir;
    case args of
        "gc" :: rest => (reject_json "gc"; gc rest)

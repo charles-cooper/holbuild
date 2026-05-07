@@ -116,6 +116,15 @@ if grep -q $'\033\\[0K' "$plain_build_log"; then
   exit 1
 fi
 
+verbose_build_log=$tmpdir/verbose-build.log
+(cd "$plain_build_project" && "$HOLBUILD_BIN" --verbose --holdir "$HOLDIR" build --force BTheory) > "$verbose_build_log" 2>&1
+require_grep "BTheory started" "$verbose_build_log"
+require_grep "BTheory built in " "$verbose_build_log"
+if grep -q $'\033\\[0K' "$verbose_build_log"; then
+  echo "status redraw escaped into verbose non-tty build output" >&2
+  exit 1
+fi
+
 message_project=$tmpdir/message-project
 mkdir -p "$message_project/src"
 cat > "$message_project/holproject.toml" <<'TOML'
