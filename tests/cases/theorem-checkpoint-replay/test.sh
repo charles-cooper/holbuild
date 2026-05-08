@@ -424,6 +424,41 @@ require_grep "holbuild goal 1 of 2:" "$multi_goal_child_log"
 require_grep "holbuild goal 2 of 2:" "$multi_goal_child_log"
 require_grep "holbuild end all goals" "$multi_goal_child_log"
 
+multi_goal_large_project=$tmpdir/multi-goal-large-project
+mkdir -p "$multi_goal_large_project/src"
+cat > "$multi_goal_large_project/holproject.toml" <<'TOML'
+[project]
+name = "multi-goal-large"
+
+[build]
+members = ["src"]
+TOML
+python3 - <<PY
+from pathlib import Path
+long_var = "p" * 5000
+Path("$multi_goal_large_project/src/AScript.sml").write_text(fr'''open HolKernel Parse boolLib bossLib;
+val _ = new_theory "A";
+
+Theorem multi_goal_large_failure:
+  {long_var} /\\ {long_var}
+Proof
+  CONJ_TAC >> FAIL_TAC "multi goal large failure"
+QED
+
+val _ = export_theory();
+''')
+PY
+multi_goal_large_log=$tmpdir/multi-goal-large.log
+if (cd "$multi_goal_large_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$multi_goal_large_log" 2>&1; then
+  echo "expected large multi-goal proof to fail build" >&2
+  exit 1
+fi
+multi_goal_large_child_log=$(find "$multi_goal_large_project/.holbuild/logs" -name '*-ATheory-instrumented-failure.log' -print -quit)
+require_file "$multi_goal_large_child_log"
+require_grep "holbuild all goals:" "$multi_goal_large_child_log"
+require_grep "holbuild all goals truncated after 4096 bytes" "$multi_goal_large_child_log"
+require_grep "holbuild end all goals" "$multi_goal_large_child_log"
+
 a_thm_context=$(find "$failure_project/.holbuild/checkpoints" -name '*a_thm_context.save' -print -quit)
 require_file "$a_thm_context"
 b_thm_failed_prefix=$(find "$failure_project/.holbuild/checkpoints" -name '*b_thm_failed_prefix.save' -print -quit)

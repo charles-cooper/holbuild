@@ -184,15 +184,24 @@ fun numbered_goal_text total (index, goal) =
   String.concat ["holbuild goal ", Int.toString index, " of ", Int.toString total, ":\n",
                  goal_text goal]
 
+val all_goals_limit = 4096
+
+fun limited_all_goals_text text =
+  if size text <= all_goals_limit then text
+  else
+    String.concat [String.substring(text, 0, all_goals_limit),
+                   "\nholbuild all goals truncated after ", Int.toString all_goals_limit, " bytes\n"]
+
 fun all_goals_text goals =
   if length goals <= 1 then ""
   else
     let
       val total = length goals
       val indexed = ListPair.zip (List.tabulate(total, fn i => i + 1), goals)
+      val text = String.concat (map (numbered_goal_text total) indexed)
     in
-      String.concat (["holbuild all goals:\n"] @ map (numbered_goal_text total) indexed @
-                     ["holbuild end all goals\n"])
+      String.concat ["holbuild all goals:\n", limited_all_goals_text text,
+                     "holbuild end all goals\n"]
     end
 
 fun active_theorem_name () =
