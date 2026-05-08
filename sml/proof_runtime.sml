@@ -175,8 +175,25 @@ fun save_theorem_context () =
         (context_info_ref := NONE;
          save_checkpoint "theorem_context" false context_path context_ok depth)
 
+fun goal_text goal = PP.pp_to_string 100 goalStack.std_pp_goal goal ^ "\n"
+
 fun top_goal_text [] = "<no open goals>\n"
-  | top_goal_text (goal :: _) = PP.pp_to_string 100 goalStack.std_pp_goal goal ^ "\n"
+  | top_goal_text (goal :: _) = goal_text goal
+
+fun numbered_goal_text total (index, goal) =
+  String.concat ["holbuild goal ", Int.toString index, " of ", Int.toString total, ":\n",
+                 goal_text goal]
+
+fun all_goals_text goals =
+  if length goals <= 1 then ""
+  else
+    let
+      val total = length goals
+      val indexed = ListPair.zip (List.tabulate(total, fn i => i + 1), goals)
+    in
+      String.concat (["holbuild all goals:\n"] @ map (numbered_goal_text total) indexed @
+                     ["holbuild end all goals\n"])
+    end
 
 fun active_theorem_name () =
   case !theorem_info_ref of
@@ -254,7 +271,8 @@ fun print_goal_state label =
                      "\nholbuild remaining goals: ", Int.toString (length goals), "\n",
                      "holbuild top goal:\n",
                      top_goal_text goals,
-                     "holbuild end top goal\n"])
+                     "holbuild end top goal\n",
+                     all_goals_text goals])
   end
   handle e =>
     TextIO.output(TextIO.stdErr,

@@ -493,6 +493,10 @@ fun truncate_goal_state text =
 fun remaining_goals_summary NONE = ""
   | remaining_goals_summary (SOME n) = "remaining goals at failed fragment: " ^ Int.toString n ^ "\n"
 
+fun all_goals_log_summary (SOME n) =
+      if n > 1 then "all goals at failed fragment are in the instrumented log\n" else ""
+  | all_goals_log_summary NONE = ""
+
 fun goal_state_summary {remaining_goals, top_goal} =
   let
     val (truncated, preview) = truncate_goal_state top_goal
@@ -505,6 +509,7 @@ fun goal_state_summary {remaining_goals, top_goal} =
     String.concat
       ["top goal at failed fragment:\n",
        remaining_goals_summary remaining_goals,
+       all_goals_log_summary remaining_goals,
        truncation_line,
        preview,
        if size preview = 0 orelse String.sub(preview, size preview - 1) <> #"\n" then "\n" else ""]

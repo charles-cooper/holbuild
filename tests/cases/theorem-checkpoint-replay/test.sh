@@ -382,6 +382,48 @@ require_grep "holbuild plan position: 00 tactic FAIL_TAC" "$failure_child_log"
 require_grep "holbuild remaining goals: 1" "$failure_child_log"
 require_grep "holbuild top goal:" "$failure_child_log"
 require_grep "holbuild end top goal" "$failure_child_log"
+
+multi_goal_project=$tmpdir/multi-goal-project
+mkdir -p "$multi_goal_project/src"
+cat > "$multi_goal_project/holproject.toml" <<'TOML'
+[project]
+name = "multi-goal"
+
+[build]
+members = ["src"]
+TOML
+cat > "$multi_goal_project/src/AScript.sml" <<'SML'
+open HolKernel Parse boolLib bossLib;
+val _ = new_theory "A";
+
+Theorem multi_goal_failure:
+  T /\ T
+Proof
+  CONJ_TAC >> FAIL_TAC "multi goal failure"
+QED
+
+val _ = export_theory();
+SML
+multi_goal_log=$tmpdir/multi-goal.log
+if (cd "$multi_goal_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$multi_goal_log" 2>&1; then
+  echo "expected multi-goal proof to fail build" >&2
+  exit 1
+fi
+require_grep "remaining goals at failed fragment: 2" "$multi_goal_log"
+require_grep "all goals at failed fragment are in the instrumented log" "$multi_goal_log"
+if grep -q "holbuild all goals:" "$multi_goal_log"; then
+  echo "parent output should not include full all-goals log" >&2
+  exit 1
+fi
+multi_goal_child_log=$(find "$multi_goal_project/.holbuild/logs" -name '*-ATheory-instrumented-failure.log' -print -quit)
+require_file "$multi_goal_child_log"
+require_grep "holbuild remaining goals: 2" "$multi_goal_child_log"
+require_grep "holbuild top goal:" "$multi_goal_child_log"
+require_grep "holbuild all goals:" "$multi_goal_child_log"
+require_grep "holbuild goal 1 of 2:" "$multi_goal_child_log"
+require_grep "holbuild goal 2 of 2:" "$multi_goal_child_log"
+require_grep "holbuild end all goals" "$multi_goal_child_log"
+
 a_thm_context=$(find "$failure_project/.holbuild/checkpoints" -name '*a_thm_context.save' -print -quit)
 require_file "$a_thm_context"
 b_thm_failed_prefix=$(find "$failure_project/.holbuild/checkpoints" -name '*b_thm_failed_prefix.save' -print -quit)
