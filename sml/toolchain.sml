@@ -181,6 +181,9 @@ fun timed_shell kind argv output script =
 fun run argv =
   timed_shell "run" argv NONE (command argv)
 
+fun run_interactive argv =
+  timed_system "run_interactive" argv NONE (fn () => OS.Process.system (command argv))
+
 fun run_in_dir dir argv =
   timed_shell "run_in_dir" argv NONE ("cd " ^ quote dir ^ " && " ^ command argv)
 

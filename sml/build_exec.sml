@@ -1565,7 +1565,7 @@ fun run_failure_repl tc policy theorem_checkpoints failure_checkpoints deps_load
                       (String.concat ["holbuild: starting HOL repl from ", kind,
                                       " checkpoint\ncheckpoint: ", path, "\n"])
           in
-            ignore (HolbuildToolchain.run argv)
+            ignore (HolbuildToolchain.run_interactive argv)
           end
 
 fun write_theory_script policy project base_context plan keys input_key toolchain_key node source_text checkpoints terminations staged_script preload timeout_marker plan_only_marker =
