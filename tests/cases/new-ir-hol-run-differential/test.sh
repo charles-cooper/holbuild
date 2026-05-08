@@ -238,6 +238,14 @@ Proof
   >- ACCEPT_TAC TRUTH
 QED
 
+Theorem branch_then1_lhs_sequence_success:
+  ((T ∨ T) ⇒ T) ∧ T
+Proof
+  CONJ_TAC
+  >- (ALL_TAC >> strip_tac >- ACCEPT_TAC TRUTH >> ACCEPT_TAC TRUTH)
+  >- ACCEPT_TAC TRUTH
+QED
+
 Theorem branch_suffix_reverse_success:
   ((T ∧ T) ∧ (T ∧ T)) ∧ T
 Proof

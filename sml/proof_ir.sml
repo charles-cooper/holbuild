@@ -617,7 +617,10 @@ fun branch_suffix_steps source tactic =
 
 fun branch_start_steps source tactic =
   case tactic of
-      TacThen1 (lhs, rhs) => branch_start_steps source lhs @ branch_steps source rhs
+      TacThen (first :: rest) =>
+        branch_start_steps source first @ List.concat (map (branch_suffix_steps source) rest)
+    | TacThen1 (lhs, rhs) => branch_start_steps source lhs @ branch_steps source rhs
+    | TacRepairGroup (_, inner) => branch_start_steps source inner
     | _ => [branch_step (tactic_span tactic) (">- " ^ tactic_label source tactic) BranchStart (tactic_program source tactic)]
 and branch_steps source rhs =
   case rhs of

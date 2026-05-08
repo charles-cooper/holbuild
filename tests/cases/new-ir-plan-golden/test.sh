@@ -199,6 +199,26 @@ holbuild proof-ir plan ATheory:branch_sequence_plan source=src/AScript.sml (5 st
 EXPECTED
 
 cat >> "$project/src/AScript.sml" <<'SML'
+Theorem branch_then1_lhs_sequence_plan:
+  ((T \/ T) ==> T) /\ T
+Proof
+  CONJ_TAC
+  >- (ALL_TAC >> strip_tac >- ACCEPT_TAC TRUTH >> ACCEPT_TAC TRUTH)
+  >- ACCEPT_TAC TRUTH
+QED
+SML
+check_plan branch_then1_lhs_sequence_plan <<'EXPECTED'
+holbuild proof-ir plan ATheory:branch_then1_lhs_sequence_plan source=src/AScript.sml (7 steps)
+  00 CONJ_TAC
+  01 >- ALL_TAC
+  02    >> strip_tac
+  03 >- ACCEPT_TAC TRUTH
+  04    >> ACCEPT_TAC TRUTH
+  05    >- solved
+  06 >- ACCEPT_TAC TRUTH
+EXPECTED
+
+cat >> "$project/src/AScript.sml" <<'SML'
 Theorem branch_suffix_reverse_plan:
   ((T /\ T) /\ (T /\ T)) /\ T
 Proof
