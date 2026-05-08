@@ -1,14 +1,12 @@
 # A modern, human- and agent-friendly build system for HOL4
 
-`holbuild` is an experimental project-aware build frontend for HOL4.
+`holbuild` is a project-aware build frontend for HOL4. The implementation is fairly stable; the `holproject.toml` format is still under active design while feature requests settle before eventual upstreaming into HOL.
 
-This repository is an external prototype for the design in HOL issue #1916:
-`holproject.toml` as a project manifest, logical build targets, project-level
-artifacts, and a future in-tree `hol build` implementation.
+This repository is the external development vehicle for the design in https://github.com/HOL-Theorem-Prover/HOL/issues/1916: `holproject.toml` as a project manifest, logical build targets, project-level artifacts, and a future in-tree `hol build` implementation.
 
 ## Current scope
 
-This prototype is intentionally small:
+The current implementation intentionally focuses on:
 
 - reads and schema-checks the nearest `holproject.toml`
 - establishes a shared project context for `build`, `run`, and `repl`
@@ -24,12 +22,12 @@ This prototype is intentionally small:
 - records generated theory ML dependencies from HOL theory metadata in internal load manifests
 - rejects source-level `use "file"` in project build actions; declare/load project modules instead
 - supports per-action policy for explicit logical dependencies/loadable modules, extra inputs, cache disabling, and always-rerun actions
-- computes prototype source/resolved-dependency input keys for planned actions
+- computes current-format source/resolved-dependency input keys for planned actions
 - schedules build actions in DAG-ready parallel order with `-jN`, local `[build].jobs`, or a CPU-derived default
 - executes simple theory-script builds into project `.holbuild/` without Holmake
 - records local action metadata and skips unchanged actions
 - publishes/restores simple theory semantic artifacts through the global cache
-- includes the configured toolchain/base context in prototype action keys
+- includes the configured toolchain/base context in current action keys
 - creates transient local theory checkpoints while building: dependencies-loaded and final-context checkpoints when checkpointing is enabled, plus theorem end-of-proof/context and failed-prefix proof-navigation checkpoints when theorem instrumentation is enabled; successful builds remove them after writing logical artifacts and metadata
 - runs modern theorem proofs through holbuild's proof IR runtime by default, with tactic parsing/step planning, proof-history execution, checkpoint saves, timeout handling, and diagnostics kept out of generated per-theory source; the legacy HOL `goalFrag` runtime remains available with `--goalfrag`
 - keeps proof instrumentation separate from checkpoint creation; `--skip-checkpoints` avoids theory `.save` files entirely, `--skip-goalfrag` opts out of theorem instrumentation but can still use non-theorem dependency/final-context checkpoints, and `--tactic-timeout SECONDS` controls the root-project per-tactic proof timeout (default 2.5s; `0` disables it)
@@ -39,7 +37,7 @@ This prototype is intentionally small:
 - treats `.uo`/`.ui` as internal ML artifacts, never user-requestable targets
 - delegates execution to `$HOLDIR/bin/hol run` / `hol repl` for now
 
-The external prototype requires a HOL checkout or installation via `HOLDIR` so it
+The external implementation requires a HOL checkout or installation via `HOLDIR` so it
 can reuse HOL tooling. Current code still starts actions from `$HOLDIR/bin/hol.state`
 and includes that heap in the toolchain key; it does not create a project-local
 copy under `.holbuild/checkpoints/_base`. The target design replaces this
@@ -48,9 +46,10 @@ restore hermetically under `.holbuild/` after `git pull`. See `DESIGN.md`.
 
 ## Current validation status
 
-This is still an alpha prototype, but it is now production-dogfooded beyond toy
-cases. The full holbuild test suite passes against the local HOL checkout. The
-Vyper HOL project worktree has passed rooted project builds with goalfrag and
+The codebase is stable and production-dogfooded beyond toy cases; the remaining
+volatility is in the project-manifest format and related user-facing build model.
+The full holbuild test suite passes against the local HOL checkout. The Vyper HOL
+project worktree has passed rooted project builds with theorem instrumentation and
 transient checkpoints enabled using `--no-cache --tactic-timeout 0`; focused
 finite-timeout smoke testing for the large `instIdxIndepTheory` target passes at
 `--tactic-timeout 60`. The default root timeout remains intentionally strict
@@ -112,8 +111,7 @@ bin/holbuild build --dry-run MyTheory
 bin/holbuild gc
 ```
 
-Additional prototype commands exist for project-context execution and explicit
-heap exports:
+Additional commands exist for project-context execution and explicit heap exports:
 
 ```sh
 bin/holbuild run someScript.sml
@@ -256,10 +254,10 @@ move under a project-level `.holbuild/` directory. The top-level directory is no
 `.hol/` because Holmake/HOL tooling already uses `.hol` conventions. Any
 `.hol/objs` directories written by holbuild are nested compatibility remap copies
 inside `.holbuild/`, not the project state root. `.uo` and `.ui` files are internal
-ML artifacts; users should request logical targets only. The prototype rejects
+ML artifacts; users should request logical targets only. The current implementation rejects
 ambiguous graphs where two sources export the same logical theory/module name;
 the intended exception is a same-package `.sig`/`.sml` companion pair. The
-prototype also writes auxiliary `HOLFileSys` remap copies under `.hol/objs` for
+current implementation also writes auxiliary `HOLFileSys` remap copies under `.hol/objs` for
 path-sensitive internal loads while preserving canonical artifacts in the project
 layout.
 
@@ -321,4 +319,4 @@ temporary entries, action manifests, and old unreferenced blobs after 7 days by 
 `holbuild run` and `holbuild repl` generate `.holbuild/holbuild-run-context.sml`
 in the project root before loading `[run].loads` and user-supplied arguments.
 
-`hol debug` is deliberately out of scope for this prototype.
+`hol debug` is deliberately out of scope for the current implementation.
