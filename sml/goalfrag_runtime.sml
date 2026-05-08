@@ -231,13 +231,15 @@ open HolbuildGoalfragPlan
 
 fun report_step_failure label e = (save_failed_prefix_checkpoint (); print_goal_state label; raise e)
 
+fun quiet_goalstack f = Lib.with_flag (proofManagerLib.chatting, false) f ()
+
 fun apply_ftac label ftac =
-  with_tactic_timeout label (fn () => (proofManagerLib.ef ftac; ())) ()
+  with_tactic_timeout label (fn () => quiet_goalstack (fn () => (proofManagerLib.ef ftac; ()))) ()
   handle e => report_step_failure label e
 
 fun eval_step label program fail_msg =
   with_tactic_timeout label
-    (fn () => if smlExecute.quse_string program then () else raise Fail fail_msg) ()
+    (fn () => quiet_goalstack (fn () => if smlExecute.quse_string program then () else raise Fail fail_msg)) ()
   handle e => report_step_failure label e
 
 fun int_arg_open prefix apply label =

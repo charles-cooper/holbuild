@@ -224,7 +224,9 @@ fun init_history g limit =
   set_history (History.new_history {obj = goalStack.new_goal g Lib.I,
                                     limit = Int.max(15, limit)})
 
-fun append_history f = set_history (History.apply f (current_history()))
+fun append_history f =
+  set_history (Lib.with_flag (goalStack.chatting, false)
+                 (fn () => History.apply f (current_history())) ())
 fun ensure_history_limit limit = set_history (History.set_limit (current_history()) (Int.max(15, limit)))
 
 fun history_top_goals () = project_history goalStack.top_goals

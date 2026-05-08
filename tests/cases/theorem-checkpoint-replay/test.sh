@@ -156,6 +156,10 @@ require_grep "holbuild checkpoint kind=deps_loaded" "$first_log"
 require_grep "holbuild checkpoint kind=end_of_proof" "$first_log"
 require_grep "holbuild checkpoint kind=theorem_context" "$first_log"
 require_grep "holbuild checkpoint kind=final_context" "$first_log"
+if grep -q '^[0-9][0-9]* subgoals:$' "$first_log"; then
+  echo "proof IR child log leaked interactive goal-stack progress" >&2
+  exit 1
+fi
 require_file "$project/.holbuild/gen/src/ATheory.sig"
 require_file "$project/.holbuild/gen/src/ATheory.sml"
 require_file "$project/.holbuild/obj/src/ATheory.dat"
@@ -237,6 +241,10 @@ require_file "$trace_child_log"
 require_grep "holbuild goalfrag plan theorem=a_thm steps=" "$trace_child_log"
 require_grep "holbuild goalfrag plan theorem=b_thm steps=" "$trace_child_log"
 require_grep "holbuild goalfrag before theorem=b_thm step=0" "$trace_child_log"
+if grep -q '^[0-9][0-9]* subgoals:$' "$trace_child_log"; then
+  echo "goalfrag child log leaked interactive goal-stack progress" >&2
+  exit 1
+fi
 require_grep "holbuild goalfrag after theorem=b_thm step=0.*elapsed_ms=" "$trace_child_log"
 force_log=$tmpdir/force.log
 (cd "$trace_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --force ATheory) > "$force_log" 2>&1
