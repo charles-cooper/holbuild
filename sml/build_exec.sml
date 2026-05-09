@@ -776,10 +776,16 @@ fun find_substring needle haystack =
     if n = 0 then NONE else loop 0
   end
 
-fun checkpoint_parent_mismatch text =
-  Option.isSome (find_substring "Couldn't load HOL base-state" text) andalso
-  Option.isSome (find_substring "parent for this saved state" text) andalso
-  Option.isSome (find_substring "does not match or has been changed" text)
+fun hol_state_load_failure text =
+  Option.isSome (find_substring "Couldn't load HOL base-state" text)
+
+(* Defensive recovery for already-invalid checkpoint artifacts. Holbuild should
+   preserve parent/child heap families atomically; this path is not a substitute
+   for that invariant. It keeps old/manual/interrupted artifacts from surfacing
+   as source proof failures. *)
+fun invalid_checkpoint_retryable base_context run_context msg =
+  hol_state_load_failure msg andalso
+  hol_context_path run_context <> hol_context_path base_context
 
 fun remove_checkpoints paths =
   List.app remove_checkpoint paths
@@ -1808,12 +1814,11 @@ fun build_theory cache_allowed policy tc project base_context plan keys toolchai
         "holbuild-build.log"
         "hol run failed while building theory script"
       handle Error msg =>
-        if checkpoint_parent_mismatch msg andalso
-           hol_context_path (#context run_spec) <> hol_context_path base_context then
+        if invalid_checkpoint_retryable base_context (#context run_spec) msg then
           let
             val invalid = #failure_checkpoints run_spec
             val _ = remove_checkpoints invalid
-            val _ = warn ("discarding checkpoint family after PolyML parent mismatch: " ^ checkpoint_paths_text invalid)
+            val _ = warn ("discarding invalid checkpoint after HOL state load failure: " ^ checkpoint_paths_text invalid)
           in
             raise RetryInvalidCheckpoint
           end

@@ -233,13 +233,13 @@ write_good_source
 force_rebuild
 parent_mismatch_log=$tmpdir/parent-mismatch.log
 (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$parent_mismatch_log" 2>&1
-require_grep "discarding checkpoint family after PolyML parent mismatch" "$parent_mismatch_log"
+require_grep "discarding invalid checkpoint after HOL state load failure" "$parent_mismatch_log"
 if grep -q "Couldn't load HOL base-state\|parent for this saved state" "$parent_mismatch_log"; then
   echo "checkpoint parent mismatch leaked as a build failure" >&2
   exit 1
 fi
 require_file "$project/.holbuild/obj/src/ATheory.dat"
-assert_no_checkpoints "clean rebuild after checkpoint parent mismatch retained checkpoint files"
+assert_no_checkpoints "clean rebuild after invalid parent checkpoint retained checkpoint files"
 
 run_expect_suffix_failure "$tmpdir/corrupt-seed.log"
 corrupt_context=$(first_context_path)
@@ -249,24 +249,13 @@ printf 'not a valid PolyML checkpoint\n' > "$corrupt_context"
 write_good_source
 force_rebuild
 corrupt_log=$tmpdir/corrupt.log
-if (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$corrupt_log" 2>&1; then
-  echo "corrupt checkpoint replay should fail the build, not retry plain source" >&2
-  exit 1
-fi
+(cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$corrupt_log" 2>&1
 require_grep "from: theorem-context checkpoint after first" "$corrupt_log"
-require_grep "instrumented log:" "$corrupt_log"
-if grep -q -- "--- child log tail ---" "$corrupt_log"; then
-  echo "checkpoint failure duplicated full child log tail" >&2
+require_grep "discarding invalid checkpoint after HOL state load failure" "$corrupt_log"
+if grep -q "Couldn't load HOL base-state\|Unable to load header" "$corrupt_log"; then
+  echo "corrupt checkpoint load failure leaked as a build failure" >&2
   exit 1
 fi
-if [[ -e "$corrupt_context" || -e "$corrupt_context.ok" ]]; then
-  echo "failed replay did not discard corrupt theorem checkpoint" >&2
-  exit 1
-fi
-rm -rf "$project/.holbuild/checkpoints"
-write_good_source
-force_rebuild
-(cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$tmpdir/corrupt-clean-rebuild.log" 2>&1
 require_file "$project/.holbuild/obj/src/ATheory.dat"
 assert_no_checkpoints "clean rebuild after corrupt checkpoint retained checkpoint files"
 
@@ -279,18 +268,13 @@ printf 'not a valid PolyML deps checkpoint\n' > "$corrupt_deps"
 write_good_source
 force_rebuild
 corrupt_deps_log=$tmpdir/corrupt-deps.log
-if (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$corrupt_deps_log" 2>&1; then
-  echo "corrupt deps checkpoint replay should fail the build" >&2
-  exit 1
-fi
+(cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$corrupt_deps_log" 2>&1
 require_grep "from: deps-loaded checkpoint" "$corrupt_deps_log"
-if [[ -e "$corrupt_deps" || -e "$corrupt_deps.ok" ]]; then
-  echo "failed replay did not discard corrupt deps checkpoint" >&2
+require_grep "discarding invalid checkpoint after HOL state load failure" "$corrupt_deps_log"
+if grep -q "Couldn't load HOL base-state\|Unable to load header" "$corrupt_deps_log"; then
+  echo "corrupt deps checkpoint load failure leaked as a build failure" >&2
   exit 1
 fi
-write_good_source
-force_rebuild
-(cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$tmpdir/corrupt-deps-clean-rebuild.log" 2>&1
 require_file "$project/.holbuild/obj/src/ATheory.dat"
 assert_no_checkpoints "clean rebuild after corrupt deps checkpoint retained checkpoint files"
 
