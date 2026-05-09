@@ -6,6 +6,7 @@ structure FS = OS.FileSys
 
 exception Error of string
 exception GoalfragPlanPrinted
+exception RetryInvalidCheckpoint
 
 fun has_suffix suffix s =
   let
@@ -703,6 +704,16 @@ fun find_substring needle haystack =
   in
     if n = 0 then NONE else loop 0
   end
+
+fun checkpoint_parent_mismatch text =
+  Option.isSome (find_substring "Couldn't load HOL base-state" text) andalso
+  Option.isSome (find_substring "parent for this saved state" text) andalso
+  Option.isSome (find_substring "does not match or has been changed" text)
+
+fun remove_checkpoints paths =
+  List.app remove_checkpoint paths
+
+fun checkpoint_paths_text paths = String.concatWith ", " paths
 
 fun preserve_log src dst =
   if file_exists src then
@@ -1726,15 +1737,25 @@ fun build_theory cache_allowed policy tc project base_context plan keys toolchai
         "holbuild-build.log"
         "hol run failed while building theory script"
       handle Error msg =>
-        let
-          val failure_error =
-            if file_exists timeout_marker then tactic_timeout_error ()
-            else if null theorem_checkpoints andalso null termination_diagnostics then Error msg
-            else checkpoint_failure_error msg
-          val _ = run_failure_repl tc policy theorem_checkpoints (#failure_checkpoints run_spec) deps_loaded
-        in
-          raise failure_error
-        end
+        if checkpoint_parent_mismatch msg andalso
+           hol_context_path (#context run_spec) <> hol_context_path base_context then
+          let
+            val invalid = #failure_checkpoints run_spec
+            val _ = remove_checkpoints invalid
+            val _ = warn ("discarding checkpoint family after PolyML parent mismatch: " ^ checkpoint_paths_text invalid)
+          in
+            raise RetryInvalidCheckpoint
+          end
+        else
+          let
+            val failure_error =
+              if file_exists timeout_marker then tactic_timeout_error ()
+              else if null theorem_checkpoints andalso null termination_diagnostics then Error msg
+              else checkpoint_failure_error msg
+            val _ = run_failure_repl tc policy theorem_checkpoints (#failure_checkpoints run_spec) deps_loaded
+          in
+            raise failure_error
+          end
     val _ =
       if goalfrag_plan_only policy andalso file_exists plan_only_marker then
         (HolbuildStatus.message_stdout (read_text build_log handle _ => "");
@@ -2028,10 +2049,15 @@ fun build_theory_node (options : build_options) tc project base_context plan key
           theory_checkpoints_for_node policy project plan keys toolchain_key node source_text
         val termination_diagnostics = termination_diagnostics_for_node policy node source_text
       in
-        (build_theory cache_allowed policy tc project base_context plan keys toolchain_key node source_text theorem_checkpoints termination_diagnostics;
-         write_metadata policy project plan keys input_key toolchain_key node metadata_checkpoints;
-         remove_checkpoint_family project node;
-         HolbuildStatus.Built)
+        ((build_theory cache_allowed policy tc project base_context plan keys toolchain_key node source_text theorem_checkpoints termination_diagnostics;
+          write_metadata policy project plan keys input_key toolchain_key node metadata_checkpoints;
+          remove_checkpoint_family project node;
+          HolbuildStatus.Built)
+         handle RetryInvalidCheckpoint =>
+           (build_theory cache_allowed policy tc project base_context plan keys toolchain_key node source_text theorem_checkpoints termination_diagnostics;
+            write_metadata policy project plan keys input_key toolchain_key node metadata_checkpoints;
+            remove_checkpoint_family project node;
+            HolbuildStatus.Built))
         handle GoalfragPlanPrinted => HolbuildStatus.Inspected
       end
   end

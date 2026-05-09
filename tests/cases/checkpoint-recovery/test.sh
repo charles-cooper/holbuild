@@ -224,6 +224,23 @@ require_grep "checkpoint save was interrupted; restoring previous checkpoint:" "
 require_grep "from: theorem-context checkpoint after first" "$backup_log"
 assert_no_checkpoints "clean rebuild after restored checkpoint backup retained checkpoint files"
 
+run_expect_suffix_failure "$tmpdir/parent-mismatch-seed.log"
+parent_mismatch_deps=$(first_deps_path)
+parent_mismatch_failed_prefix=$(second_failed_prefix_path)
+rm -f "$parent_mismatch_failed_prefix" "$parent_mismatch_failed_prefix.ok" "$parent_mismatch_failed_prefix.meta" "$parent_mismatch_failed_prefix.prefix"
+cp "$HOLDIR/bin/hol.state" "$parent_mismatch_deps"
+write_good_source
+force_rebuild
+parent_mismatch_log=$tmpdir/parent-mismatch.log
+(cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$parent_mismatch_log" 2>&1
+require_grep "discarding checkpoint family after PolyML parent mismatch" "$parent_mismatch_log"
+if grep -q "Couldn't load HOL base-state\|parent for this saved state" "$parent_mismatch_log"; then
+  echo "checkpoint parent mismatch leaked as a build failure" >&2
+  exit 1
+fi
+require_file "$project/.holbuild/obj/src/ATheory.dat"
+assert_no_checkpoints "clean rebuild after checkpoint parent mismatch retained checkpoint files"
+
 run_expect_suffix_failure "$tmpdir/corrupt-seed.log"
 corrupt_context=$(first_context_path)
 corrupt_failed_prefix=$(second_failed_prefix_path)
