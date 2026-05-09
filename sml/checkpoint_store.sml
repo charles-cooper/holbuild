@@ -93,17 +93,24 @@ fun remove_incomplete_residue warn path =
      remove_file (path ^ ".prefix"))
   else ()
 
-fun ok_matches warn path fields =
+fun valid_checkpoint_file warn path =
   (restore_checkpoint_backup warn path;
    remove_incomplete_residue warn path;
-   file_exists path andalso
-   case current_metadata (ok_path path) of
-       SOME text =>
-         let val lines = metadata_lines text
-         in
-           List.exists (fn line => line = "holbuild-checkpoint-ok-v2") lines andalso
-           List.all (fn (key, value) => metadata_value key lines = SOME value) fields
-         end
-     | NONE => false)
+   file_exists path)
+
+fun ok_text_matches warn path expected_text =
+  valid_checkpoint_file warn path andalso
+  current_metadata (ok_path path) = SOME expected_text
+
+fun ok_matches warn path fields =
+  valid_checkpoint_file warn path andalso
+  case current_metadata (ok_path path) of
+      SOME text =>
+        let val lines = metadata_lines text
+        in
+          List.exists (fn line => line = "holbuild-checkpoint-ok-v2") lines andalso
+          List.all (fn (key, value) => metadata_value key lines = SOME value) fields
+        end
+    | NONE => false
 
 end

@@ -209,6 +209,42 @@ if grep -q "from: theorem-context checkpoint after first\|selected HOL base-stat
 fi
 assert_no_checkpoints "clean rebuild after orphan checkpoint metadata retained checkpoint files"
 
+run_expect_suffix_failure "$tmpdir/missing-failed-prefix-seed.log"
+missing_failed_prefix_save=$(second_failed_prefix_path)
+rm -f "$missing_failed_prefix_save"
+write_good_source
+force_rebuild
+missing_failed_prefix_log=$tmpdir/missing-failed-prefix.log
+(cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$missing_failed_prefix_log" 2>&1
+require_grep "from: theorem-context checkpoint after first" "$missing_failed_prefix_log"
+if grep -q "from: failed-prefix checkpoint\|selected HOL base-state checkpoint is missing\|Couldn't load HOL base-state\|instrumented log:" "$missing_failed_prefix_log"; then
+  echo "missing failed-prefix .save was treated as replayable" >&2
+  exit 1
+fi
+assert_no_checkpoints "clean rebuild after missing failed-prefix save retained checkpoint files"
+
+run_expect_suffix_failure "$tmpdir/fresh-deps-seed.log"
+fresh_deps=$(first_deps_path)
+fresh_context=$(first_context_path)
+fresh_failed_prefix=$(second_failed_prefix_path)
+stale_descendant="$(dirname "$(dirname "$fresh_context")")/stale_prefix/stale_context.save"
+mkdir -p "$(dirname "$stale_descendant")"
+printf 'stale child checkpoint\n' > "$stale_descendant"
+printf 'holbuild-checkpoint-ok-v2\nkind=theorem_context\n' > "$stale_descendant.ok"
+rm -f "$fresh_deps" "$fresh_deps.ok" "$fresh_deps.meta" "$fresh_deps.prefix" "$fresh_failed_prefix" "$fresh_failed_prefix.ok" "$fresh_failed_prefix.meta" "$fresh_failed_prefix.prefix"
+force_rebuild
+fresh_deps_log=$tmpdir/fresh-deps-rebuild-failure.log
+if (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$fresh_deps_log" 2>&1; then
+  echo "expected fresh deps rebuild to preserve suffix failure" >&2
+  exit 1
+fi
+require_grep "expected dirty residue" "$fresh_deps_log"
+if [[ -e "$stale_descendant" || -e "$stale_descendant.ok" ]]; then
+  echo "fresh deps checkpoint rewrite left stale theorem descendants" >&2
+  exit 1
+fi
+rm -rf "$project/.holbuild/checkpoints"
+
 run_expect_suffix_failure "$tmpdir/backup-seed.log"
 backup_context=$(first_context_path)
 backup_failed_prefix=$(second_failed_prefix_path)

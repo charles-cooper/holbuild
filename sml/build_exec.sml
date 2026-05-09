@@ -398,8 +398,11 @@ fun deps_loaded_path project node deps_key =
 
 fun theorem_checkpoint_root project node = checkpoint_base project node ^ ".theorems"
 
+fun theorem_checkpoints_for_deps_root project node deps_key =
+  Path.concat(theorem_checkpoint_root project node, deps_key)
+
 fun theorem_checkpoint_dir project node deps_key proof_engine prefix_hash =
-  Path.concat(Path.concat(Path.concat(theorem_checkpoint_root project node, deps_key), proof_engine), prefix_hash)
+  Path.concat(Path.concat(theorem_checkpoints_for_deps_root project node deps_key, proof_engine), prefix_hash)
 
 fun final_context_path project node = checkpoint_base project node ^ ".final_context.save"
 
@@ -431,6 +434,9 @@ fun remove_checkpoint_tree path =
     ignore (OS.Process.system ("rm -rf " ^ HolbuildToolchain.quote path))
   else ()
 
+fun remove_theorem_checkpoints_for_deps project node deps_key =
+  remove_checkpoint_tree (theorem_checkpoints_for_deps_root project node deps_key)
+
 fun remove_checkpoint_family project node =
   (remove_legacy_checkpoint_family project node;
    remove_checkpoint_tree (deps_checkpoint_root project node);
@@ -461,7 +467,8 @@ fun children dir =
       result
     end
 
-fun failed_prefix_ok_artifact path = has_suffix "_failed_prefix.save.ok" path
+fun failed_prefix_ok_artifact path =
+  has_suffix "_failed_prefix.save.ok" path andalso path_exists (drop_suffix ".ok" path)
 
 fun contains_failed_prefix_ok path =
   if not (path_exists path) then false
@@ -789,6 +796,13 @@ fun invalid_checkpoint_retryable base_context run_context msg =
 
 fun remove_checkpoints paths =
   List.app remove_checkpoint paths
+
+fun remove_invalid_checkpoints project node deps_key deps_loaded paths =
+  if List.exists (fn path => path = deps_loaded) paths then
+    (remove_checkpoint deps_loaded;
+     remove_theorem_checkpoints_for_deps project node deps_key)
+  else
+    remove_checkpoints paths
 
 fun checkpoint_paths_text paths = String.concatWith ", " paths
 
@@ -1390,6 +1404,9 @@ fun metadata_value key lines =
 
 fun checkpoint_ok_matches path fields = HolbuildCheckpointStore.ok_matches warn path fields
 
+fun checkpoint_ok_text_matches path expected_text =
+  HolbuildCheckpointStore.ok_text_matches warn path expected_text
+
 fun deps_checkpoint_ok_text deps_key =
   checkpoint_ok_text "deps_loaded" [("deps_key", deps_key)]
 
@@ -1443,7 +1460,7 @@ fun failed_prefix_metadata path =
 fun failed_prefix_text path = current_metadata (path ^ ".prefix")
 
 fun failed_prefix_checkpoint checkpoint =
-  if current_metadata (checkpoint_ok_path (#failed_prefix_path checkpoint)) = SOME (#failed_prefix_ok checkpoint) then
+  if checkpoint_ok_text_matches (#failed_prefix_path checkpoint) (#failed_prefix_ok checkpoint) then
     case (failed_prefix_metadata (#failed_prefix_path checkpoint),
           failed_prefix_text (#failed_prefix_path checkpoint)) of
         (SOME step_count, SOME prefix_text) =>
@@ -1671,7 +1688,11 @@ fun write_theory_script policy project base_context plan keys input_key toolchai
          deps_loaded_resume_message node;
          {context = HolState deps_loaded, files = [staged_script], failure_checkpoints = [deps_loaded]})
       fun run_from_fresh_preload () =
-        (write_preload plan node deps_loaded deps_ok preload;
+        (remove_theorem_checkpoints_for_deps project node deps_key;
+         List.app (fn {context_path, end_of_proof_path, failed_prefix_path, ...} =>
+                     (ensure_parent context_path; ensure_parent end_of_proof_path; ensure_parent failed_prefix_path))
+                  checkpoints;
+         write_preload plan node deps_loaded deps_ok preload;
          write_text staged_script (instrumented_source policy (SOME timeout_marker) plan_only_marker source_text 0 checkpoints terminations);
          {context = base_context, files = [preload, staged_script], failure_checkpoints = []})
     in
@@ -1817,7 +1838,7 @@ fun build_theory cache_allowed policy tc project base_context plan keys toolchai
         if invalid_checkpoint_retryable base_context (#context run_spec) msg then
           let
             val invalid = #failure_checkpoints run_spec
-            val _ = remove_checkpoints invalid
+            val _ = remove_invalid_checkpoints project node deps_key deps_loaded invalid
             val _ = warn ("discarding invalid checkpoint after HOL state load failure: " ^ checkpoint_paths_text invalid)
           in
             raise RetryInvalidCheckpoint
