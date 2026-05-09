@@ -20,12 +20,9 @@ fun fmt_time t = Real.fmt (StringCvt.FIX (SOME 3)) t
 fun remove_file path = OS.FileSys.remove path handle _ => ()
 fun file_exists path = OS.FileSys.access(path, [OS.FileSys.A_READ]) handle _ => false
 fun rename_file old new = OS.FileSys.rename {old = old, new = new}
-fun rename_if_exists old new = if file_exists old then rename_file old new else ()
 
 fun ok_path path = path ^ ".ok"
 fun ok_tmp_path path = ok_path path ^ ".tmp"
-fun save_backup_path path = path ^ ".bak"
-fun ok_backup_path path = ok_path path ^ ".bak"
 
 fun write_text_atomically path text =
   let
@@ -42,18 +39,13 @@ fun write_text_atomically path text =
 
 (* PolyML child heaps record parent-state filenames. The checkpoint .save must
    therefore be created at its final path, not at a temporary path that is later
-   renamed. Replacement keeps the previous complete .save/.ok pair as .bak
-   until the new .ok metadata is atomically published. *)
+   renamed. Replacement intentionally drops old metadata before writing the new
+   save: an interrupted save may lose this checkpoint, but validation will not
+   pair stale metadata with partial save bytes. *)
 fun begin_replacement path =
   (remove_file (ok_tmp_path path);
-   remove_file (save_backup_path path);
-   remove_file (ok_backup_path path);
-   rename_if_exists (ok_path path) (ok_backup_path path);
-   rename_if_exists path (save_backup_path path))
-
-fun finish_replacement path =
-  (remove_file (save_backup_path path);
-   remove_file (ok_backup_path path))
+   remove_file (ok_path path);
+   remove_file path)
 
 fun save_checkpoint ({label, default_share, path, ok_text, depth} :
                      {label : string, default_share : bool, path : string,
@@ -68,7 +60,6 @@ fun save_checkpoint ({label, default_share, path, ok_text, depth} :
     val _ = PolyML.SaveState.saveChild(path, depth)
     val t2 = Time.now()
     val _ = write_text_atomically (ok_path path) ok_text
-    val _ = finish_replacement path
     val _ =
       if timing then
         TextIO.output

@@ -61,41 +61,6 @@ fun metadata_value key lines =
                lines
   end
 
-fun save_backup_path path = path ^ ".bak"
-fun ok_backup_path path = ok_path path ^ ".bak"
-
-fun discard_checkpoint_backup path =
-  (remove_file (save_backup_path path); remove_file (ok_backup_path path))
-
-fun restore_backup_pair warn message path =
-  let
-    val ok = ok_path path
-    val save_bak = save_backup_path path
-    val ok_bak = ok_backup_path path
-    val has_save_bak = file_exists save_bak
-  in
-    warn (message ^ path);
-    if has_save_bak then (remove_file path; rename_file save_bak path) else remove_file path;
-    remove_file ok;
-    rename_file ok_bak ok
-  end
-
-(* Checkpoint saves publish .ok last. If an interrupt lands after the old
-   checkpoint was moved to .bak but before the new .ok was published, validation
-   must prefer the last complete checkpoint over a partial replacement. *)
-fun restore_checkpoint_backup warn path =
-  let
-    val ok = ok_path path
-    val ok_bak = ok_backup_path path
-    val should_restore =
-      file_exists ok_bak andalso (not (file_exists ok) orelse not (file_exists path))
-  in
-    if should_restore then
-      restore_backup_pair warn "checkpoint save was interrupted; restoring previous checkpoint: " path
-    else ()
-  end
-  handle OS.SysErr _ => ()
-
 fun remove_incomplete_residue warn path =
   if file_exists (ok_path path) andalso not (file_exists path) then
     (warn ("checkpoint metadata exists without checkpoint file; discarding metadata: " ^ path);
@@ -119,15 +84,8 @@ fun checkpoint_matches warn path metadata_matches =
            SOME text => metadata_matches text
          | NONE => false)
   in
-    restore_checkpoint_backup warn path;
     remove_incomplete_residue warn path;
-    if current_matches () then (discard_checkpoint_backup path; true)
-    else if file_exists (ok_backup_path path) then
-      ((restore_backup_pair warn "checkpoint metadata publish was interrupted; restoring previous checkpoint: " path;
-        remove_incomplete_residue warn path;
-        current_matches ())
-       handle OS.SysErr _ => false)
-    else false
+    current_matches ()
   end
 
 fun ok_text_matches warn path expected_text =

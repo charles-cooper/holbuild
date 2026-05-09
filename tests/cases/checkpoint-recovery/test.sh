@@ -261,36 +261,39 @@ if [[ -e "$stale_descendant" || -e "$stale_descendant.ok" ]]; then
 fi
 rm -rf "$project/.holbuild/checkpoints"
 
-run_expect_suffix_failure "$tmpdir/backup-seed.log"
-backup_context=$(first_context_path)
-backup_failed_prefix=$(second_failed_prefix_path)
-rm -f "$backup_failed_prefix" "$backup_failed_prefix.ok" "$backup_failed_prefix.meta" "$backup_failed_prefix.prefix"
-mv "$backup_context.ok" "$backup_context.ok.bak"
-mv "$backup_context" "$backup_context.bak"
-printf 'partial interrupted checkpoint\n' > "$backup_context"
+run_expect_suffix_failure "$tmpdir/interrupted-save-seed.log"
+interrupted_context=$(first_context_path)
+interrupted_failed_prefix=$(second_failed_prefix_path)
+rm -f "$interrupted_failed_prefix" "$interrupted_failed_prefix.ok" "$interrupted_failed_prefix.meta" "$interrupted_failed_prefix.prefix"
+rm -f "$interrupted_context.ok"
+printf 'partial interrupted checkpoint\n' > "$interrupted_context"
 write_good_source
 force_rebuild
-backup_log=$tmpdir/backup-restore.log
-(cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$backup_log" 2>&1
-require_grep "checkpoint save was interrupted; restoring previous checkpoint:" "$backup_log"
-require_grep "from: theorem-context checkpoint after first" "$backup_log"
-assert_no_checkpoints "clean rebuild after restored checkpoint backup retained checkpoint files"
+interrupted_log=$tmpdir/interrupted-save-rebuild.log
+(cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$interrupted_log" 2>&1
+require_grep "from: deps-loaded checkpoint" "$interrupted_log"
+if grep -q "from: theorem-context checkpoint after first\|restoring previous checkpoint" "$interrupted_log"; then
+  echo "interrupted checkpoint save was restored instead of ignored" >&2
+  exit 1
+fi
+assert_no_checkpoints "clean rebuild after interrupted checkpoint save retained checkpoint files"
 
-run_expect_suffix_failure "$tmpdir/partial-ok-seed.log"
-partial_ok_context=$(first_context_path)
-partial_ok_failed_prefix=$(second_failed_prefix_path)
-rm -f "$partial_ok_failed_prefix" "$partial_ok_failed_prefix.ok" "$partial_ok_failed_prefix.meta" "$partial_ok_failed_prefix.prefix"
-mv "$partial_ok_context.ok" "$partial_ok_context.ok.bak"
-mv "$partial_ok_context" "$partial_ok_context.bak"
-printf 'partial replacement checkpoint\n' > "$partial_ok_context"
-printf 'holbuild-checkpoint-ok-v2\nkind=theorem_context\n' > "$partial_ok_context.ok"
+run_expect_suffix_failure "$tmpdir/orphan-ok-seed.log"
+orphan_ok_context=$(first_context_path)
+orphan_ok_failed_prefix=$(second_failed_prefix_path)
+rm -f "$orphan_ok_failed_prefix" "$orphan_ok_failed_prefix.ok" "$orphan_ok_failed_prefix.meta" "$orphan_ok_failed_prefix.prefix"
+rm -f "$orphan_ok_context"
 write_good_source
 force_rebuild
-partial_ok_log=$tmpdir/partial-ok-restore.log
-(cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$partial_ok_log" 2>&1
-require_grep "checkpoint metadata publish was interrupted; restoring previous checkpoint:" "$partial_ok_log"
-require_grep "from: theorem-context checkpoint after first" "$partial_ok_log"
-assert_no_checkpoints "clean rebuild after restored partial-ok checkpoint retained checkpoint files"
+orphan_ok_log=$tmpdir/orphan-ok-rebuild.log
+(cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$orphan_ok_log" 2>&1
+require_grep "checkpoint metadata exists without checkpoint file; discarding metadata:" "$orphan_ok_log"
+require_grep "from: deps-loaded checkpoint" "$orphan_ok_log"
+if grep -q "from: theorem-context checkpoint after first\|restoring previous checkpoint" "$orphan_ok_log"; then
+  echo "orphan checkpoint metadata was restored instead of ignored" >&2
+  exit 1
+fi
+assert_no_checkpoints "clean rebuild after orphan checkpoint metadata retained checkpoint files"
 
 run_expect_suffix_failure "$tmpdir/parent-mismatch-seed.log"
 parent_mismatch_deps=$(first_deps_path)
