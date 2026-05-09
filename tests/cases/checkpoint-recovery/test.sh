@@ -133,7 +133,7 @@ first_deps_path() {
 
 second_failed_prefix_path() {
   find "$project/.holbuild/checkpoints/checkpointrecovery/src/AScript.sml.theorems" \
-    -path '*/.failed/second/*_failed_prefix.save' -print -quit
+    -path '*second_failed_prefix.save' -print -quit
 }
 
 run_expect_suffix_failure() {
@@ -156,39 +156,9 @@ run_expect_suffix_failure() {
   fi
   require_grep '^holbuild-checkpoint-ok-v2$' "$deps_loaded_path.ok"
   require_grep '^kind=deps_loaded$' "$deps_loaded_path.ok"
-  require_grep '^deps_hash=' "$deps_loaded_path.ok"
   require_grep '^holbuild-checkpoint-ok-v2$' "$context_path.ok"
   require_grep '^kind=theorem_context$' "$context_path.ok"
-  require_grep '^deps_hash=' "$context_path.ok"
 }
-
-probe_polyml_renamed_parent_paths() {
-  local probe_dir=$tmpdir/polyml-parent-probe
-  local probe_log=$tmpdir/polyml-parent-probe.log
-  mkdir -p "$probe_dir"
-  cat > "$probe_dir/probe.sml" <<SML
-use "poly/poly-init2.ML";
-val dir = "$probe_dir";
-val parent_tmp = dir ^ "/parent.tmp.save";
-val parent_final = dir ^ "/parent.final.save";
-val child = dir ^ "/child.save";
-val _ = PolyML.SaveState.saveChild(parent_tmp, length (PolyML.SaveState.showHierarchy()));
-val _ = OS.FileSys.rename {old = parent_tmp, new = parent_final};
-val _ = PolyML.SaveState.loadState parent_final;
-val _ = PolyML.SaveState.saveChild(child, length (PolyML.SaveState.showHierarchy()));
-val _ =
-  case PolyML.SaveState.showParent child of
-      SOME parent => if parent = parent_final then print "parent ok\n" else raise Fail ("wrong parent: " ^ parent)
-    | NONE => raise Fail "child has no parent";
-val _ = PolyML.SaveState.loadState child;
-val _ = print "child load ok\n";
-SML
-  (cd "$HOLDIR/tools-poly" && poly < "$probe_dir/probe.sml") > "$probe_log" 2>&1
-  require_grep "parent ok" "$probe_log"
-  require_grep "child load ok" "$probe_log"
-}
-
-probe_polyml_renamed_parent_paths
 
 write_good_source
 (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$tmpdir/initial.log" 2>&1

@@ -55,11 +55,9 @@ fun finish_replacement path =
   (remove_file (save_backup_path path);
    remove_file (ok_backup_path path))
 
-fun write_sidecar path (suffix, text) = write_text_atomically (path ^ suffix) text
-
-fun save_checkpoint_bundle ({label, default_share, path, ok_text, depth, sidecars} :
-                            {label : string, default_share : bool, path : string,
-                             ok_text : string, depth : int, sidecars : (string * string) list}) =
+fun save_checkpoint ({label, default_share, path, ok_text, depth} :
+                     {label : string, default_share : bool, path : string,
+                      ok_text : string, depth : int}) =
   let
     val share = Option.getOpt(env_bool "HOLBUILD_SHARE_COMMON_DATA", default_share)
     val timing = Option.getOpt(env_bool "HOLBUILD_CHECKPOINT_TIMING", false)
@@ -69,7 +67,6 @@ fun save_checkpoint_bundle ({label, default_share, path, ok_text, depth, sidecar
     val t1 = Time.now()
     val _ = PolyML.SaveState.saveChild(path, depth)
     val t2 = Time.now()
-    val _ = List.app (write_sidecar path) sidecars
     val _ = write_text_atomically (ok_path path) ok_text
     val _ = finish_replacement path
     val _ =
@@ -87,12 +84,5 @@ fun save_checkpoint_bundle ({label, default_share, path, ok_text, depth, sidecar
   in
     ()
   end
-
-fun save_checkpoint ({label, default_share, path, ok_text, depth} :
-                     {label : string, default_share : bool, path : string,
-                      ok_text : string, depth : int}) =
-  save_checkpoint_bundle {label = label, default_share = default_share,
-                          path = path, ok_text = ok_text, depth = depth,
-                          sidecars = []}
 
 end

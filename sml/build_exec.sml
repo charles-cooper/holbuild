@@ -29,8 +29,6 @@ fun temp_near path =
 
 fun remove_file path = FS.remove path handle OS.SysErr _ => ()
 
-fun rename_file old new = FS.rename {old = old, new = new}
-
 fun rename_replace {old, new} =
   FS.rename {old = old, new = new}
   handle OS.SysErr _ =>
@@ -366,28 +364,16 @@ fun checkpoint_base (project : HolbuildProject.t) node =
 
 fun deps_checkpoint_root project node = checkpoint_base project node ^ ".deps"
 
-fun deps_key_root project node deps_key =
-  Path.concat(deps_checkpoint_root project node, deps_key)
-
-fun deps_generation_root project node deps_key deps_hash =
-  Path.concat(deps_key_root project node deps_key, deps_hash)
-
-fun deps_loaded_in_generation generation_root =
-  Path.concat(generation_root, "deps_loaded.save")
-
-fun deps_loaded_path project node deps_key deps_hash =
-  deps_loaded_in_generation (deps_generation_root project node deps_key deps_hash)
-
-fun deps_creating_root project node deps_key =
-  Path.concat(deps_key_root project node deps_key, ".creating")
+fun deps_loaded_path project node deps_key =
+  Path.concat(Path.concat(deps_checkpoint_root project node, deps_key), "deps_loaded.save")
 
 fun theorem_checkpoint_root project node = checkpoint_base project node ^ ".theorems"
 
-fun theorem_checkpoints_for_deps_root project node deps_key deps_hash =
-  Path.concat(Path.concat(theorem_checkpoint_root project node, deps_key), deps_hash)
+fun theorem_checkpoints_for_deps_root project node deps_key =
+  Path.concat(theorem_checkpoint_root project node, deps_key)
 
-fun theorem_checkpoint_dir project node deps_key deps_hash proof_engine prefix_hash =
-  Path.concat(Path.concat(theorem_checkpoints_for_deps_root project node deps_key deps_hash, proof_engine), prefix_hash)
+fun theorem_checkpoint_dir project node deps_key proof_engine prefix_hash =
+  Path.concat(Path.concat(theorem_checkpoints_for_deps_root project node deps_key, proof_engine), prefix_hash)
 
 fun final_context_path project node = checkpoint_base project node ^ ".final_context.save"
 
@@ -420,7 +406,7 @@ fun remove_checkpoint_tree path =
   else ()
 
 fun remove_theorem_checkpoints_for_deps project node deps_key =
-  remove_checkpoint_tree (Path.concat(theorem_checkpoint_root project node, deps_key))
+  remove_checkpoint_tree (theorem_checkpoints_for_deps_root project node deps_key)
 
 fun remove_checkpoint_family project node =
   (remove_legacy_checkpoint_family project node;
@@ -1271,21 +1257,19 @@ fun metadata_path (project : HolbuildProject.t) node =
     Path.concat(base, #relative_path source ^ ".key")
   end
 
-fun theorem_context_path project node deps_key deps_hash proof_engine prefix_hash safe_name =
-  Path.concat(theorem_checkpoint_dir project node deps_key deps_hash proof_engine prefix_hash,
+fun theorem_context_path project node deps_key proof_engine prefix_hash safe_name =
+  Path.concat(theorem_checkpoint_dir project node deps_key proof_engine prefix_hash,
               safe_name ^ "_context.save")
 
-fun theorem_end_of_proof_path project node deps_key deps_hash proof_engine prefix_hash safe_name =
-  Path.concat(theorem_checkpoint_dir project node deps_key deps_hash proof_engine prefix_hash,
+fun theorem_end_of_proof_path project node deps_key proof_engine prefix_hash safe_name =
+  Path.concat(theorem_checkpoint_dir project node deps_key proof_engine prefix_hash,
               safe_name ^ "_end_of_proof.save")
 
-fun failed_prefix_checkpoint_dir project node deps_key deps_hash proof_engine =
-  Path.concat(theorem_checkpoint_root project node,
-              Path.concat(Path.concat(Path.concat(deps_key, deps_hash), proof_engine), ".failed"))
+fun failed_prefix_checkpoint_dir project node deps_key proof_engine =
+  Path.concat(theorem_checkpoint_root project node, Path.concat(Path.concat(deps_key, proof_engine), ".failed"))
 
-fun theorem_failed_prefix_path project node deps_key deps_hash proof_engine safe_name failed_prefix_hash =
-  Path.concat(Path.concat(Path.concat(failed_prefix_checkpoint_dir project node deps_key deps_hash proof_engine, safe_name),
-                          failed_prefix_hash),
+fun theorem_failed_prefix_path project node deps_key proof_engine safe_name =
+  Path.concat(failed_prefix_checkpoint_dir project node deps_key proof_engine,
               safe_name ^ "_failed_prefix.save")
 
 fun discover_theorem_boundaries source_path source_text =
@@ -1299,23 +1283,21 @@ fun discover_termination_diagnostics_strict source_path source_text =
   HolbuildTheorySpans.scan_terminations_strict source_path source_text
   handle HolbuildTheoryCheckpoints.Error msg => raise Error msg
 
-fun theorem_checkpoint_key {kind, name, safe_name, boundary, deps_key, deps_hash, proof_engine, prefix_hash} =
+fun theorem_checkpoint_key {kind, name, safe_name, boundary, deps_key, proof_engine, prefix_hash} =
   HolbuildToolchain.hash_text
     (String.concatWith "\n"
-       ["holbuild-theorem-checkpoint-key-v3",
+       ["holbuild-theorem-checkpoint-key-v2",
         "kind=" ^ kind,
         "name=" ^ name,
         "safe_name=" ^ safe_name,
         "boundary=" ^ Int.toString boundary,
         "deps_key=" ^ deps_key,
-        "deps_hash=" ^ deps_hash,
         "proof_engine=" ^ proof_engine,
         "prefix_key=" ^ prefix_hash] ^ "\n")
 
-fun theorem_checkpoint_ok kind deps_key deps_hash proof_engine prefix_hash checkpoint_key =
+fun theorem_checkpoint_ok kind deps_key proof_engine prefix_hash checkpoint_key =
   checkpoint_ok_text kind
     [("deps_key", deps_key),
-     ("deps_hash", deps_hash),
      ("proof_engine", proof_engine),
      ("prefix_key", prefix_hash),
      ("checkpoint_key", checkpoint_key)]
@@ -1326,46 +1308,38 @@ fun theorem_header_hash source theorem_start tactic_start =
 fun pre_theorem_hash source theorem_start =
   HolbuildToolchain.hash_text (String.substring(source, 0, theorem_start))
 
-fun failed_prefix_ok proof_engine deps_key deps_hash safe_name pre_hash header_hash =
+fun failed_prefix_ok proof_engine deps_key safe_name pre_hash header_hash =
   checkpoint_ok_text "failed_prefix"
     [("deps_key", deps_key),
-     ("deps_hash", deps_hash),
      ("proof_engine", proof_engine),
      ("safe_name", safe_name),
      ("pre_theorem_key", pre_hash),
      ("header_key", header_hash),
      ("failure_diagnostic_key", proof_engine)]
 
-fun theorem_checkpoint_specs proof_engine project node deps_key deps_hash source boundaries =
+fun theorem_checkpoint_specs proof_engine project node deps_key source boundaries =
   map (fn {kind, name, safe_name, theorem_start, theorem_stop, boundary, tactic_start,
            tactic_end, tactic_text, has_proof_attrs, prefix_hash} =>
           let
             val checkpoint_key = theorem_checkpoint_key {kind = kind, name = name, safe_name = safe_name,
                                                          boundary = boundary, deps_key = deps_key,
-                                                         deps_hash = deps_hash,
                                                          proof_engine = proof_engine,
                                                          prefix_hash = prefix_hash}
             val header_hash = theorem_header_hash source theorem_start tactic_start
             val pre_hash = pre_theorem_hash source theorem_start
-            val failed_prefix_hash =
-              HolbuildToolchain.hash_text
-                (String.concatWith "\n"
-                   ["failed-prefix-path-v2", deps_key, deps_hash, proof_engine,
-                    safe_name, pre_hash, header_hash] ^ "\n")
           in
             {kind = kind, name = name, safe_name = safe_name, theorem_start = theorem_start,
              theorem_stop = theorem_stop, boundary = boundary,
              tactic_start = tactic_start, tactic_end = tactic_end,
              tactic_text = tactic_text, has_proof_attrs = has_proof_attrs,
              prefix_hash = prefix_hash,
-             context_path = theorem_context_path project node deps_key deps_hash proof_engine prefix_hash safe_name,
-             context_ok = theorem_checkpoint_ok "theorem_context" deps_key deps_hash proof_engine prefix_hash checkpoint_key,
-             end_of_proof_path = theorem_end_of_proof_path project node deps_key deps_hash proof_engine prefix_hash safe_name,
-             end_of_proof_ok = theorem_checkpoint_ok "end_of_proof" deps_key deps_hash proof_engine prefix_hash checkpoint_key,
-             failed_prefix_path = theorem_failed_prefix_path project node deps_key deps_hash proof_engine safe_name failed_prefix_hash,
-             failed_prefix_ok = failed_prefix_ok proof_engine deps_key deps_hash safe_name pre_hash header_hash,
+             context_path = theorem_context_path project node deps_key proof_engine prefix_hash safe_name,
+             context_ok = theorem_checkpoint_ok "theorem_context" deps_key proof_engine prefix_hash checkpoint_key,
+             end_of_proof_path = theorem_end_of_proof_path project node deps_key proof_engine prefix_hash safe_name,
+             end_of_proof_ok = theorem_checkpoint_ok "end_of_proof" deps_key proof_engine prefix_hash checkpoint_key,
+             failed_prefix_path = theorem_failed_prefix_path project node deps_key proof_engine safe_name,
+             failed_prefix_ok = failed_prefix_ok proof_engine deps_key safe_name pre_hash header_hash,
              deps_key = deps_key,
-             deps_hash = deps_hash,
              checkpoint_key = checkpoint_key}
           end)
       boundaries
@@ -1404,65 +1378,19 @@ fun checkpoint_ok_matches path fields = HolbuildCheckpointStore.ok_matches warn 
 fun checkpoint_ok_text_matches path expected_text =
   HolbuildCheckpointStore.ok_text_matches warn path expected_text
 
-fun deps_checkpoint_ok_text deps_key deps_hash =
-  checkpoint_ok_text "deps_loaded" [("deps_key", deps_key), ("deps_hash", deps_hash)]
+fun deps_checkpoint_ok_text deps_key =
+  checkpoint_ok_text "deps_loaded" [("deps_key", deps_key)]
 
-fun deps_checkpoint_exists path deps_key deps_hash =
-  checkpoint_ok_matches path [("kind", "deps_loaded"), ("deps_key", deps_key), ("deps_hash", deps_hash)]
-
-type deps_generation = {deps_hash : string, deps_loaded : string, mtime : Time.time}
-
-fun deps_generation_exists project node deps_key deps_hash =
-  let val path = deps_loaded_path project node deps_key deps_hash
-  in deps_checkpoint_exists path deps_key deps_hash end
-
-fun deps_generation_from_dir deps_key dir =
-  let
-    val deps_hash = Path.file dir
-    val deps_loaded = deps_loaded_in_generation dir
-  in
-    if deps_hash = ".creating" then NONE
-    else if deps_checkpoint_exists deps_loaded deps_key deps_hash then
-      SOME {deps_hash = deps_hash,
-            deps_loaded = deps_loaded,
-            mtime = FS.modTime deps_loaded handle OS.SysErr _ => Time.zeroTime}
-    else NONE
-  end
-
-fun remove_orphan_theorem_generations project node deps_key generations =
-  let
-    val valid_hashes = map #deps_hash generations
-    fun valid_hash hash = List.exists (fn existing => existing = hash) valid_hashes
-    val root = Path.concat(theorem_checkpoint_root project node, deps_key)
-  in
-    List.app (fn child => if valid_hash (Path.file child) then () else remove_tree child)
-             (children root)
-  end
-
-fun live_deps_generations project node deps_key =
-  let
-    val generations = List.mapPartial (deps_generation_from_dir deps_key) (children (deps_key_root project node deps_key))
-    val _ = remove_orphan_theorem_generations project node deps_key generations
-  in
-    generations
-  end
-
-fun newer_generation (a : deps_generation, b : deps_generation) =
-  if Time.<=(#mtime a, #mtime b) then b else a
-
-fun newest_deps_generation generations =
-  case generations of
-      [] => NONE
-    | first :: rest => SOME (List.foldl newer_generation first rest)
+fun deps_checkpoint_exists path deps_key =
+  checkpoint_ok_matches path [("kind", "deps_loaded"), ("deps_key", deps_key)]
 
 fun theorem_context_checkpoint_exists project node checkpoint =
-  let val deps_loaded = deps_loaded_path project node (#deps_key checkpoint) (#deps_hash checkpoint)
+  let val deps_loaded = deps_loaded_path project node (#deps_key checkpoint)
   in
-    deps_checkpoint_exists deps_loaded (#deps_key checkpoint) (#deps_hash checkpoint) andalso
+    deps_checkpoint_exists deps_loaded (#deps_key checkpoint) andalso
     checkpoint_ok_matches (#context_path checkpoint)
       [("kind", "theorem_context"),
        ("deps_key", #deps_key checkpoint),
-       ("deps_hash", #deps_hash checkpoint),
        ("prefix_key", #prefix_hash checkpoint),
        ("checkpoint_key", #checkpoint_key checkpoint)]
   end
@@ -1470,26 +1398,17 @@ fun theorem_context_checkpoint_exists project node checkpoint =
 fun theorem_replay_failure_checkpoints checkpoint =
   [#context_path checkpoint, #end_of_proof_path checkpoint]
 
-fun replay_checkpoint_candidates project node checkpoints =
-  List.filter (theorem_context_checkpoint_exists project node) checkpoints
-
 fun replay_candidates project node checkpoints =
-  map (fn checkpoint =>
-         {boundary = #boundary checkpoint, path = #context_path checkpoint,
-          safe_name = #safe_name checkpoint,
-          failure_checkpoints = theorem_replay_failure_checkpoints checkpoint})
-      (replay_checkpoint_candidates project node checkpoints)
+  List.mapPartial
+    (fn checkpoint =>
+        if theorem_context_checkpoint_exists project node checkpoint then
+          SOME {boundary = #boundary checkpoint, path = #context_path checkpoint,
+                safe_name = #safe_name checkpoint,
+                failure_checkpoints = theorem_replay_failure_checkpoints checkpoint}
+        else NONE)
+    checkpoints
 
 fun later_candidate (a, b) = if #boundary a >= #boundary b then a else b
-
-fun later_checkpoint (a : HolbuildTheoryCheckpoints.checkpoint,
-                      b : HolbuildTheoryCheckpoints.checkpoint) =
-  if #boundary a >= #boundary b then a else b
-
-fun best_replay_checkpoint project node checkpoints =
-  case replay_checkpoint_candidates project node checkpoints of
-      [] => NONE
-    | first :: rest => SOME (List.foldl later_checkpoint first rest)
 
 fun best_replay_candidate project node checkpoints =
   case replay_candidates project node checkpoints of
@@ -1545,10 +1464,6 @@ fun tactic_timeout (CheckpointPolicy {tactic_timeout, ...}) = tactic_timeout
 fun goalfrag_plan (CheckpointPolicy {goalfrag_plan, ...}) = goalfrag_plan
 fun goalfrag_trace (CheckpointPolicy {goalfrag_trace, ...}) = goalfrag_trace
 fun repl_on_failure (CheckpointPolicy {repl_on_failure, ...}) = repl_on_failure
-
-fun proof_engine (CheckpointPolicy {goalfrag = false, ...}) = "plain_v1"
-  | proof_engine (CheckpointPolicy {new_ir = true, ...}) = "proof_ir_v3"
-  | proof_engine _ = "goalfrag_failed_fragment_span_v6"
 
 fun goalfrag_plan_only (CheckpointPolicy {goalfrag_plan = SOME _, goalfrag_trace = false, ...}) = true
   | goalfrag_plan_only _ = false
@@ -1729,96 +1644,53 @@ fun run_failure_repl tc policy theorem_checkpoints failure_checkpoints deps_load
             ignore (HolbuildToolchain.run_interactive argv)
           end
 
-fun write_plain_theory_script policy base_context plan node source_text checkpoints terminations staged_script preload timeout_marker plan_only_marker =
-  (write_plain_preload plan node preload;
-   write_text staged_script (instrumented_source policy (SOME timeout_marker) plan_only_marker source_text 0 checkpoints terminations);
-   {context = base_context, files = [preload, staged_script], failure_checkpoints = []})
+fun write_theory_script policy project base_context plan keys input_key toolchain_key node source_text checkpoints terminations staged_script preload timeout_marker plan_only_marker =
+  if not (checkpoint_enabled policy) then
+    (write_plain_preload plan node preload;
+     write_text staged_script (instrumented_source policy (SOME timeout_marker) plan_only_marker source_text 0 checkpoints terminations);
+     {context = base_context, files = [preload, staged_script], failure_checkpoints = []})
+  else
+    let
+      val deps_key = dependency_context_key toolchain_key plan keys node
+      val deps_loaded = deps_loaded_path project node deps_key
+      val deps_ok = deps_checkpoint_ok_text deps_key
+      fun run_from_deps_checkpoint () =
+        (write_text staged_script (instrumented_source policy (SOME timeout_marker) plan_only_marker source_text 0 checkpoints terminations);
+         deps_loaded_resume_message node;
+         {context = HolState deps_loaded, files = [staged_script], failure_checkpoints = [deps_loaded]})
+      fun run_from_fresh_preload () =
+        (remove_theorem_checkpoints_for_deps project node deps_key;
+         List.app (fn {context_path, end_of_proof_path, failed_prefix_path, ...} =>
+                     (ensure_parent context_path; ensure_parent end_of_proof_path; ensure_parent failed_prefix_path))
+                  checkpoints;
+         write_preload plan node deps_loaded deps_ok preload;
+         write_text staged_script (instrumented_source policy (SOME timeout_marker) plan_only_marker source_text 0 checkpoints terminations);
+         {context = base_context, files = [preload, staged_script], failure_checkpoints = []})
+    in
+      case if goalfrag_enabled policy then best_failed_prefix_checkpoint checkpoints else NONE of
+          SOME {checkpoint, step_count, prefix_text} =>
+            let
+              val path = #failed_prefix_path checkpoint
+              val _ = write_text staged_script (failed_prefix_resume_source policy timeout_marker plan_only_marker source_text checkpoints terminations checkpoint step_count prefix_text)
+              val _ = failed_prefix_resume_message node source_text checkpoint prefix_text
+            in
+              {context = HolState path, files = [staged_script], failure_checkpoints = [path, deps_loaded]}
+            end
+        | NONE =>
+            case replay_candidate project node checkpoints of
+                SOME {boundary, path, safe_name, failure_checkpoints} =>
+                  let
+                    val _ = write_text staged_script (instrumented_source policy (SOME timeout_marker) plan_only_marker source_text boundary checkpoints terminations)
+                    val _ = theorem_context_resume_message node source_text safe_name boundary
+                  in
+                    {context = HolState path, files = [staged_script], failure_checkpoints = failure_checkpoints @ [deps_loaded]}
+                  end
+              | NONE =>
+                  if deps_checkpoint_exists deps_loaded deps_key then run_from_deps_checkpoint ()
+                  else run_from_fresh_preload ()
+    end
 
-fun ensure_checkpoint_parents checkpoints =
-  List.app (fn {context_path, end_of_proof_path, failed_prefix_path, ...} =>
-              (ensure_parent context_path; ensure_parent end_of_proof_path; ensure_parent failed_prefix_path))
-           checkpoints
-
-datatype selected_replay =
-    SelectedFailedPrefix of {checkpoint : HolbuildTheoryCheckpoints.checkpoint,
-                             step_count : int, prefix_text : string}
-  | SelectedTheoremContext of {checkpoint : HolbuildTheoryCheckpoints.checkpoint,
-                               failure_checkpoints : string list}
-  | SelectedDepsOnly
-  | SelectedFreshDeps
-
-fun deps_scratch_generation_root project node deps_key input_key =
-  Path.concat(deps_creating_root project node deps_key, input_key)
-
-fun install_deps_generation project node deps_key scratch_root =
-  let
-    val scratch_deps = deps_loaded_in_generation scratch_root
-    val deps_hash = HolbuildHash.file_sha1 scratch_deps
-    val final_root = deps_generation_root project node deps_key deps_hash
-    val final_deps = deps_loaded_in_generation final_root
-    val _ =
-      if deps_generation_exists project node deps_key deps_hash then
-        remove_tree scratch_root
-      else
-        (if path_exists final_root then remove_tree final_root else ();
-         ensure_parent final_root;
-         rename_file scratch_root final_root;
-         write_text (checkpoint_ok_path final_deps) (deps_checkpoint_ok_text deps_key deps_hash))
-  in
-    {deps_hash = deps_hash,
-     deps_loaded = final_deps,
-     mtime = FS.modTime final_deps handle OS.SysErr _ => Time.now()}
-  end
-
-fun create_fresh_deps_generation tc project stage base_context plan node deps_key input_key preload =
-  let
-    val scratch_root = deps_scratch_generation_root project node deps_key input_key
-    val scratch_deps = deps_loaded_in_generation scratch_root
-    val scratch_ok = deps_checkpoint_ok_text deps_key "creating"
-    val _ = remove_tree scratch_root
-    val _ = ensure_parent scratch_deps
-    val _ = write_preload plan node scratch_deps scratch_ok preload
-    val _ =
-      run_hol_files_to_log tc stage base_context [preload]
-        "holbuild-deps.log"
-        "hol run failed while preparing dependency checkpoint"
-  in
-    install_deps_generation project node deps_key scratch_root
-  end
-
-fun write_theory_script_from_replay policy node source_text checkpoints terminations staged_script timeout_marker plan_only_marker deps_loaded replay =
-  let
-    fun run_from_deps_checkpoint () =
-      (write_text staged_script (instrumented_source policy (SOME timeout_marker) plan_only_marker source_text 0 checkpoints terminations);
-       deps_loaded_resume_message node;
-       {context = HolState deps_loaded, files = [staged_script], failure_checkpoints = [deps_loaded]})
-  in
-    ensure_checkpoint_parents checkpoints;
-    case replay of
-        SelectedFailedPrefix {checkpoint, step_count, prefix_text} =>
-          let
-            val path = #failed_prefix_path checkpoint
-            val _ = write_text staged_script (failed_prefix_resume_source policy timeout_marker plan_only_marker source_text checkpoints terminations checkpoint step_count prefix_text)
-            val _ = failed_prefix_resume_message node source_text checkpoint prefix_text
-          in
-            {context = HolState path, files = [staged_script], failure_checkpoints = [path, deps_loaded]}
-          end
-      | SelectedTheoremContext {checkpoint, failure_checkpoints} =>
-          let
-            val boundary = #boundary checkpoint
-            val path = #context_path checkpoint
-            val _ = write_text staged_script (instrumented_source policy (SOME timeout_marker) plan_only_marker source_text boundary checkpoints terminations)
-            val _ = theorem_context_resume_message node source_text (#safe_name checkpoint) boundary
-          in
-            {context = HolState path, files = [staged_script], failure_checkpoints = failure_checkpoints @ [deps_loaded]}
-          end
-      | SelectedDepsOnly => run_from_deps_checkpoint ()
-      | SelectedFreshDeps =>
-          (write_text staged_script (instrumented_source policy (SOME timeout_marker) plan_only_marker source_text 0 checkpoints terminations);
-           {context = HolState deps_loaded, files = [staged_script], failure_checkpoints = []})
-  end
-
-fun build_theory cache_allowed policy tc project base_context plan keys toolchain_key node source_text theorem_boundaries termination_diagnostics =
+fun build_theory cache_allowed policy tc project base_context plan keys toolchain_key node source_text theorem_checkpoints termination_diagnostics =
   let
     val input_key = HolbuildBuildPlan.input_key_for keys node
     val stage = stage_dir project input_key
@@ -1829,54 +1701,23 @@ fun build_theory cache_allowed policy tc project base_context plan keys toolchai
     val timeout_marker = Path.concat(stage, "holbuild-tactic-timeout.txt")
     val plan_only_marker = Path.concat(stage, "holbuild-goalfrag-plan.txt")
     val deps_key = dependency_context_key toolchain_key plan keys node
+    val deps_loaded = deps_loaded_path project node deps_key
+    val deps_ok = deps_checkpoint_ok_text deps_key
     val final_context = final_context_path project node
     val {sig_path, sml_path, data_path, script_uo, theory_ui, theory_uo} = theory_outputs node
     val staged_sig = staged_theory_file stage node ".sig"
     val staged_sml = staged_theory_file stage node ".sml"
     val staged_dat = staged_theory_file stage node ".dat"
-    val selected_theorem_checkpoints = ref ([] : HolbuildTheoryCheckpoints.checkpoint list)
-    val selected_deps_loaded = ref (NONE : string option)
-    fun theorem_checkpoints () = !selected_theorem_checkpoints
-    fun checkpoints_for deps_hash =
-      theorem_checkpoint_specs (proof_engine policy) project node deps_key deps_hash source_text theorem_boundaries
-    fun checkpoints_for_generation ({deps_hash, ...} : deps_generation) = checkpoints_for deps_hash
-    fun deps_loaded_for_hash deps_hash = deps_loaded_path project node deps_key deps_hash
-    fun select_existing_checkpoint generations =
-      let val checkpoints = List.concat (map checkpoints_for_generation generations)
-      in
-        case if goalfrag_enabled policy then best_failed_prefix_checkpoint checkpoints else NONE of
-            SOME {checkpoint, step_count, prefix_text} =>
-              SOME (#deps_hash checkpoint, SelectedFailedPrefix {checkpoint = checkpoint, step_count = step_count, prefix_text = prefix_text})
-          | NONE =>
-              case best_replay_checkpoint project node checkpoints of
-                  SOME checkpoint => SOME (#deps_hash checkpoint,
-                                           SelectedTheoremContext {checkpoint = checkpoint,
-                                                                   failure_checkpoints = theorem_replay_failure_checkpoints checkpoint})
-                | NONE => NONE
-      end
-    fun prepare_checkpoint_run () =
-      let
-        val generations = live_deps_generations project node deps_key
-        val (deps_hash, deps_loaded, replay) =
-          case select_existing_checkpoint generations of
-              SOME (hash, selected) => (hash, deps_loaded_for_hash hash, selected)
-            | NONE =>
-                case newest_deps_generation generations of
-                    SOME {deps_hash, deps_loaded, ...} => (deps_hash, deps_loaded, SelectedDepsOnly)
-                  | NONE =>
-                      let val generation = create_fresh_deps_generation tc project stage base_context plan node deps_key input_key preload
-                      in (#deps_hash generation, #deps_loaded generation, SelectedFreshDeps) end
-        val checkpoints = checkpoints_for deps_hash
-        val _ = selected_theorem_checkpoints := checkpoints
-        val _ = selected_deps_loaded := SOME deps_loaded
-      in
-        write_theory_script_from_replay policy node source_text checkpoints termination_diagnostics staged_script timeout_marker
-                                      (if goalfrag_plan_only policy then SOME plan_only_marker else NONE)
-                                      deps_loaded replay
-      end
     val _ = remove_tree stage
     val _ = ensure_dir stage
+    val _ = if checkpoint_enabled policy then ensure_parent deps_loaded else ()
     val _ = if checkpoint_enabled policy then ensure_parent final_context else ()
+    val _ =
+      if checkpoint_enabled policy then
+        List.app (fn {context_path, end_of_proof_path, failed_prefix_path, ...} =>
+                    (ensure_parent context_path; ensure_parent end_of_proof_path; ensure_parent failed_prefix_path))
+                 theorem_checkpoints
+      else ()
     val _ =
       if checkpoint_enabled policy then
         write_final_context_loader
@@ -1889,17 +1730,9 @@ fun build_theory cache_allowed policy tc project base_context plan keys toolchai
            path = final_loader, mldeps_report = SOME mldeps_report}
     val _ = remove_file timeout_marker
     val _ = remove_file plan_only_marker
-    val run_spec =
-      if checkpoint_enabled policy then prepare_checkpoint_run ()
-      else
-        let
-          val checkpoints = checkpoints_for "no_checkpoint"
-          val _ = selected_theorem_checkpoints := checkpoints
-        in
-          write_plain_theory_script policy base_context plan node source_text checkpoints termination_diagnostics
-                                    staged_script preload timeout_marker
+    val run_spec = write_theory_script policy project base_context plan keys input_key toolchain_key node
+                                    source_text theorem_checkpoints termination_diagnostics staged_script preload timeout_marker
                                     (if goalfrag_plan_only policy then SOME plan_only_marker else NONE)
-        end
     fun tactic_timeout_error () =
       let
         val words = String.tokens Char.isSpace (read_text timeout_marker)
@@ -1907,7 +1740,7 @@ fun build_theory cache_allowed policy tc project base_context plan keys toolchai
         val source_context =
           Option.mapPartial
             (HolbuildTheoryDiagnostics.summarize_failed_fragment_source
-               (source_file node) source_text (theorem_checkpoints()))
+               (source_file node) source_text theorem_checkpoints)
             failure_log
         val goal_state = Option.mapPartial HolbuildTheoryDiagnostics.summarize_goal_state failure_log
         val plan_position = Option.mapPartial HolbuildTheoryDiagnostics.plan_position_summary failure_log
@@ -1936,7 +1769,7 @@ fun build_theory cache_allowed policy tc project base_context plan keys toolchai
         val plan_position = Option.mapPartial HolbuildTheoryDiagnostics.plan_position_summary failure_log
         val trace_context = if goalfrag_trace policy then Option.mapPartial HolbuildTheoryDiagnostics.summarize_goalfrag_trace failure_log else NONE
         val static_error = Option.mapPartial (fn path => HolbuildTheoryDiagnostics.static_error_summary (source_file node) source_text (String.fields (fn c => c = #"\n") (read_text path))) failure_log
-        val source_context = Option.mapPartial (HolbuildTheoryDiagnostics.summarize_failed_fragment_source (source_file node) source_text (theorem_checkpoints())) failure_log
+        val source_context = Option.mapPartial (HolbuildTheoryDiagnostics.summarize_failed_fragment_source (source_file node) source_text theorem_checkpoints) failure_log
         val termination_context =
           Option.mapPartial
             (HolbuildTheoryDiagnostics.summarize_termination_goal_source
@@ -1976,7 +1809,6 @@ fun build_theory cache_allowed policy tc project base_context plan keys toolchai
         if invalid_checkpoint_retryable base_context (#context run_spec) msg then
           let
             val invalid = #failure_checkpoints run_spec
-            val deps_loaded = Option.getOpt(!selected_deps_loaded, "")
             val _ = remove_invalid_checkpoints project node deps_key deps_loaded invalid
             val _ = warn ("discarding invalid checkpoint after HOL state load failure: " ^ checkpoint_paths_text invalid)
           in
@@ -1986,9 +1818,9 @@ fun build_theory cache_allowed policy tc project base_context plan keys toolchai
           let
             val failure_error =
               if file_exists timeout_marker then tactic_timeout_error ()
-              else if null (theorem_checkpoints()) andalso null termination_diagnostics then Error msg
+              else if null theorem_checkpoints andalso null termination_diagnostics then Error msg
               else checkpoint_failure_error msg
-            val _ = run_failure_repl tc policy (theorem_checkpoints()) (#failure_checkpoints run_spec) (Option.getOpt(!selected_deps_loaded, ""))
+            val _ = run_failure_repl tc policy theorem_checkpoints (#failure_checkpoints run_spec) deps_loaded
           in
             raise failure_error
           end
@@ -2223,16 +2055,25 @@ fun checkpoint_policy_for_node ({skip_checkpoints, goalfrag, new_ir, tactic_time
                     goalfrag_trace = goalfrag andalso goalfrag_trace,
                     repl_on_failure = repl_on_failure}
 
+fun proof_engine (CheckpointPolicy {goalfrag = false, ...}) = "plain_v1"
+  | proof_engine (CheckpointPolicy {new_ir = true, ...}) = "proof_ir_v3"
+  | proof_engine _ = "goalfrag_failed_fragment_span_v6"
+
 fun build_config_lines_for_node options project node =
   case #kind (HolbuildBuildPlan.source_of node) of
       HolbuildSourceIndex.TheoryScript => policy_config_lines (checkpoint_policy_for_node options project node)
     | HolbuildSourceIndex.Sml => policy_config_lines no_checkpoint_policy
     | HolbuildSourceIndex.Sig => policy_config_lines no_checkpoint_policy
 
-fun theorem_boundaries_for_node policy node source_text =
+fun theory_checkpoints_for_node policy project plan keys toolchain_key node source_text =
   if not (goalfrag_enabled policy) andalso not (checkpoint_enabled policy) then []
   else
-    discover_theorem_boundaries_strict (source_file node) source_text
+    let
+      val deps_key = dependency_context_key toolchain_key plan keys node
+      val boundaries = discover_theorem_boundaries_strict (source_file node) source_text
+    in
+      theorem_checkpoint_specs (proof_engine policy) project node deps_key source_text boundaries
+    end
     handle Error msg =>
       (warn ("could not safely instrument theorem boundaries for " ^ logical_name node ^
              "; building without goalfrag/checkpoints for this theory\n" ^ msg);
@@ -2272,15 +2113,16 @@ fun build_theory_node (options : build_options) tc project base_context plan key
     else
       let
         val source_text = read_text (source_file node)
-        val theorem_boundaries = theorem_boundaries_for_node policy node source_text
+        val theorem_checkpoints =
+          theory_checkpoints_for_node policy project plan keys toolchain_key node source_text
         val termination_diagnostics = termination_diagnostics_for_node policy node source_text
       in
-        ((build_theory cache_allowed policy tc project base_context plan keys toolchain_key node source_text theorem_boundaries termination_diagnostics;
+        ((build_theory cache_allowed policy tc project base_context plan keys toolchain_key node source_text theorem_checkpoints termination_diagnostics;
           write_metadata policy project plan keys input_key toolchain_key node metadata_checkpoints;
           remove_checkpoint_family project node;
           HolbuildStatus.Built)
          handle RetryInvalidCheckpoint =>
-           (build_theory cache_allowed policy tc project base_context plan keys toolchain_key node source_text theorem_boundaries termination_diagnostics;
+           (build_theory cache_allowed policy tc project base_context plan keys toolchain_key node source_text theorem_checkpoints termination_diagnostics;
             write_metadata policy project plan keys input_key toolchain_key node metadata_checkpoints;
             remove_checkpoint_family project node;
             HolbuildStatus.Built))
