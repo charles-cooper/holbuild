@@ -14,7 +14,7 @@ type checkpoint = {kind : string, name : string, safe_name : string, theorem_sta
                    context_path : string, context_ok : string,
                    end_of_proof_path : string, end_of_proof_ok : string,
                    failed_prefix_path : string, failed_prefix_ok : string,
-                   deps_key : string, checkpoint_key : string}
+                   deps_key : string, deps_hash : string, checkpoint_key : string}
 
 type termination = {name : string, safe_name : string, definition_start : int,
                     definition_stop : int, boundary : int,

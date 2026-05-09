@@ -61,12 +61,15 @@ fun with_tactic_timeout label f x =
            (write_timeout_marker label seconds;
             raise Fail (timeout_message label seconds)))
 
-fun save_checkpoint label default_share path ok_text depth =
+fun save_checkpoint_bundle label default_share path ok_text depth sidecars =
   if not (!checkpoint_enabled_ref) then ()
   else
-    HolbuildCheckpointSaveRuntime.save_checkpoint
+    HolbuildCheckpointSaveRuntime.save_checkpoint_bundle
       {label = label, default_share = default_share, path = path,
-       ok_text = ok_text, depth = depth}
+       ok_text = ok_text, depth = depth, sidecars = sidecars}
+
+fun save_checkpoint label default_share path ok_text depth =
+  save_checkpoint_bundle label default_share path ok_text depth []
 
 fun write_text_file path text =
   let val out = TextIO.openOut path
@@ -86,9 +89,8 @@ fun save_failed_prefix_checkpoint () =
               String.concat ["step_count=", Int.toString step_count, "\n",
                              "prefix_end=", Int.toString prefix_end, "\n"]
             val _ = proofManagerLib.set_backup (step_count + 1)
-            val _ = save_checkpoint "failed_prefix" false failed_prefix_path failed_prefix_ok depth
-            val _ = write_text_file (failed_prefix_path ^ ".meta") meta_text
-            val _ = write_text_file (failed_prefix_path ^ ".prefix") prefix_text
+            val _ = save_checkpoint_bundle "failed_prefix" false failed_prefix_path failed_prefix_ok depth
+                                           [(".meta", meta_text), (".prefix", prefix_text)]
           in () end
 
 fun begin_theorem (kind, name, tactic_text, context_path, context_ok,
