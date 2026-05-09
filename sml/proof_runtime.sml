@@ -190,7 +190,7 @@ fun limited_all_goals_text text =
   if size text <= all_goals_limit then text
   else
     String.concat [String.substring(text, 0, all_goals_limit),
-                   "\nholbuild all goals truncated after ", Int.toString all_goals_limit, " bytes\n"]
+                   "\nholbuild failed tactic input goals truncated after ", Int.toString all_goals_limit, " bytes\n"]
 
 fun all_goals_text goals =
   if length goals <= 1 then ""
@@ -200,8 +200,8 @@ fun all_goals_text goals =
       val indexed = ListPair.zip (List.tabulate(total, fn i => i + 1), goals)
       val text = String.concat (map (numbered_goal_text total) indexed)
     in
-      String.concat ["holbuild all goals:\n", limited_all_goals_text text,
-                     "holbuild end all goals\n"]
+      String.concat ["holbuild all failed tactic input goals:\n", limited_all_goals_text text,
+                     "holbuild end all failed tactic input goals\n"]
     end
 
 fun active_theorem_name () =
@@ -268,26 +268,40 @@ fun alpha_convert_to_goal g th =
 
 fun history_top_thm g = alpha_convert_to_goal g (project_history goalStack.extract_thm)
 
-fun print_goal_state label =
-  let val goals = history_top_goals()
-  in
-    TextIO.output(TextIO.stdErr,
-      String.concat ["\nholbuild goal state at failed fragment: ", label,
-                     failed_theorem_line (),
-                     failed_step_end_line (),
-                     failed_step_span_line (),
-                     failed_plan_position_line (),
-                     "\nholbuild remaining goals: ", Int.toString (length goals), "\n",
-                     "holbuild top goal:\n",
-                     top_goal_text goals,
-                     "holbuild end top goal\n",
-                     all_goals_text goals])
-  end
-  handle e =>
-    TextIO.output(TextIO.stdErr,
-      String.concat ["holbuild failed to print goal state: ", General.exnMessage e, "\n"])
+fun print_goal_state label goals =
+  TextIO.output(TextIO.stdErr,
+    String.concat ["\nholbuild goal state at failed fragment: ", label,
+                   failed_theorem_line (),
+                   failed_step_end_line (),
+                   failed_step_span_line (),
+                   failed_plan_position_line (),
+                   "\nholbuild failed tactic input goal count: ", Int.toString (length goals), "\n",
+                   "holbuild failed tactic top input goal:\n",
+                   top_goal_text goals,
+                   "holbuild end failed tactic top input goal\n",
+                   all_goals_text goals])
 
-fun report_step_failure label e = (save_failed_prefix_checkpoint (); print_goal_state label; raise e)
+fun report_step_failure_with_goals label goals e =
+  (save_failed_prefix_checkpoint ();
+   print_goal_state label goals
+   handle print_e =>
+     TextIO.output(TextIO.stdErr,
+       String.concat ["holbuild failed to print goal state: ", General.exnMessage print_e, "\n"]);
+   raise e)
+
+fun report_step_failure label e =
+  report_step_failure_with_goals label (history_top_goals() handle _ => []) e
+
+fun take_goals n goals =
+  let
+    fun loop 0 _ acc = rev acc
+      | loop _ [] acc = rev acc
+      | loop k (goal :: rest) acc = loop (k - 1) rest (goal :: acc)
+  in
+    loop (Int.max(0, n)) goals []
+  end
+
+fun top_input_goals () = take_goals 1 (history_top_goals())
 
 fun compile_tactic label program =
   if smlExecute.quse_string ("HolbuildProofRuntime.compiled_tactic_ref := (" ^ program ^ ");") then
@@ -302,10 +316,12 @@ fun compile_list_tactic label program =
     raise Fail ("list tactic fragment did not compile: " ^ label)
 
 fun apply_tactic_step label program =
-  let val tactic = compile_tactic label program
+  let
+    val input_goals = top_input_goals()
+    val tactic = compile_tactic label program
   in
     with_tactic_timeout label (fn () => append_history (goalStack.expandf tactic)) ()
-    handle e => report_step_failure label e
+    handle e => report_step_failure_with_goals label input_goals e
   end
 
 fun no_open_goals () =
@@ -317,10 +333,12 @@ fun allgoals_suffix_label label = String.isPrefix ">> " label
 fun apply_list_tactic_step label program =
   if allgoals_suffix_label label andalso no_open_goals () then ()
   else
-    let val list_tactic = compile_list_tactic label program
+    let
+      val input_goals = history_top_goals()
+      val list_tactic = compile_list_tactic label program
     in
       with_tactic_timeout label (fn () => append_history (goalStack.expand_listf list_tactic)) ()
-      handle e => report_step_failure label e
+      handle e => report_step_failure_with_goals label input_goals e
     end
 
 fun gentle_then1 tac1 tac2 goal =
@@ -388,44 +406,48 @@ fun reverse_recorded_groups goals =
 
 fun apply_then1_step label false first_program second_program =
       let
+        val input_goals = top_input_goals()
         val first_tactic = compile_tactic label first_program
         val second_tactic = compile_tactic label second_program
       in
         with_tactic_timeout label
           (fn () => append_history (goalStack.expandf (Tactical.THEN1(first_tactic, second_tactic)))) ()
-        handle e => report_step_failure label e
+        handle e => report_step_failure_with_goals label input_goals e
       end
   | apply_then1_step label true first_program second_program =
       if no_open_goals () then ()
       else
         let
+          val input_goals = history_top_goals()
           val first_tactic = compile_tactic label first_program
           val second_tactic = compile_tactic label second_program
         in
           with_tactic_timeout label
             (fn () => append_history (goalStack.expand_listf (Tactical.ALLGOALS (Tactical.THEN1(first_tactic, second_tactic))))) ()
-          handle e => report_step_failure label e
+          handle e => report_step_failure_with_goals label input_goals e
         end
 
 fun apply_gentle_then1_step label false first_program second_program =
       let
+        val input_goals = top_input_goals()
         val first_tactic = compile_tactic label first_program
         val second_tactic = compile_tactic label second_program
       in
         with_tactic_timeout label
           (fn () => append_history (goalStack.expandf (gentle_then1 first_tactic second_tactic))) ()
-        handle e => report_step_failure label e
+        handle e => report_step_failure_with_goals label input_goals e
       end
   | apply_gentle_then1_step label true first_program second_program =
       if no_open_goals () then ()
       else
         let
+          val input_goals = history_top_goals()
           val first_tactic = compile_tactic label first_program
           val second_tactic = compile_tactic label second_program
         in
           with_tactic_timeout label
             (fn () => append_history (goalStack.expand_listf (Tactical.ALLGOALS (gentle_then1 first_tactic second_tactic)))) ()
-          handle e => report_step_failure label e
+          handle e => report_step_failure_with_goals label input_goals e
         end
 
 fun current_goal_total () = length (history_top_goals()) handle _ => 0
@@ -448,30 +470,34 @@ fun pop_branch_tail_count label =
 
 fun apply_branch_start_step label program =
   let
-    val before_count = current_goal_total ()
+    val goals = history_top_goals()
+    val before_count = length goals
+    val input_goals = take_goals 1 goals
     val tactic = compile_tactic label program
     val tail_count = before_count - 1
   in
     if before_count <= 0 then raise Fail ("branch start with no open goals: " ^ label) else ();
-    with_tactic_timeout label
-      (fn () => append_history (goalStack.expand_listf (Tactical.NTH_GOAL tactic 1))) ();
-    push_branch_tail_count tail_count
+    (with_tactic_timeout label
+       (fn () => append_history (goalStack.expand_listf (Tactical.NTH_GOAL tactic 1))) ();
+     push_branch_tail_count tail_count)
+    handle e => report_step_failure_with_goals label input_goals e
   end
-  handle e => report_step_failure label e
 
 fun apply_branch_suffix_list_tactic label list_tactic =
   let
-    val total_count = current_goal_total ()
+    val goals = history_top_goals()
+    val total_count = length goals
     val generated_count = current_branch_generated_count label
+    val input_goals = take_goals generated_count goals
     val scoped_list_tactic = Tactical.SPLIT_LT generated_count (list_tactic, Tactical.ALL_LT)
   in
-    if generated_count = 0 then
-      (if total_count = 0 then () else append_history (goalStack.expand_listf Tactical.ALL_LT))
-    else
-      with_tactic_timeout label
-        (fn () => append_history (goalStack.expand_listf scoped_list_tactic)) ()
+    (if generated_count = 0 then
+       (if total_count = 0 then () else append_history (goalStack.expand_listf Tactical.ALL_LT))
+     else
+       with_tactic_timeout label
+         (fn () => append_history (goalStack.expand_listf scoped_list_tactic)) ())
+    handle e => report_step_failure_with_goals label input_goals e
   end
-  handle e => report_step_failure label e
 
 fun apply_branch_suffix_step label program =
   let val tactic = compile_tactic label program
@@ -483,16 +509,18 @@ fun apply_branch_list_suffix_step label program =
 
 fun apply_branch_close_step label =
   let
-    val total_count = current_goal_total ()
+    val goals = history_top_goals()
+    val total_count = length goals
     val generated_count = current_branch_generated_count label
+    val input_goals = take_goals generated_count goals
   in
-    if generated_count = 0 then
-      (if total_count = 0 then () else append_history (goalStack.expand_listf Tactical.ALL_LT);
-       pop_branch_tail_count label)
-    else
-      raise Fail "THEN1 first subgoal not solved by branch tactic"
+    (if generated_count = 0 then
+       (if total_count = 0 then () else append_history (goalStack.expand_listf Tactical.ALL_LT);
+        pop_branch_tail_count label)
+     else
+       raise Fail "THEN1 first subgoal not solved by branch tactic")
+    handle e => report_step_failure_with_goals label input_goals e
   end
-  handle e => report_step_failure label e
 
 fun apply_branch_step label program phase =
   case phase of

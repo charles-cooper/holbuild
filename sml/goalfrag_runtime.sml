@@ -181,7 +181,7 @@ fun limited_all_goals_text text =
   if size text <= all_goals_limit then text
   else
     String.concat [String.substring(text, 0, all_goals_limit),
-                   "\nholbuild all goals truncated after ", Int.toString all_goals_limit, " bytes\n"]
+                   "\nholbuild failed tactic input goals truncated after ", Int.toString all_goals_limit, " bytes\n"]
 
 fun all_goals_text goals =
   if length goals <= 1 then ""
@@ -191,8 +191,8 @@ fun all_goals_text goals =
       val indexed = ListPair.zip (List.tabulate(total, fn i => i + 1), goals)
       val text = String.concat (map (numbered_goal_text total) indexed)
     in
-      String.concat ["holbuild all goals:\n", limited_all_goals_text text,
-                     "holbuild end all goals\n"]
+      String.concat ["holbuild all failed tactic input goals:\n", limited_all_goals_text text,
+                     "holbuild end all failed tactic input goals\n"]
     end
 
 fun active_theorem_name () =
@@ -241,10 +241,10 @@ fun print_goal_state label =
                      failed_step_end_line (),
                      failed_step_span_line (),
                      failed_plan_position_line (),
-                     "\nholbuild remaining goals: ", Int.toString (length goals), "\n",
-                     "holbuild top goal:\n",
+                     "\nholbuild failed tactic input goal count: ", Int.toString (length goals), "\n",
+                     "holbuild failed tactic top input goal:\n",
                      top_goal_text goals,
-                     "holbuild end top goal\n",
+                     "holbuild end failed tactic top input goal\n",
                      all_goals_text goals])
   end
   handle e =>

@@ -47,9 +47,9 @@ fi
 first_count=$(wc -c < "$counter" | tr -d ' ')
 [[ "$first_count" = "2" ]] || { echo "expected first run to execute slow prefix twice, got $first_count" >&2; exit 1; }
 require_grep "FAIL_TAC \"first suffix failure\"" "$first_log"
-require_grep "top goal at failed fragment:" "$first_log"
+require_grep "failed tactic top input goal:" "$first_log"
 require_grep "plan position: 02 list_tactic >> FAIL_TAC" "$first_log"
-require_grep "remaining goals at failed fragment: 1" "$first_log"
+require_grep "failed tactic input goals: 1" "$first_log"
 require_file "$(find "$project/.holbuild/checkpoints" -name '*slow_prefix_failure_failed_prefix.save' -print -quit)"
 
 python3 - <<PY
@@ -67,7 +67,7 @@ edited_count=$(wc -c < "$counter" | tr -d ' ')
 require_grep "from: failed-prefix checkpoint in slow_prefix_failure" "$edited_log"
 require_grep "edited suffix failure" "$edited_log"
 require_grep "plan position: 02 list_tactic >> FAIL_TAC" "$edited_log"
-require_grep "remaining goals at failed fragment: 1" "$edited_log"
+require_grep "failed tactic input goals: 1" "$edited_log"
 
 python3 - <<PY
 from pathlib import Path

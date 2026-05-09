@@ -393,9 +393,9 @@ fun failed_theorem_source_summary source_path source_text checkpoints label theo
                          | NONE => {offset = #tactic_start checkpoint, width = 1}))
 
 val goal_state_limit = 4096
-val goal_state_start_marker = "holbuild top goal:"
-val goal_state_end_marker = "holbuild end top goal"
-val remaining_goals_marker = "holbuild remaining goals: "
+val goal_state_start_marker = "holbuild failed tactic top input goal:"
+val goal_state_end_marker = "holbuild end failed tactic top input goal"
+val remaining_goals_marker = "holbuild failed tactic input goal count: "
 val failed_fragment_prefix = "holbuild goal state at failed fragment: "
 val failed_fragment_end_prefix = "holbuild failed fragment end: "
 val failed_fragment_span_prefix = "holbuild failed fragment span: "
@@ -491,10 +491,10 @@ fun truncate_goal_state text =
   else (true, String.substring(text, 0, goal_state_limit))
 
 fun remaining_goals_summary NONE = ""
-  | remaining_goals_summary (SOME n) = "remaining goals at failed fragment: " ^ Int.toString n ^ "\n"
+  | remaining_goals_summary (SOME n) = "failed tactic input goals: " ^ Int.toString n ^ "\n"
 
 fun all_goals_log_summary (SOME n) =
-      if n > 1 then "all goals at failed fragment are in the instrumented log\n" else ""
+      if n > 1 then "all failed tactic input goals are in the instrumented log\n" else ""
   | all_goals_log_summary NONE = ""
 
 fun goal_state_summary {remaining_goals, top_goal} =
@@ -507,7 +507,7 @@ fun goal_state_summary {remaining_goals, top_goal} =
       else ""
   in
     String.concat
-      ["top goal at failed fragment:\n",
+      ["failed tactic top input goal:\n",
        remaining_goals_summary remaining_goals,
        all_goals_log_summary remaining_goals,
        truncation_line,

@@ -365,9 +365,9 @@ if (cd "$failure_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) >
   exit 1
 fi
 require_grep "expected failure" "$failure_log"
-require_grep "top goal at failed fragment:" "$failure_log"
+require_grep "failed tactic top input goal:" "$failure_log"
 require_grep "plan position: 00 tactic FAIL_TAC" "$failure_log"
-require_grep "remaining goals at failed fragment: 1" "$failure_log"
+require_grep "failed tactic input goals: 1" "$failure_log"
 require_grep "top goal exceeded 4 KiB" "$failure_log"
 require_grep "full top goal is in the instrumented log above" "$failure_log"
 require_grep "theorem: b_thm (line " "$failure_log"
@@ -379,9 +379,9 @@ failure_child_log=$(find "$failure_project/.holbuild/logs" -name '*-ATheory-inst
 require_file "$failure_child_log"
 require_grep "holbuild goal state at failed fragment" "$failure_child_log"
 require_grep "holbuild plan position: 00 tactic FAIL_TAC" "$failure_child_log"
-require_grep "holbuild remaining goals: 1" "$failure_child_log"
-require_grep "holbuild top goal:" "$failure_child_log"
-require_grep "holbuild end top goal" "$failure_child_log"
+require_grep "holbuild failed tactic input goal count: 1" "$failure_child_log"
+require_grep "holbuild failed tactic top input goal:" "$failure_child_log"
+require_grep "holbuild end failed tactic top input goal" "$failure_child_log"
 
 multi_goal_project=$tmpdir/multi-goal-project
 mkdir -p "$multi_goal_project/src"
@@ -409,20 +409,63 @@ if (cd "$multi_goal_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory
   echo "expected multi-goal proof to fail build" >&2
   exit 1
 fi
-require_grep "remaining goals at failed fragment: 2" "$multi_goal_log"
-require_grep "all goals at failed fragment are in the instrumented log" "$multi_goal_log"
-if grep -q "holbuild all goals:" "$multi_goal_log"; then
+require_grep "failed tactic input goals: 2" "$multi_goal_log"
+require_grep "all failed tactic input goals are in the instrumented log" "$multi_goal_log"
+if grep -q "holbuild all failed tactic input goals:" "$multi_goal_log"; then
   echo "parent output should not include full all-goals log" >&2
   exit 1
 fi
 multi_goal_child_log=$(find "$multi_goal_project/.holbuild/logs" -name '*-ATheory-instrumented-failure.log' -print -quit)
 require_file "$multi_goal_child_log"
-require_grep "holbuild remaining goals: 2" "$multi_goal_child_log"
-require_grep "holbuild top goal:" "$multi_goal_child_log"
-require_grep "holbuild all goals:" "$multi_goal_child_log"
+require_grep "holbuild failed tactic input goal count: 2" "$multi_goal_child_log"
+require_grep "holbuild failed tactic top input goal:" "$multi_goal_child_log"
+require_grep "holbuild all failed tactic input goals:" "$multi_goal_child_log"
 require_grep "holbuild goal 1 of 2:" "$multi_goal_child_log"
 require_grep "holbuild goal 2 of 2:" "$multi_goal_child_log"
-require_grep "holbuild end all goals" "$multi_goal_child_log"
+require_grep "holbuild end all failed tactic input goals" "$multi_goal_child_log"
+
+branch_input_project=$tmpdir/branch-input-project
+mkdir -p "$branch_input_project/src"
+cat > "$branch_input_project/holproject.toml" <<'TOML'
+[project]
+name = "branch-input"
+
+[build]
+members = ["src"]
+TOML
+cat > "$branch_input_project/src/AScript.sml" <<'SML'
+open HolKernel Parse boolLib bossLib;
+val _ = new_theory "A";
+
+Theorem branch_suffix_failure:
+  (T /\ T) /\ T
+Proof
+  CONJ_TAC
+  >- (CONJ_TAC >> FAIL_TAC "branch suffix failure")
+  >- ACCEPT_TAC TRUTH
+QED
+
+val _ = export_theory();
+SML
+branch_input_log=$tmpdir/branch-input.log
+if (cd "$branch_input_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$branch_input_log" 2>&1; then
+  echo "expected branch-suffix proof to fail build" >&2
+  exit 1
+fi
+require_grep "failed tactic input goals: 2" "$branch_input_log"
+if grep -q "failed tactic input goals: 3" "$branch_input_log"; then
+  echo "branch suffix reported unrelated tail goal as failed tactic input" >&2
+  exit 1
+fi
+branch_input_child_log=$(find "$branch_input_project/.holbuild/logs" -name '*-ATheory-instrumented-failure.log' -print -quit)
+require_file "$branch_input_child_log"
+require_grep "holbuild failed tactic input goal count: 2" "$branch_input_child_log"
+require_grep "holbuild goal 1 of 2:" "$branch_input_child_log"
+require_grep "holbuild goal 2 of 2:" "$branch_input_child_log"
+if grep -q "holbuild goal 3 of" "$branch_input_child_log"; then
+  echo "child log included unrelated tail goal as failed tactic input" >&2
+  exit 1
+fi
 
 multi_goal_large_project=$tmpdir/multi-goal-large-project
 mkdir -p "$multi_goal_large_project/src"
@@ -455,9 +498,9 @@ if (cd "$multi_goal_large_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build A
 fi
 multi_goal_large_child_log=$(find "$multi_goal_large_project/.holbuild/logs" -name '*-ATheory-instrumented-failure.log' -print -quit)
 require_file "$multi_goal_large_child_log"
-require_grep "holbuild all goals:" "$multi_goal_large_child_log"
-require_grep "holbuild all goals truncated after 4096 bytes" "$multi_goal_large_child_log"
-require_grep "holbuild end all goals" "$multi_goal_large_child_log"
+require_grep "holbuild all failed tactic input goals:" "$multi_goal_large_child_log"
+require_grep "holbuild failed tactic input goals truncated after 4096 bytes" "$multi_goal_large_child_log"
+require_grep "holbuild end all failed tactic input goals" "$multi_goal_large_child_log"
 
 a_thm_context=$(find "$failure_project/.holbuild/checkpoints" -name '*a_thm_context.save' -print -quit)
 require_file "$a_thm_context"
@@ -471,16 +514,16 @@ fi
 require_grep "from: failed-prefix checkpoint in b_thm" "$failure_again_log"
 require_grep "matched proof prefix through: .*AScript.sml:" "$failure_again_log"
 require_grep "replaying remaining proof from: .*AScript.sml:" "$failure_again_log"
-require_grep "top goal at failed fragment:" "$failure_again_log"
+require_grep "failed tactic top input goal:" "$failure_again_log"
 require_grep "plan position: 00 tactic FAIL_TAC" "$failure_again_log"
-require_grep "remaining goals at failed fragment: 1" "$failure_again_log"
+require_grep "failed tactic input goals: 1" "$failure_again_log"
 require_file "$a_thm_context"
 require_file "$b_thm_failed_prefix"
 failed_prefix_plan_log=$tmpdir/failed-prefix-plan.log
 (cd "$failure_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --goalfrag --goalfrag-plan ATheory:b_thm) > "$failed_prefix_plan_log" 2>&1
 require_grep "holbuild goalfrag plan ATheory:b_thm source=src/AScript.sml (" "$failed_prefix_plan_log"
 require_grep "FAIL_TAC \"expected failure\"" "$failed_prefix_plan_log"
-if grep -q "resuming ATheory\|ATheory inspected\|top goal at failed fragment" "$failed_prefix_plan_log"; then
+if grep -q "resuming ATheory\|ATheory inspected\|failed tactic top input goal" "$failed_prefix_plan_log"; then
   echo "--goalfrag-plan executed/replayed the build instead of statically printing the plan" >&2
   exit 1
 fi
@@ -537,7 +580,7 @@ if (cd "$stale_prefix_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheo
 fi
 require_grep "from: failed-prefix checkpoint in first_failure" "$stale_second_log"
 require_grep "theorem: second_failure (line " "$stale_second_log"
-require_grep "top goal at failed fragment:" "$stale_second_log"
+require_grep "failed tactic top input goal:" "$stale_second_log"
 require_file "$(find "$stale_prefix_project/.holbuild/checkpoints" -name '*second_failure_failed_prefix.save' -print -quit)"
 stale_third_log=$tmpdir/stale-prefix-third.log
 if (cd "$stale_prefix_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$stale_third_log" 2>&1; then
@@ -578,8 +621,8 @@ fi
 first_slow_count=$(wc -c < "$slow_prefix_counter" | tr -d ' ')
 [[ "$first_slow_count" = "2" ]] || { echo "expected first run to execute slow prefix twice, got $first_slow_count" >&2; exit 1; }
 require_grep "slow_tac >> slow_tac >> FAIL_TAC" "$slow_prefix_first_log"
-require_grep "top goal at failed fragment:" "$slow_prefix_first_log"
-require_grep "remaining goals at failed fragment: 1" "$slow_prefix_first_log"
+require_grep "failed tactic top input goal:" "$slow_prefix_first_log"
+require_grep "failed tactic input goals: 1" "$slow_prefix_first_log"
 slow_prefix_again_log=$tmpdir/slow-prefix-again.log
 if (cd "$slow_prefix_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$slow_prefix_again_log" 2>&1; then
   echo "expected repeated slow-prefix proof to fail build" >&2
@@ -588,8 +631,8 @@ fi
 second_slow_count=$(wc -c < "$slow_prefix_counter" | tr -d ' ')
 [[ "$second_slow_count" = "2" ]] || { echo "failed-prefix replay reran slow prefix; count $second_slow_count" >&2; exit 1; }
 require_grep "from: failed-prefix checkpoint in slow_prefix_failure" "$slow_prefix_again_log"
-require_grep "top goal at failed fragment:" "$slow_prefix_again_log"
-require_grep "remaining goals at failed fragment: 1" "$slow_prefix_again_log"
+require_grep "failed tactic top input goal:" "$slow_prefix_again_log"
+require_grep "failed tactic input goals: 1" "$slow_prefix_again_log"
 
 failed_root_project=$tmpdir/failed-root-project
 failed_root_counter=$tmpdir/failed-root-dep-count.txt
