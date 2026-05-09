@@ -287,6 +287,27 @@ disables global-cache restore/publish for that action. `always_reexecute = true`
 prevents local up-to-date skipping and any retained/debug checkpoint replay for that action. These
 are escape hatches, not ambient include/search paths.
 
+Generated HOL source can be declared with pre-discovery generator steps. Generated
+outputs are ordinary visible source files, typically under a project `gen/`
+directory that is also listed in `[build].members`:
+
+```toml
+[build]
+members = ["src", "gen"]
+
+[[generate]]
+name = "opcodes"
+command = ["python3", "scripts/gen_opcodes.py", "data/opcodes.toml", "-o", "gen/opcodeClassScript.sml"]
+inputs = ["scripts/gen_opcodes.py", "data/opcodes.toml"]
+outputs = ["gen/opcodeClassScript.sml"]
+```
+
+Generator `deps` may name earlier `[[generate]]` steps. Holbuild topologically
+runs stale or missing generators before source discovery, verifies declared
+outputs exist, and then scans/hashes the actual generated source bytes. Declared
+outputs may be overwritten; use VCS for review/recovery of user-visible
+`gen/` files.
+
 Incremental correctness is action-key based. `holbuild` does not use
 `hol buildheap` as its default build primitive; it builds contexts directly by
 loading resolved ancestors and, unless `--skip-checkpoints` is set, saving

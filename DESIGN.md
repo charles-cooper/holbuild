@@ -323,9 +323,14 @@ recorded theory metadata (`Theory.current_ML_deps` /
 `local open ...` dependencies are preserved without parsing generated SML text.
 Source-level `use "file"` is rejected in project build actions in v1 because it
 is an arbitrary path/input outside the resolved package graph; declare a project
-module and `load` it instead. `.sml` files get a `.uo` plus an empty companion
-`.ui` unless a real `.sig` companion exists, and same-name signatures are
-implicit dependencies of their implementation. HOL's current
+module and `load` it instead. Generated HOL source is modeled by manifest
+`[[generate]]` steps that run before source discovery. Their package-root-relative
+outputs are visible source-tree files (commonly under `gen/`), may be overwritten,
+and are scanned/hashed as ordinary sources after generation. Generator keys decide
+whether to rerun the generator; theory/action keys still use the actual generated
+source bytes. `.sml` files get a `.uo` plus an empty companion `.ui` unless a real
+`.sig` companion exists, and same-name signatures are implicit dependencies of
+their implementation. HOL's current
 `HOLFileSys` remaps `.uo`/`.ui` and files ending in
 `Theory.dat`/`.sml`/`.sig` through `.hol/objs`, so a project-level layout may
 need auxiliary internal load paths or rewritten non-semantic load copies while

@@ -534,6 +534,7 @@ fun main raw_args =
        | Error msg => err msg
        | HolbuildToolchain.Error msg => err msg
        | HolbuildProject.Error msg => err msg
+       | HolbuildGenerators.Error msg => err msg
        | HolbuildSourceIndex.Error msg => err msg
        | HolbuildDependencies.Error msg => err msg
        | HolbuildBuildPlan.Error msg => err msg

@@ -18,6 +18,14 @@ datatype action_policy =
       cache : bool,
       always_reexecute : bool }
 
+datatype generator =
+  Generator of
+    { name : string,
+      command : string list,
+      inputs : string list,
+      outputs : string list,
+      deps : string list }
+
 datatype dependency =
   Dependency of
     { name : string,
@@ -39,7 +47,8 @@ datatype package =
       excludes : string list,
       roots : string list,
       artifact_root : string,
-      action_policies : action_policy list }
+      action_policies : action_policy list,
+      generators : generator list }
 
 type t =
   { root : string,
@@ -58,7 +67,8 @@ type t =
     run_heap : string option,
     run_loads : string list,
     heaps : heap list,
-    action_policies : action_policy list }
+    action_policies : action_policy list,
+    generators : generator list }
 
 exception Error of string
 
@@ -250,6 +260,14 @@ fun string_array_field_opt table name =
             SOME xs => SOME xs
           | NONE => die (name ^ " must be a string array")
 
+fun required_string_array_field context table name =
+  case lookup table [name] of
+      NONE => die (context ^ " requires " ^ name)
+    | SOME value =>
+        case string_array_value value of
+            SOME xs => xs
+          | NONE => die (context ^ "." ^ name ^ " must be a string array")
+
 fun package_relative_path field path =
   let
     val has_parent_component =
@@ -300,6 +318,32 @@ fun heaps_at table =
     | SOME (TOML.ARRAY values) => map parse_heap values
     | SOME _ => die "heap must be an array of tables"
 
+fun parse_generator value =
+  case value of
+      TOML.TABLE table =>
+        let
+          val name =
+            case string_field table "name" of
+                SOME s => s
+              | NONE => die "[[generate]] entry requires name"
+          val command = required_string_array_field ("generate." ^ name) table "command"
+          val inputs = package_relative_paths ("generate." ^ name ^ ".inputs") (string_array_field table "inputs")
+          val outputs = package_relative_paths ("generate." ^ name ^ ".outputs") (required_string_array_field ("generate." ^ name) table "outputs")
+          val deps = string_array_field table "deps"
+          val _ = if name = "" then die "generate.name must not be empty" else ()
+          val _ = if null command then die ("generate." ^ name ^ ".command must not be empty") else ()
+          val _ = if null outputs then die ("generate." ^ name ^ ".outputs must not be empty") else ()
+        in
+          Generator {name = name, command = command, inputs = inputs, outputs = outputs, deps = deps}
+        end
+    | _ => die "generate entries must be tables"
+
+fun generators_at table =
+  case lookup table ["generate"] of
+      NONE => []
+    | SOME (TOML.ARRAY values) => map parse_generator values
+    | SOME _ => die "generate must be an array of tables"
+
 fun validate_schema table =
   case table_field table ["holbuild"] of
       NONE => ()
@@ -318,10 +362,15 @@ fun validate_action_table (logical, table) =
   require_known_fields ("actions." ^ logical)
     ["deps", "loads", "extra_inputs", "impure", "cache", "always_reexecute"] table
 
+fun validate_generate_entry value =
+  case value of
+      TOML.TABLE generate => require_known_fields "generate" ["name", "command", "inputs", "outputs", "deps"] generate
+    | _ => die "generate entries must be tables"
+
 fun validate_manifest_table table =
   let
     val _ = require_known_fields "holproject.toml"
-              ["holbuild", "project", "build", "dependencies", "run", "heap", "actions"] table
+              ["holbuild", "project", "build", "dependencies", "run", "heap", "actions", "generate"] table
     val _ = Option.app (require_known_fields "project" ["name", "version"])
               (table_field table ["project"])
     val _ = Option.app (require_known_fields "build" ["members", "exclude", "roots", "tactic_timeout"])
@@ -330,6 +379,11 @@ fun validate_manifest_table table =
               (table_field table ["run"])
     val _ = List.app validate_dependency_table (named_table_entries table ["dependencies"])
     val _ = List.app validate_action_table (named_table_entries table ["actions"])
+    val _ =
+      case lookup table ["generate"] of
+          NONE => ()
+        | SOME (TOML.ARRAY values) => List.app validate_generate_entry values
+        | SOME _ => die "generate must be an array of tables"
     fun validate_heap_entry value =
       case value of
           TOML.TABLE heap => require_known_fields "heap" ["name", "output", "objects"] heap
@@ -459,7 +513,8 @@ fun parse_table_at table {manifest, root, artifact_root, local_config} =
       run_heap = Option.mapPartial (fn t => string_field t "heap") run,
       run_loads = from run (fn t => string_array_field t "loads") [],
       heaps = heaps_at table,
-      action_policies = action_policies_at root table }
+      action_policies = action_policies_at root table,
+      generators = generators_at table }
   end
 
 fun parse_at args = parse_table_at (TOML.fromFile (#manifest args)) args
@@ -513,9 +568,16 @@ fun package_members (Package {members, ...}) = members
 fun package_excludes (Package {excludes, ...}) = excludes
 fun package_roots (Package {roots, ...}) = roots
 fun package_artifact_root (Package {artifact_root, ...}) = artifact_root
+fun package_generators (Package {generators, ...}) = generators
 fun artifact_root ({artifact_root, ...} : t) = artifact_root
 fun build_roots ({roots, ...} : t) = roots
 fun package_action_policies (Package {action_policies, ...}) = action_policies
+
+fun generator_name (Generator {name, ...}) = name
+fun generator_command (Generator {command, ...}) = command
+fun generator_inputs (Generator {inputs, ...}) = inputs
+fun generator_outputs (Generator {outputs, ...}) = outputs
+fun generator_deps (Generator {deps, ...}) = deps
 
 fun action_policy_logical (ActionPolicy {logical, ...}) = logical
 fun action_deps (ActionPolicy {deps, ...}) = deps
@@ -575,11 +637,12 @@ fun dependency_to_string project (dep as Dependency {name, path, manifest, git, 
 
 fun override_to_string (Override {name, path}) = name ^ " -> " ^ path
 
-fun project_package ({root, artifact_root, manifest, name, members, excludes, roots, action_policies, ...} : t) =
+fun project_package ({root, artifact_root, manifest, name, members, excludes, roots, action_policies, generators, ...} : t) =
   Package {name = Option.getOpt(name, "root"), root = root, manifest = manifest,
            members = members, excludes = excludes, roots = roots,
            artifact_root = Path.concat(artifact_root, ".holbuild"),
-           action_policies = action_policies}
+           action_policies = action_policies,
+           generators = generators}
 
 fun dependency_project (project : t) (dep as Dependency {name, ...}) =
   let
@@ -623,7 +686,8 @@ fun dependency_package artifact_parent project (dep as Dependency {name, ...}) =
     (Package {name = name, root = dep_root, manifest = dep_manifest,
               members = #members dep_project, excludes = #excludes dep_project,
               roots = #roots dep_project, artifact_root = artifact_root,
-              action_policies = #action_policies dep_project},
+              action_policies = #action_policies dep_project,
+              generators = #generators dep_project},
      dep_project)
   end
 
@@ -654,7 +718,7 @@ fun packages (project : t) =
 fun describe (project : t) =
   let
     val {root, artifact_root, manifest, name, version, members, excludes, roots, dependencies,
-         overrides, local_build_excludes, local_build_jobs, build_tactic_timeout, run_heap, run_loads, heaps, action_policies} = project
+         overrides, local_build_excludes, local_build_jobs, build_tactic_timeout, run_heap, run_loads, heaps, action_policies, generators} = project
     fun opt label value =
       case value of NONE => () | SOME s => print (label ^ s ^ "\n")
   in
@@ -673,6 +737,7 @@ fun describe (project : t) =
     opt "run.heap: " run_heap;
     print ("run.loads: " ^ String.concatWith ", " run_loads ^ "\n");
     List.app (fn heap => print ("heap: " ^ heap_to_string heap ^ "\n")) heaps;
+    List.app (fn generator => print ("generate: " ^ generator_name generator ^ "\n")) generators;
     List.app (fn policy => print ("action: " ^ action_policy_logical policy ^ "\n")) action_policies
   end
 

@@ -192,6 +192,43 @@ extra_inputs = ["/tmp/generated.dat"]
 TOML
 expect_context_failure bad_action_abs_input "extra_inputs must be package-root-relative"
 
+make_project bad_generate_field
+cat > "$tmpdir/bad_generate_field/holproject.toml" <<'TOML'
+[project]
+name = "bad_generate_field"
+
+[[generate]]
+name = "gen"
+command = ["python3", "gen.py"]
+outputs = ["gen/AScript.sml"]
+extra = true
+TOML
+expect_context_failure bad_generate_field "unknown field in generate: extra"
+
+make_project bad_generate_command_type
+cat > "$tmpdir/bad_generate_command_type/holproject.toml" <<'TOML'
+[project]
+name = "bad_generate_command_type"
+
+[[generate]]
+name = "gen"
+command = "python3 gen.py"
+outputs = ["gen/AScript.sml"]
+TOML
+expect_context_failure bad_generate_command_type "generate.gen.command must be a string array"
+
+make_project bad_generate_abs_output
+cat > "$tmpdir/bad_generate_abs_output/holproject.toml" <<'TOML'
+[project]
+name = "bad_generate_abs_output"
+
+[[generate]]
+name = "gen"
+command = ["python3", "gen.py"]
+outputs = ["/tmp/AScript.sml"]
+TOML
+expect_context_failure bad_generate_abs_output "generate.gen.outputs must be package-root-relative"
+
 make_project bad_config
 cat > "$tmpdir/bad_config/holproject.toml" <<'TOML'
 [project]

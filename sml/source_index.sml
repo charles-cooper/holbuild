@@ -241,6 +241,8 @@ fun discover_package package acc =
     val artifact_root = HolbuildProject.package_artifact_root package
     val policies = HolbuildProject.package_action_policies package
     val excludes = HolbuildProject.package_excludes package
+    val _ = HolbuildGenerators.run_package package
+            handle HolbuildGenerators.Error msg => raise Error msg
     val members =
       map (fn member => HolbuildProject.abs_under source_root member)
         (HolbuildProject.package_members package)
