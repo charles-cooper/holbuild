@@ -238,6 +238,12 @@ Proof
   >- ACCEPT_TAC TRUTH
 QED
 
+Theorem branch_sequence_solves_last_goal_success:
+  T
+Proof
+  ALL_TAC >- (ALL_TAC >> ACCEPT_TAC TRUTH)
+QED
+
 Theorem branch_then1_lhs_sequence_success:
   ((T ∨ T) ⇒ T) ∧ T
 Proof

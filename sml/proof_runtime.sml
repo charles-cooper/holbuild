@@ -406,8 +406,28 @@ fun current_branch_tail_count label =
       [] => raise Fail ("branch suffix without active branch: " ^ label)
     | tail_count :: _ => tail_count
 
-fun current_branch_generated_count label =
-  current_goal_total () - current_branch_tail_count label
+fun history_is_proved () =
+  ((project_history goalStack.extract_thm; true) handle _ => false)
+
+fun branch_goal_snapshot label =
+  let
+    val tail_count = current_branch_tail_count label
+    fun snapshot goals =
+      let
+        val total_count = length goals
+        val generated_count = total_count - tail_count
+      in
+        if generated_count < 0 then
+          raise Fail ("branch tail count exceeds open goals: " ^ label)
+        else {goals = goals, total_count = total_count, generated_count = generated_count}
+      end
+  in
+    snapshot (history_top_goals())
+    handle e =>
+      if tail_count = 0 andalso history_is_proved () then
+        {goals = [], total_count = 0, generated_count = 0}
+      else raise e
+  end
 
 fun push_branch_tail_count tail_count =
   branch_tail_count_ref := tail_count :: !branch_tail_count_ref
@@ -434,9 +454,7 @@ fun apply_branch_start_step label program =
 
 fun apply_branch_suffix_list_tactic label list_tactic =
   let
-    val goals = history_top_goals()
-    val total_count = length goals
-    val generated_count = current_branch_generated_count label
+    val {goals, total_count, generated_count} = branch_goal_snapshot label
     val input_goals = take_goals generated_count goals
     val scoped_list_tactic = Tactical.SPLIT_LT generated_count (list_tactic, Tactical.ALL_LT)
   in
@@ -458,9 +476,7 @@ fun apply_branch_list_suffix_step label program =
 
 fun apply_branch_close_step label =
   let
-    val goals = history_top_goals()
-    val total_count = length goals
-    val generated_count = current_branch_generated_count label
+    val {goals, total_count, generated_count} = branch_goal_snapshot label
     val input_goals = take_goals generated_count goals
   in
     (if generated_count = 0 then
