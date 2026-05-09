@@ -260,6 +260,22 @@ require_grep "checkpoint save was interrupted; restoring previous checkpoint:" "
 require_grep "from: theorem-context checkpoint after first" "$backup_log"
 assert_no_checkpoints "clean rebuild after restored checkpoint backup retained checkpoint files"
 
+run_expect_suffix_failure "$tmpdir/partial-ok-seed.log"
+partial_ok_context=$(first_context_path)
+partial_ok_failed_prefix=$(second_failed_prefix_path)
+rm -f "$partial_ok_failed_prefix" "$partial_ok_failed_prefix.ok" "$partial_ok_failed_prefix.meta" "$partial_ok_failed_prefix.prefix"
+mv "$partial_ok_context.ok" "$partial_ok_context.ok.bak"
+mv "$partial_ok_context" "$partial_ok_context.bak"
+printf 'partial replacement checkpoint\n' > "$partial_ok_context"
+printf 'holbuild-checkpoint-ok-v2\nkind=theorem_context\n' > "$partial_ok_context.ok"
+write_good_source
+force_rebuild
+partial_ok_log=$tmpdir/partial-ok-restore.log
+(cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$partial_ok_log" 2>&1
+require_grep "checkpoint metadata publish was interrupted; restoring previous checkpoint:" "$partial_ok_log"
+require_grep "from: theorem-context checkpoint after first" "$partial_ok_log"
+assert_no_checkpoints "clean rebuild after restored partial-ok checkpoint retained checkpoint files"
+
 run_expect_suffix_failure "$tmpdir/parent-mismatch-seed.log"
 parent_mismatch_deps=$(first_deps_path)
 parent_mismatch_failed_prefix=$(second_failed_prefix_path)

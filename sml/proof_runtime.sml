@@ -43,38 +43,8 @@ fun env_bool name =
     | SOME "no" => SOME false
     | _ => NONE
 
-fun bool_text true = "true"
-  | bool_text false = "false"
-
 fun seconds (a, b) = Time.toReal (Time.-(b, a))
-fun fmt_time t = Real.fmt (StringCvt.FIX (SOME 3)) t
 fun fmt_ms t = Real.fmt (StringCvt.FIX (SOME 3)) (1000.0 * t)
-
-fun delete_file path = OS.FileSys.remove path handle _ => ()
-fun file_exists path = OS.FileSys.access(path, [OS.FileSys.A_READ]) handle _ => false
-fun rename_file old new = OS.FileSys.rename {old = old, new = new}
-fun rename_if_exists old new = if file_exists old then rename_file old new else ()
-
-fun delete_checkpoint path =
-  (delete_file (path ^ ".ok.bak");
-   delete_file (path ^ ".bak");
-   delete_file (path ^ ".ok");
-   delete_file (path ^ ".meta");
-   delete_file (path ^ ".prefix");
-   delete_file path)
-
-fun write_checkpoint_ok path ok_text =
-  let val out = TextIO.openOut (path ^ ".ok")
-  in TextIO.output(out, ok_text); TextIO.closeOut out end
-
-fun backup_checkpoint path =
-  (delete_file (path ^ ".bak");
-   delete_file (path ^ ".ok.bak");
-   rename_if_exists (path ^ ".ok") (path ^ ".ok.bak");
-   rename_if_exists path (path ^ ".bak"))
-
-fun discard_checkpoint_backup path =
-  (delete_file (path ^ ".bak"); delete_file (path ^ ".ok.bak"))
 
 fun write_timeout_marker label seconds =
   case !tactic_timeout_marker_ref of
@@ -100,30 +70,9 @@ fun with_tactic_timeout label f x =
 fun save_checkpoint label default_share path ok_text depth =
   if not (!checkpoint_enabled_ref) then ()
   else
-    let
-      val share = Option.getOpt(env_bool "HOLBUILD_SHARE_COMMON_DATA", default_share)
-      val timing = Option.getOpt(env_bool "HOLBUILD_CHECKPOINT_TIMING", false)
-      val t0 = Time.now()
-      val _ = backup_checkpoint path
-      val _ = if share then PolyML.shareCommonData PolyML.rootFunction else ()
-      val t1 = Time.now()
-      val _ = PolyML.SaveState.saveChild(path, depth)
-      val t2 = Time.now()
-      val _ = write_checkpoint_ok path ok_text
-      val _ = discard_checkpoint_backup path
-      val _ =
-        if timing then
-          TextIO.output
-            (TextIO.stdErr,
-             String.concat ["holbuild checkpoint kind=", label,
-                            " share=", bool_text share,
-                            " depth=", Int.toString depth,
-                            " share_s=", fmt_time (seconds (t0, t1)),
-                            " save_s=", fmt_time (seconds (t1, t2)),
-                            " size=", Position.toString (OS.FileSys.fileSize path),
-                            " path=", path, "\n"])
-        else ()
-    in () end
+    HolbuildCheckpointSaveRuntime.save_checkpoint
+      {label = label, default_share = default_share, path = path,
+       ok_text = ok_text, depth = depth}
 
 fun write_text_file path text =
   let val out = TextIO.openOut path

@@ -185,54 +185,23 @@ fun checkpoint_ok_v1 () = HolbuildCheckpointStore.ok_v1 ()
 
 fun checkpoint_ok_text kind fields = HolbuildCheckpointStore.ok_text kind fields
 
-(* PolyML child heaps remember their parent-chain filenames. We therefore save
-   checkpoints directly to the final .save path rather than to a temp path that
-   is renamed afterwards. To make replacement crash-safe, move the previous
-   .save/.ok pair aside as .bak, save the new child to the final path, then
-   publish the new .ok. Checkpoint validation restores .bak if an interrupt
-   leaves a partial replacement. If we later use PolyML parent-name retargeting,
-   keep this invariant documented and covered by checkpoint-recovery tests. *)
+fun checkpoint_save_runtime_helper_path () =
+  Path.concat(HolbuildRuntimePaths.source_root, "sml/checkpoint_save_runtime.sml")
+
+fun checkpoint_save_runtime_line () =
+  "use " ^ HolbuildToolchain.sml_string (checkpoint_save_runtime_helper_path ()) ^ ";"
+
+(* PolyML child heaps remember their parent-chain filenames. The shared runtime
+   helper saves checkpoints directly to the final .save path and publishes .ok
+   metadata last via an atomic .ok.tmp rename. *)
 fun save_heap_line {label, share_common_data, output, ok_text} =
-  let val default_share = if share_common_data then "true" else "false"
-  in
-    String.concatWith "\n"
-      ["val _ = let",
-       "  val holbuild_checkpoint_path = " ^ HolbuildToolchain.sml_string output,
-       "  val holbuild_checkpoint_label = " ^ HolbuildToolchain.sml_string label,
-       "  val holbuild_checkpoint_default_share = " ^ default_share,
-       "  val holbuild_checkpoint_ok_text = " ^ HolbuildToolchain.sml_string ok_text,
-       "  fun holbuild_checkpoint_bool name = case OS.Process.getEnv name of SOME \"1\" => SOME true | SOME \"true\" => SOME true | SOME \"yes\" => SOME true | SOME \"0\" => SOME false | SOME \"false\" => SOME false | SOME \"no\" => SOME false | _ => NONE",
-       "  fun holbuild_checkpoint_remove path = OS.FileSys.remove path handle _ => ()",
-       "  fun holbuild_checkpoint_rename old new = OS.FileSys.rename {old = old, new = new}",
-       "  fun holbuild_checkpoint_exists path = OS.FileSys.access(path, [OS.FileSys.A_READ]) handle _ => false",
-       "  fun holbuild_checkpoint_rename_if_exists old new = if holbuild_checkpoint_exists old then holbuild_checkpoint_rename old new else ()",
-       "  fun holbuild_checkpoint_write_ok path = let val out = TextIO.openOut path in TextIO.output(out, holbuild_checkpoint_ok_text); TextIO.closeOut out end",
-       "  fun holbuild_checkpoint_seconds (a, b) = Time.toReal (Time.-(b, a))",
-       "  fun holbuild_checkpoint_fmt t = Real.fmt (StringCvt.FIX (SOME 3)) t",
-       "  fun holbuild_checkpoint_bool_text true = \"true\" | holbuild_checkpoint_bool_text false = \"false\"",
-       "  val holbuild_checkpoint_share = Option.getOpt(holbuild_checkpoint_bool \"HOLBUILD_SHARE_COMMON_DATA\", holbuild_checkpoint_default_share)",
-       "  val holbuild_checkpoint_timing = Option.getOpt(holbuild_checkpoint_bool \"HOLBUILD_CHECKPOINT_TIMING\", false)",
-       "  val holbuild_checkpoint_ok = holbuild_checkpoint_path ^ \".ok\"",
-       "  val holbuild_checkpoint_bak = holbuild_checkpoint_path ^ \".bak\"",
-       "  val holbuild_checkpoint_ok_bak = holbuild_checkpoint_ok ^ \".bak\"",
-       "  val holbuild_checkpoint_depth = length (PolyML.SaveState.showHierarchy())",
-       "  (* SaveChild records parent-state filenames, so do not save to a temp path and rename it. *)",
-       "  (* Preserve the old complete pair as .bak until the new .ok is published. *)",
-       "  val holbuild_checkpoint_t0 = Time.now()",
-       "  val _ = holbuild_checkpoint_remove holbuild_checkpoint_bak",
-       "  val _ = holbuild_checkpoint_remove holbuild_checkpoint_ok_bak",
-       "  val _ = holbuild_checkpoint_rename_if_exists holbuild_checkpoint_ok holbuild_checkpoint_ok_bak",
-       "  val _ = holbuild_checkpoint_rename_if_exists holbuild_checkpoint_path holbuild_checkpoint_bak",
-       "  val _ = if holbuild_checkpoint_share then PolyML.shareCommonData PolyML.rootFunction else ()",
-       "  val holbuild_checkpoint_t1 = Time.now()",
-       "  val _ = PolyML.SaveState.saveChild(holbuild_checkpoint_path, holbuild_checkpoint_depth)",
-       "  val holbuild_checkpoint_t2 = Time.now()",
-       "  val _ = holbuild_checkpoint_write_ok holbuild_checkpoint_ok",
-       "  val _ = holbuild_checkpoint_remove holbuild_checkpoint_bak",
-       "  val _ = holbuild_checkpoint_remove holbuild_checkpoint_ok_bak",
-       "  val _ = if holbuild_checkpoint_timing then TextIO.output(TextIO.stdErr, String.concat [\"holbuild checkpoint kind=\", holbuild_checkpoint_label, \" share=\", holbuild_checkpoint_bool_text holbuild_checkpoint_share, \" depth=\", Int.toString holbuild_checkpoint_depth, \" share_s=\", holbuild_checkpoint_fmt (holbuild_checkpoint_seconds (holbuild_checkpoint_t0, holbuild_checkpoint_t1)), \" save_s=\", holbuild_checkpoint_fmt (holbuild_checkpoint_seconds (holbuild_checkpoint_t1, holbuild_checkpoint_t2)), \" size=\", Position.toString (OS.FileSys.fileSize holbuild_checkpoint_path), \" path=\", holbuild_checkpoint_path, \"\\n\"]) else ()",
-       "in () end;"]
-  end
+  String.concat
+    ["val _ = HolbuildCheckpointSaveRuntime.save_checkpoint {label = ",
+     HolbuildToolchain.sml_string label,
+     ", default_share = ", if share_common_data then "true" else "false",
+     ", path = ", HolbuildToolchain.sml_string output,
+     ", ok_text = ", HolbuildToolchain.sml_string ok_text,
+     ", depth = length (PolyML.SaveState.showHierarchy())};"]
 
 fun direct_external_loads plan node =
   unique_strings
@@ -253,7 +222,8 @@ fun preload_lines plan node =
 fun write_preload plan node deps_loaded deps_ok path =
   let
     val lines = preload_lines plan node @
-                [save_heap_line {label = "deps_loaded", share_common_data = true,
+                [checkpoint_save_runtime_line (),
+                 save_heap_line {label = "deps_loaded", share_common_data = true,
                                  output = deps_loaded, ok_text = deps_ok}]
   in
     write_text path (String.concatWith "\n" lines ^ "\n")
@@ -281,7 +251,8 @@ fun write_final_context_loader {sig_path, sml_path, output, path, mldeps_report}
   let
     val lines = final_context_loader_lines {sig_path = sig_path, sml_path = sml_path,
                                             mldeps_report = mldeps_report} @
-                [save_heap_line {label = "final_context", share_common_data = true,
+                [checkpoint_save_runtime_line (),
+                 save_heap_line {label = "final_context", share_common_data = true,
                                  output = output, ok_text = checkpoint_ok_v1 ()}]
   in
     write_text path (String.concatWith "\n" lines ^ "\n")
@@ -2566,7 +2537,8 @@ fun write_heap_loader plan output path =
     val lines =
       map load_theory_line (heap_external_theories plan) @
       List.concat (map heap_theory_load_lines plan) @
-      [save_heap_line {label = "heap", share_common_data = false,
+      [checkpoint_save_runtime_line (),
+       save_heap_line {label = "heap", share_common_data = false,
                        output = output, ok_text = checkpoint_ok_v1 ()}]
   in
     write_text path (String.concatWith "\n" lines ^ "\n")

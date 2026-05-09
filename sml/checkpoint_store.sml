@@ -61,26 +61,37 @@ fun metadata_value key lines =
                lines
   end
 
+fun save_backup_path path = path ^ ".bak"
+fun ok_backup_path path = ok_path path ^ ".bak"
+
+fun discard_checkpoint_backup path =
+  (remove_file (save_backup_path path); remove_file (ok_backup_path path))
+
+fun restore_backup_pair warn message path =
+  let
+    val ok = ok_path path
+    val save_bak = save_backup_path path
+    val ok_bak = ok_backup_path path
+    val has_save_bak = file_exists save_bak
+  in
+    warn (message ^ path);
+    if has_save_bak then (remove_file path; rename_file save_bak path) else remove_file path;
+    remove_file ok;
+    rename_file ok_bak ok
+  end
+
 (* Checkpoint saves publish .ok last. If an interrupt lands after the old
-   checkpoint was moved to .bak but before the new .ok was written, validation
-   must prefer the last complete checkpoint over a possibly partial .save. *)
+   checkpoint was moved to .bak but before the new .ok was published, validation
+   must prefer the last complete checkpoint over a partial replacement. *)
 fun restore_checkpoint_backup warn path =
   let
     val ok = ok_path path
-    val save_bak = path ^ ".bak"
-    val ok_bak = ok ^ ".bak"
-    val has_save_bak = file_exists save_bak
-    val has_ok_bak = file_exists ok_bak
-    val missing_ok = not (file_exists ok)
-    val should_restore = has_ok_bak andalso (missing_ok orelse not (file_exists path))
+    val ok_bak = ok_backup_path path
+    val should_restore =
+      file_exists ok_bak andalso (not (file_exists ok) orelse not (file_exists path))
   in
     if should_restore then
-      (warn ("checkpoint save was interrupted; restoring previous checkpoint: " ^ path);
-       if has_save_bak then (remove_file path; rename_file save_bak path) else ();
-       remove_file ok;
-       rename_file ok_bak ok)
-    else if file_exists path andalso file_exists ok then
-      (remove_file save_bak; remove_file ok_bak)
+      restore_backup_pair warn "checkpoint save was interrupted; restoring previous checkpoint: " path
     else ()
   end
   handle OS.SysErr _ => ()
@@ -93,24 +104,36 @@ fun remove_incomplete_residue warn path =
      remove_file (path ^ ".prefix"))
   else ()
 
-fun valid_checkpoint_file warn path =
-  (restore_checkpoint_backup warn path;
-   remove_incomplete_residue warn path;
-   file_exists path)
+fun metadata_matches_fields fields text =
+  let val lines = metadata_lines text
+  in
+    List.exists (fn line => line = "holbuild-checkpoint-ok-v2") lines andalso
+    List.all (fn (key, value) => metadata_value key lines = SOME value) fields
+  end
+
+fun checkpoint_matches warn path metadata_matches =
+  let
+    fun current_matches () =
+      file_exists path andalso
+      (case current_metadata (ok_path path) of
+           SOME text => metadata_matches text
+         | NONE => false)
+  in
+    restore_checkpoint_backup warn path;
+    remove_incomplete_residue warn path;
+    if current_matches () then (discard_checkpoint_backup path; true)
+    else if file_exists (ok_backup_path path) then
+      ((restore_backup_pair warn "checkpoint metadata publish was interrupted; restoring previous checkpoint: " path;
+        remove_incomplete_residue warn path;
+        current_matches ())
+       handle OS.SysErr _ => false)
+    else false
+  end
 
 fun ok_text_matches warn path expected_text =
-  valid_checkpoint_file warn path andalso
-  current_metadata (ok_path path) = SOME expected_text
+  checkpoint_matches warn path (fn text => text = expected_text)
 
 fun ok_matches warn path fields =
-  valid_checkpoint_file warn path andalso
-  case current_metadata (ok_path path) of
-      SOME text =>
-        let val lines = metadata_lines text
-        in
-          List.exists (fn line => line = "holbuild-checkpoint-ok-v2") lines andalso
-          List.all (fn (key, value) => metadata_value key lines = SOME value) fields
-        end
-    | NONE => false
+  checkpoint_matches warn path (metadata_matches_fields fields)
 
 end
