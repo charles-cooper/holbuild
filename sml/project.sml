@@ -76,8 +76,11 @@ fun set_source_dir path = source_dir_ref := SOME (absolute_from_cwd path)
 
 fun builtin_holdir_dependency name = name = "HOLDIR"
 
-fun builtin_holdir_manifest () =
-  Path.concat(Path.concat(HolbuildRuntimePaths.source_root, "examples/root-hol"), "holproject.toml")
+fun builtin_holdir_manifest () = HolbuildBuiltinManifests.holdir_manifest_name
+
+fun uses_builtin_holdir_manifest (Dependency {name, manifest = NONE, ...}) =
+      builtin_holdir_dependency name
+  | uses_builtin_holdir_manifest _ = false
 
 fun original_dir () =
   case OS.Process.getEnv "HOLBUILD_ORIG_CWD" of
@@ -423,9 +426,8 @@ fun parse_local_config root =
     else LocalConfig {overrides = [], build_excludes = [], build_jobs = NONE, build_tactic_timeout = NONE}
   end
 
-fun parse_at {manifest, root, artifact_root, local_config} =
+fun parse_table_at table {manifest, root, artifact_root, local_config} =
   let
-    val table = TOML.fromFile manifest
     val _ = validate_manifest_table table
     val project = table_field table ["project"]
     val build = table_field table ["build"]
@@ -459,6 +461,11 @@ fun parse_at {manifest, root, artifact_root, local_config} =
       heaps = heaps_at table,
       action_policies = action_policies_at root table }
   end
+
+fun parse_at args = parse_table_at (TOML.fromFile (#manifest args)) args
+
+fun parse_builtin_holdir_at args =
+  parse_table_at (TOML.fromString HolbuildBuiltinManifests.holdir_manifest_text) args
 
 fun parse manifest =
   let
@@ -584,14 +591,17 @@ fun dependency_project (project : t) (dep as Dependency {name, ...}) =
       case dependency_manifest project dep of
           SOME manifest => manifest
         | NONE => die ("dependency " ^ name ^ " has no manifest")
-    val _ =
-      if readable dep_manifest then ()
-      else die ("dependency " ^ name ^ " manifest not found: " ^ dep_manifest)
-    val dep_project = parse_at {manifest = dep_manifest, root = dep_root, artifact_root = dep_root,
-                                local_config = LocalConfig {overrides = #overrides project,
-                                                            build_excludes = #local_build_excludes project,
-                                                            build_jobs = #local_build_jobs project,
-                                                            build_tactic_timeout = #build_tactic_timeout project}}
+    val parse_dep =
+      if uses_builtin_holdir_manifest dep then parse_builtin_holdir_at
+      else
+        (if readable dep_manifest then ()
+         else die ("dependency " ^ name ^ " manifest not found: " ^ dep_manifest);
+         parse_at)
+    val dep_project = parse_dep {manifest = dep_manifest, root = dep_root, artifact_root = dep_root,
+                                 local_config = LocalConfig {overrides = #overrides project,
+                                                             build_excludes = #local_build_excludes project,
+                                                             build_jobs = #local_build_jobs project,
+                                                             build_tactic_timeout = #build_tactic_timeout project}}
     val declared_name = #name dep_project
     val _ =
       case declared_name of

@@ -24,6 +24,11 @@ members = []
 [dependencies.HOLDIR]
 TOML
 
+(cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" context) > "$tmpdir/context.log"
+require_grep "dependency: HOLDIR \[local=$HOLDIR, resolved-manifest=builtin:HOLDIR\]" "$tmpdir/context.log"
+(cd "$project" && HOLDIR="$HOLDIR" "$HOLBUILD_BIN" context) > "$tmpdir/context-env.log"
+require_grep "dependency: HOLDIR \[local=$HOLDIR, resolved-manifest=builtin:HOLDIR\]" "$tmpdir/context-env.log"
+
 (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --dry-run) > "$tmpdir/dry.log"
 
 require_grep "KernelTypes (sml, package HOLDIR)" "$tmpdir/dry.log"

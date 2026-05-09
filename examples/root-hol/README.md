@@ -8,9 +8,10 @@ checkout/install root. It enumerates explicit `src/*` members and excludes known
 non-build/test/tooling variants that currently collide on logical names or have
 side effects.
 
-The current sketch is a planning boundary, not a bootstrap recipe. It should be
-used as holbuild's built-in `HOLDIR` manifest while holbuild still runs from an
-already configured `HOLDIR`.
+The current sketch is a planning boundary, not a bootstrap recipe. The actual
+reserved `HOLDIR` dependency uses the equivalent manifest compiled into holbuild,
+so users only set `--holdir`, `HOLBUILD_HOLDIR`, or `HOLDIR`; no HOLDIR shim
+manifest file is required.
 
 Probe shape:
 
