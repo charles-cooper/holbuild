@@ -79,7 +79,11 @@ fi
 [[ -e "$clean_only_cache/tmp/old" ]] || { echo "--clean-only removed cache state" >&2; exit 1; }
 
 budget_project=$tmpdir/budget-project
-mkdir -p "$budget_project/src" "$budget_project/.holbuild/checkpoints/old"
+budget_family="$budget_project/.holbuild/checkpoints/checkpoint-budget/src/BadScript.sml"
+mkdir -p \
+  "$budget_project/src" \
+  "$budget_family.deps/old-deps-key" \
+  "$budget_family.theorems/old-deps-key/proof_ir_v3/old-prefix"
 cat > "$budget_project/holproject.toml" <<'TOML'
 [project]
 name = "checkpoint-budget"
@@ -92,14 +96,24 @@ open HolKernel Parse boolLib bossLib;
 val _ = new_theory "Bad";
 val _ = raise Fail "forced failure after stale checkpoint budget fixture";
 SML
-truncate -s 6G "$budget_project/.holbuild/checkpoints/old/stale.save"
-touch -d '2 days ago' "$budget_project/.holbuild/checkpoints/old/stale.save"
+truncate -s 6G "$budget_family.deps/old-deps-key/deps_loaded.save"
+printf 'ok\n' > "$budget_family.deps/old-deps-key/deps_loaded.save.ok"
+printf 'child\n' > "$budget_family.theorems/old-deps-key/proof_ir_v3/old-prefix/first_context.save"
+printf 'child ok\n' > "$budget_family.theorems/old-deps-key/proof_ir_v3/old-prefix/first_context.save.ok"
+touch -d '2 days ago' \
+  "$budget_family.deps/old-deps-key/deps_loaded.save" \
+  "$budget_family.deps/old-deps-key/deps_loaded.save.ok" \
+  "$budget_family.theorems/old-deps-key/proof_ir_v3/old-prefix/first_context.save" \
+  "$budget_family.theorems/old-deps-key/proof_ir_v3/old-prefix/first_context.save.ok"
 if (cd "$budget_project" && "$HOLBUILD_BIN" --holdir "$_HOLDIR" build BadTheory) > "$tmpdir/budget.log" 2>&1; then
   echo "checkpoint budget failure fixture unexpectedly succeeded" >&2
   exit 1
 fi
-require_grep "evicted .* checkpoint artifact" "$tmpdir/budget.log"
-[[ ! -e "$budget_project/.holbuild/checkpoints/old/stale.save" ]] || { echo "build failure left checkpoint residue over budget" >&2; exit 1; }
+require_grep "evicted .* checkpoint family" "$tmpdir/budget.log"
+if find "$budget_family.deps" "$budget_family.theorems" -type f -print -quit 2>/dev/null | grep -q .; then
+  echo "checkpoint budget evicted parent/child heap family only partially" >&2
+  exit 1
+fi
 
 if (cd "$project" && "$HOLBUILD_BIN" gc --clean-only --cache-only) > "$tmpdir/bad-flags.log" 2>&1; then
   echo "gc accepted mutually exclusive flags" >&2

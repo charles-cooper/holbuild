@@ -510,74 +510,151 @@ fun checkpoint_clean_artifact path =
 
 fun remove_empty_dir path = FS.rmDir path handle OS.SysErr _ => ()
 
-fun remove_stale_checkpoint_artifacts cutoff dir =
+fun remove_empty_dirs dir =
+  if not (path_exists dir) orelse not (FS.isDir dir handle OS.SysErr _ => false) then ()
+  else
+    (List.app remove_empty_dirs (children dir);
+     remove_empty_dir dir)
+
+fun checkpoint_save_artifact_base path =
+  if has_suffix ".save.ok.tmp" path then SOME (drop_suffix ".ok.tmp" path)
+  else if has_suffix ".save.ok.bak" path then SOME (drop_suffix ".ok.bak" path)
+  else if has_suffix ".save.ok" path then SOME (drop_suffix ".ok" path)
+  else if has_suffix ".save.tmp" path then SOME (drop_suffix ".tmp" path)
+  else if has_suffix ".save.bak" path then SOME (drop_suffix ".bak" path)
+  else if has_suffix ".meta" path then SOME (drop_suffix ".meta" path)
+  else if has_suffix ".prefix" path then SOME (drop_suffix ".prefix" path)
+  else if has_suffix ".save" path then SOME path
+  else NONE
+
+fun checkpoint_family_base path =
+  let
+    fun marker_base current =
+      let val name = Path.file current
+      in
+        if has_suffix ".deps" name then
+          SOME (Path.concat(Path.dir current, drop_suffix ".deps" name))
+        else if has_suffix ".theorems" name then
+          SOME (Path.concat(Path.dir current, drop_suffix ".theorems" name))
+        else if has_suffix ".final_context.save.ok.tmp" name then
+          SOME (Path.concat(Path.dir current, drop_suffix ".final_context.save.ok.tmp" name))
+        else if has_suffix ".final_context.save.ok.bak" name then
+          SOME (Path.concat(Path.dir current, drop_suffix ".final_context.save.ok.bak" name))
+        else if has_suffix ".final_context.save.ok" name then
+          SOME (Path.concat(Path.dir current, drop_suffix ".final_context.save.ok" name))
+        else if has_suffix ".final_context.save.tmp" name then
+          SOME (Path.concat(Path.dir current, drop_suffix ".final_context.save.tmp" name))
+        else if has_suffix ".final_context.save.bak" name then
+          SOME (Path.concat(Path.dir current, drop_suffix ".final_context.save.bak" name))
+        else if has_suffix ".final_context.save.meta" name then
+          SOME (Path.concat(Path.dir current, drop_suffix ".final_context.save.meta" name))
+        else if has_suffix ".final_context.save.prefix" name then
+          SOME (Path.concat(Path.dir current, drop_suffix ".final_context.save.prefix" name))
+        else if has_suffix ".final_context.save" name then
+          SOME (Path.concat(Path.dir current, drop_suffix ".final_context.save" name))
+        else
+          let val parent = Path.dir current
+          in if parent = current then NONE else marker_base parent end
+      end
+  in
+    case marker_base path of
+        SOME base => SOME base
+      | NONE => checkpoint_save_artifact_base path
+  end
+
+fun remove_checkpoint_family_base base =
+  (remove_checkpoint_tree (base ^ ".deps");
+   remove_checkpoint_tree (base ^ ".theorems");
+   remove_checkpoint (base ^ ".final_context.save");
+   remove_checkpoint base)
+
+type checkpoint_family = {base : string, mtime : Time.time, bytes : Position.int}
+
+fun max_time (a, b) = if Time.<(a, b) then b else a
+
+fun file_size path = FS.fileSize path handle OS.SysErr _ => 0
+
+fun add_checkpoint_family_artifact (base, mtime, size) families =
+  case families of
+      [] => [{base = base, mtime = mtime, bytes = size}]
+    | ({base = family_base, mtime = family_mtime, bytes = family_bytes} : checkpoint_family) :: rest =>
+        if family_base = base then
+          {base = family_base, mtime = max_time (family_mtime, mtime), bytes = family_bytes + size} :: rest
+        else
+          {base = family_base, mtime = family_mtime, bytes = family_bytes} ::
+          add_checkpoint_family_artifact (base, mtime, size) rest
+
+fun collect_checkpoint_families dir =
+  if not (path_exists dir) then []
+  else
+    let
+      fun collect path families =
+        if FS.isDir path handle OS.SysErr _ => false then
+          List.foldl (fn (child, acc) => collect child acc) families (children path)
+        else if checkpoint_clean_artifact path then
+          case checkpoint_family_base path of
+              SOME base => add_checkpoint_family_artifact
+                             (base, FS.modTime path handle OS.SysErr _ => Time.zeroTime, file_size path)
+                             families
+            | NONE => families
+        else families
+    in
+      collect dir []
+    end
+
+fun total_checkpoint_bytes families =
+  List.foldl (fn ({bytes, ...} : checkpoint_family, total) => total + bytes) (0 : Position.int) families
+
+fun sort_families_by_mtime_ascending families =
+  let
+    fun insert x [] = [x]
+      | insert (x as {mtime = x_mtime, ...} : checkpoint_family)
+               ((y as {mtime = y_mtime, ...} : checkpoint_family) :: rest) =
+          if Time.<=(x_mtime, y_mtime) then x :: y :: rest
+          else y :: insert x rest
+  in
+    List.foldl (fn (family, sorted) => insert family sorted) [] families
+  end
+
+fun remove_stale_checkpoint_families cutoff dir =
   if not (path_exists dir) then 0
   else
     let
-      fun clean_path path removed =
-        if FS.isDir path handle OS.SysErr _ => false then
-          let val removed' = clean_dir path removed
-          in remove_empty_dir path; removed' end
-        else if checkpoint_clean_artifact path andalso stale cutoff path then
-          (remove_file path; removed + 1)
+      fun remove_if_stale ({base, mtime, ...} : checkpoint_family, removed) =
+        if Time.<(mtime, cutoff) then
+          (remove_checkpoint_family_base base; removed + 1)
         else removed
-      and clean_dir path removed = List.foldl (fn (child, count) => clean_path child count) removed (children path)
+      val removed = List.foldl remove_if_stale 0 (collect_checkpoint_families dir)
+      val _ = remove_empty_dirs dir
     in
-      clean_dir dir 0
+      removed
     end
 
 val default_max_checkpoints_gb = 5
 
 fun gb_to_bytes gb = IntInf.fromInt gb * 1073741824
 
-fun file_size path = FS.fileSize path handle OS.SysErr _ => 0
-
-fun collect_checkpoint_artifacts dir =
-  if not (path_exists dir) then []
-  else
-    let
-      fun collect path acc =
-        if FS.isDir path handle OS.SysErr _ => false then
-          List.foldl (fn (child, acc') => collect child acc') acc (children path)
-        else if checkpoint_clean_artifact path then
-          (path, FS.modTime path handle OS.SysErr _ => Time.zeroTime, file_size path) :: acc
-        else acc
-    in
-      collect dir []
-    end
-
-fun total_checkpoint_bytes artifacts =
-  List.foldl (fn ((_, _, size), total) => total + size) (0 : Position.int) artifacts
-
-fun sort_by_mtime_ascending artifacts =
-  let
-    fun insert x [] = [x]
-      | insert x ((p, mt, s) :: rest) =
-          if Time.<= (#2 x, mt) then x :: (p, mt, s) :: rest
-          else (p, mt, s) :: insert x rest
-  in
-    List.foldl (fn (artifact, sorted) => insert artifact sorted) [] artifacts
-  end
-
 fun evict_oldest_checkpoints dir max_bytes =
   if max_bytes <= 0 then 0
   else
     let
-      val artifacts = collect_checkpoint_artifacts dir
-      val total = total_checkpoint_bytes artifacts
+      val families = collect_checkpoint_families dir
+      val total = total_checkpoint_bytes families
     in
       if total <= max_bytes then 0
       else
         let
-          val sorted = sort_by_mtime_ascending artifacts
+          val sorted = sort_families_by_mtime_ascending families
           fun evict remaining freed removed =
             case remaining of
                 [] => removed
-              | (path, _, size) :: rest =>
-                  if total - freed - size < max_bytes then
-                    (remove_file path; removed + 1)
-                  else
-                    (remove_file path; evict rest (freed + size) (removed + 1))
+              | ({base, bytes, ...} : checkpoint_family) :: rest =>
+                  let val freed' = freed + bytes
+                  in
+                    remove_checkpoint_family_base base;
+                    if total - freed' <= max_bytes then removed + 1
+                    else evict rest freed' (removed + 1)
+                  end
           val evicted = evict sorted 0 0
           val _ = remove_empty_dirs dir
         in
@@ -585,18 +662,12 @@ fun evict_oldest_checkpoints dir max_bytes =
         end
     end
 
-and remove_empty_dirs dir =
-  if not (path_exists dir) orelse not (FS.isDir dir handle OS.SysErr _ => false) then ()
-  else
-    (List.app remove_empty_dirs (children dir);
-     FS.rmDir dir handle OS.SysErr _ => ())
-
 fun clean_project project days max_checkpoints_gb =
   let
     val cutoff = retention_cutoff days
     val stage_removed = remove_stale_children cutoff (project_state_dir project "stage")
     val log_removed = remove_stale_children cutoff (project_state_dir project "logs")
-    val checkpoint_removed = remove_stale_checkpoint_artifacts cutoff (project_state_dir project "checkpoints")
+    val checkpoint_removed = remove_stale_checkpoint_families cutoff (project_state_dir project "checkpoints")
     val evicted = evict_oldest_checkpoints (project_state_dir project "checkpoints")
                                        (gb_to_bytes max_checkpoints_gb)
   in
@@ -2433,7 +2504,7 @@ fun enforce_checkpoint_budget project =
   in
     if evicted > 0 then
       warn ("evicted " ^ Int.toString evicted ^
-            " checkpoint artifact(s) to keep .holbuild/checkpoints under " ^
+            " checkpoint family/families to keep .holbuild/checkpoints under " ^
             Int.toString default_max_checkpoints_gb ^ "GB")
     else ()
   end
