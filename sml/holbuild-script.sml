@@ -74,6 +74,7 @@ use "sml/source_index.sml";
 use "sml/dependencies.sml";
 use "sml/build_plan.sml";
 use "sml/status.sml";
+use "sml/checkpoint_save_runtime.sml";
 use "sml/theory_checkpoints.sml";
 use "sml/checkpoint_store.sml";
 use "sml/theory_diagnostics.sml";

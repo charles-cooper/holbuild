@@ -235,7 +235,8 @@ fun runtime_reinstall_prelude {checkpoint_enabled, tactic_timeout, timeout_marke
   let
     val install =
       if new_ir then
-        ["val _ = HolbuildProofRuntime.install {checkpoint_enabled = " ^
+        ["use " ^ HolbuildToolchain.sml_string (checkpoint_save_runtime_helper_path ()) ^ ";",
+         "val _ = HolbuildProofRuntime.install {checkpoint_enabled = " ^
            (if checkpoint_enabled then "true" else "false") ^
            ", tactic_timeout = " ^ option_real_sml tactic_timeout ^
            ", timeout_marker = " ^ option_string_sml timeout_marker ^
@@ -245,7 +246,8 @@ fun runtime_reinstall_prelude {checkpoint_enabled, tactic_timeout, timeout_marke
          "val holbuild_begin_theorem = HolbuildProofRuntime.begin_theorem;",
          "val holbuild_save_theorem_context = HolbuildProofRuntime.save_theorem_context;"]
       else
-        ["val _ = HolbuildGoalfragRuntime.install {checkpoint_enabled = " ^
+        ["use " ^ HolbuildToolchain.sml_string (checkpoint_save_runtime_helper_path ()) ^ ";",
+         "val _ = HolbuildGoalfragRuntime.install {checkpoint_enabled = " ^
            (if checkpoint_enabled then "true" else "false") ^
            ", tactic_timeout = " ^ option_real_sml tactic_timeout ^
            ", timeout_marker = " ^ option_string_sml timeout_marker ^
