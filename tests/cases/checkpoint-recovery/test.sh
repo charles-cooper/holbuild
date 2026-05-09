@@ -106,6 +106,22 @@ val _ = raise Fail "expected non-goal failure";
 SML
 }
 
+write_non_goal_failure_after_first_source() {
+  cat > "$project/src/AScript.sml" <<'SML'
+open HolKernel Parse boolLib bossLib;
+val _ = new_theory "A";
+
+Theorem first:
+  T
+Proof
+  ACCEPT_TAC TRUTH
+QED
+
+val _ = print "HOL message: expected non-goal failure after first\n";
+val _ = raise Fail "expected non-goal failure after first";
+SML
+}
+
 assert_no_checkpoints() {
   if find "$project/.holbuild/checkpoints" \( -name '*.save' -o -name '*.save.ok' \) -print -quit 2>/dev/null | grep -q .; then
     echo "$1" >&2
@@ -329,6 +345,27 @@ if grep -q "Couldn't load HOL base-state\|Unable to load header" "$corrupt_deps_
 fi
 require_file "$project/.holbuild/obj/src/ATheory.dat"
 assert_no_checkpoints "clean rebuild after corrupt deps checkpoint retained checkpoint files"
+
+run_expect_suffix_failure "$tmpdir/non-goal-replay-seed.log"
+non_goal_replay_deps=$(first_deps_path)
+write_non_goal_failure_after_first_source
+force_rebuild
+non_goal_replay_log=$tmpdir/non-goal-replay.log
+if (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$non_goal_replay_log" 2>&1; then
+  echo "expected non-goal child failure after replay" >&2
+  exit 1
+fi
+require_grep "from: theorem-context checkpoint after first" "$non_goal_replay_log"
+require_grep "HOL message: expected non-goal failure after first" "$non_goal_replay_log"
+if [[ -e "$non_goal_replay_deps" || -e "$non_goal_replay_deps.ok" ]]; then
+  echo "non-goal replay failure left deps parent after discard" >&2
+  exit 1
+fi
+if find "$project/.holbuild/checkpoints/checkpointrecovery/src/AScript.sml.theorems" -type f -print -quit 2>/dev/null | grep -q .; then
+  echo "non-goal replay failure deleted deps parent but left theorem descendants" >&2
+  exit 1
+fi
+rm -rf "$project/.holbuild/checkpoints"
 
 run_expect_suffix_failure "$tmpdir/prefix-seed.log"
 write_changed_prefix_source

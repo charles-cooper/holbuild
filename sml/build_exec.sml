@@ -408,10 +408,17 @@ fun remove_checkpoint_tree path =
 fun remove_theorem_checkpoints_for_deps project node deps_key =
   remove_checkpoint_tree (theorem_checkpoints_for_deps_root project node deps_key)
 
+fun remove_deps_checkpoint_family project node deps_key deps_loaded =
+  (* Delete theorem descendants before deleting/replacing the deps parent.  A
+     deps heap path is stable for a deps_key, so surviving descendants must
+     never outlive deletion of that parent path. *)
+  (remove_theorem_checkpoints_for_deps project node deps_key;
+   remove_checkpoint deps_loaded)
+
 fun remove_checkpoint_family project node =
   (remove_legacy_checkpoint_family project node;
-   remove_checkpoint_tree (deps_checkpoint_root project node);
-   remove_checkpoint_tree (theorem_checkpoint_root project node))
+   remove_checkpoint_tree (theorem_checkpoint_root project node);
+   remove_checkpoint_tree (deps_checkpoint_root project node))
 
 fun path_exists path = FS.access(path, []) handle OS.SysErr _ => false
 
@@ -541,8 +548,8 @@ fun checkpoint_family_base path =
   end
 
 fun remove_checkpoint_family_base base =
-  (remove_checkpoint_tree (base ^ ".deps");
-   remove_checkpoint_tree (base ^ ".theorems");
+  (remove_checkpoint_tree (base ^ ".theorems");
+   remove_checkpoint_tree (base ^ ".deps");
    remove_checkpoint (base ^ ".final_context.save");
    remove_checkpoint base)
 
@@ -770,8 +777,7 @@ fun remove_checkpoints paths =
 
 fun remove_invalid_checkpoints project node deps_key deps_loaded paths =
   if List.exists (fn path => path = deps_loaded) paths then
-    (remove_checkpoint deps_loaded;
-     remove_theorem_checkpoints_for_deps project node deps_key)
+    remove_deps_checkpoint_family project node deps_key deps_loaded
   else
     remove_checkpoints paths
 
@@ -1761,7 +1767,7 @@ fun build_theory cache_allowed policy tc project base_context plan keys toolchai
           | [] => Error (with_detail ("tactic timed out while building " ^ logical_name node))
       end
     fun discard_failure_checkpoints () =
-      List.app remove_checkpoint (#failure_checkpoints run_spec)
+      remove_invalid_checkpoints project node deps_key deps_loaded (#failure_checkpoints run_spec)
     fun checkpoint_failure_error msg =
       let
         val failure_log = preserve_checkpoint_failure_log project node input_key stage
