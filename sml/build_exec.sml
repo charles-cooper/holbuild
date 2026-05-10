@@ -1446,6 +1446,12 @@ fun failed_prefix_checkpoint checkpoint =
       | _ => NONE
   else NONE
 
+fun remove_failed_prefix_checkpoint ({failed_prefix_path, ...} : HolbuildTheoryCheckpoints.checkpoint) =
+  remove_checkpoint failed_prefix_path
+
+fun remove_failed_prefix_checkpoints checkpoints =
+  List.app remove_failed_prefix_checkpoint checkpoints
+
 fun later_failed_prefix_candidate (a, b) =
   if #boundary (#checkpoint a) >= #boundary (#checkpoint b) then a else b
 
@@ -2121,10 +2127,12 @@ fun build_theory_node (options : build_options) tc project base_context plan key
         val termination_diagnostics = termination_diagnostics_for_node policy node source_text
       in
         ((build_theory cache_allowed policy tc project base_context plan keys toolchain_key node source_text theorem_checkpoints termination_diagnostics;
+          remove_failed_prefix_checkpoints theorem_checkpoints;
           write_metadata policy project plan keys input_key toolchain_key node metadata_checkpoints;
           HolbuildStatus.Built)
          handle RetryInvalidCheckpoint =>
            (build_theory cache_allowed policy tc project base_context plan keys toolchain_key node source_text theorem_checkpoints termination_diagnostics;
+            remove_failed_prefix_checkpoints theorem_checkpoints;
             write_metadata policy project plan keys input_key toolchain_key node metadata_checkpoints;
             HolbuildStatus.Built))
         handle GoalfragPlanPrinted => HolbuildStatus.Inspected

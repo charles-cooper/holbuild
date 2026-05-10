@@ -535,6 +535,11 @@ failure_fixed_log=$tmpdir/failure-fixed.log
 (cd "$failure_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$failure_fixed_log" 2>&1
 require_grep "from: failed-prefix checkpoint in b_thm" "$failure_fixed_log"
 require_grep "ATheory built" "$failure_fixed_log"
+if [[ -e "$b_thm_failed_prefix" || -e "$b_thm_failed_prefix.ok" || \
+      -e "$b_thm_failed_prefix.meta" || -e "$b_thm_failed_prefix.prefix" ]]; then
+  echo "successful proof fix retained stale failed-prefix checkpoint" >&2
+  exit 1
+fi
 if [[ -e "$failure_project/.holbuild/checkpoints/replay/src/AScript.sml.b_thm_context.save" || \
       -e "$failure_project/.holbuild/checkpoints/replay/src/AScript.sml.b_thm_context.save.ok" || \
       -e "$failure_project/.holbuild/checkpoints/replay/src/AScript.sml.b_thm_end_of_proof.save" || \
