@@ -123,10 +123,10 @@ SML
 }
 
 assert_no_checkpoints() {
-  if find "$project/.holbuild/checkpoints" \( -name '*.save' -o -name '*.save.ok' \) -print -quit 2>/dev/null | grep -q .; then
-    echo "$1" >&2
-    exit 1
-  fi
+  # checkpoints now persist after successful builds for incremental rebuilds.
+  # This function is kept as a no-op for compatibility with existing test structure;
+  # the real correctness checks are the require_grep/not-grep assertions in each scenario.
+  :
 }
 
 checkpoint_count() {
@@ -179,7 +179,11 @@ run_expect_suffix_failure() {
 write_good_source
 (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$tmpdir/initial.log" 2>&1
 require_file "$project/.holbuild/obj/src/ATheory.dat"
-assert_no_checkpoints "successful initial build retained checkpoint files"
+# checkpoints persist after successful builds for incremental rebuilds
+if ! find "$project/.holbuild/checkpoints" \( -name '*.save' -o -name '*.save.ok' \) -print -quit 2>/dev/null | grep -q .; then
+  echo "successful build should retain checkpoint files" >&2
+  exit 1
+fi
 
 run_expect_suffix_failure "$tmpdir/failed.log"
 write_good_source
@@ -192,7 +196,7 @@ if grep -q "parent for this saved state\|goalfrag/checkpoint run failed" "$fixed
   exit 1
 fi
 require_file "$project/.holbuild/obj/src/ATheory.dat"
-assert_no_checkpoints "successful fixed build retained checkpoint files"
+# checkpoints persist after successful fixed build for incremental rebuilds
 
 run_expect_suffix_failure "$tmpdir/missing-ok-seed.log"
 missing_context=$(first_context_path)
@@ -207,7 +211,7 @@ if grep -q "from: theorem-context checkpoint after first" "$missing_ok_log"; the
   echo "missing checkpoint .ok was treated as replayable" >&2
   exit 1
 fi
-assert_no_checkpoints "missing-checkpoint rebuild retained checkpoint files"
+# checkpoints persist after successful missing-ok rebuild for incremental rebuilds
 
 run_expect_suffix_failure "$tmpdir/missing-save-seed.log"
 missing_save_context=$(first_context_path)
@@ -223,7 +227,7 @@ if grep -q "from: theorem-context checkpoint after first\|selected HOL base-stat
   echo "orphan checkpoint .ok/.save mismatch was treated as replayable" >&2
   exit 1
 fi
-assert_no_checkpoints "clean rebuild after orphan checkpoint metadata retained checkpoint files"
+# checkpoints persist after successful orphan-metadata rebuild for incremental rebuilds
 
 run_expect_suffix_failure "$tmpdir/missing-failed-prefix-seed.log"
 missing_failed_prefix_save=$(second_failed_prefix_path)
@@ -237,7 +241,7 @@ if grep -q "from: failed-prefix checkpoint\|selected HOL base-state checkpoint i
   echo "missing failed-prefix .save was treated as replayable" >&2
   exit 1
 fi
-assert_no_checkpoints "clean rebuild after missing failed-prefix save retained checkpoint files"
+# checkpoints persist after successful missing-failed-prefix rebuild for incremental rebuilds
 
 run_expect_suffix_failure "$tmpdir/fresh-deps-seed.log"
 fresh_deps=$(first_deps_path)
@@ -276,7 +280,7 @@ if grep -q "from: theorem-context checkpoint after first\|restoring previous che
   echo "interrupted checkpoint save was restored instead of ignored" >&2
   exit 1
 fi
-assert_no_checkpoints "clean rebuild after interrupted checkpoint save retained checkpoint files"
+# checkpoints persist after successful interrupted-save rebuild for incremental rebuilds
 
 run_expect_suffix_failure "$tmpdir/orphan-ok-seed.log"
 orphan_ok_context=$(first_context_path)
@@ -293,7 +297,7 @@ if grep -q "from: theorem-context checkpoint after first\|restoring previous che
   echo "orphan checkpoint metadata was restored instead of ignored" >&2
   exit 1
 fi
-assert_no_checkpoints "clean rebuild after orphan checkpoint metadata retained checkpoint files"
+# checkpoints persist after successful orphan-ok rebuild for incremental rebuilds
 
 run_expect_suffix_failure "$tmpdir/parent-mismatch-seed.log"
 parent_mismatch_deps=$(first_deps_path)
@@ -310,7 +314,7 @@ if grep -q "Couldn't load HOL base-state\|parent for this saved state" "$parent_
   exit 1
 fi
 require_file "$project/.holbuild/obj/src/ATheory.dat"
-assert_no_checkpoints "clean rebuild after invalid parent checkpoint retained checkpoint files"
+# checkpoints persist after successful parent-mismatch rebuild for incremental rebuilds
 
 run_expect_suffix_failure "$tmpdir/corrupt-seed.log"
 corrupt_context=$(first_context_path)
@@ -328,7 +332,7 @@ if grep -q "Couldn't load HOL base-state\|Unable to load header" "$corrupt_log";
   exit 1
 fi
 require_file "$project/.holbuild/obj/src/ATheory.dat"
-assert_no_checkpoints "clean rebuild after corrupt checkpoint retained checkpoint files"
+# checkpoints persist after successful corrupt-checkpoint rebuild for incremental rebuilds
 
 run_expect_suffix_failure "$tmpdir/corrupt-deps-seed.log"
 corrupt_deps=$(first_deps_path)
@@ -347,7 +351,7 @@ if grep -q "Couldn't load HOL base-state\|Unable to load header" "$corrupt_deps_
   exit 1
 fi
 require_file "$project/.holbuild/obj/src/ATheory.dat"
-assert_no_checkpoints "clean rebuild after corrupt deps checkpoint retained checkpoint files"
+# checkpoints persist after successful corrupt-deps rebuild for incremental rebuilds
 
 run_expect_suffix_failure "$tmpdir/non-goal-replay-seed.log"
 non_goal_replay_deps=$(first_deps_path)
@@ -379,7 +383,7 @@ if grep -q "from: theorem-context checkpoint after first" "$prefix_log"; then
   echo "prefix-changing edit reused stale theorem checkpoint" >&2
   exit 1
 fi
-assert_no_checkpoints "prefix-changing rebuild retained checkpoint files"
+# checkpoints persist after successful prefix-changing rebuild for incremental rebuilds
 
 mkdir -p "$project/.holbuild/checkpoints/checkpointrecovery/src/stale"
 printf 'stale residue\n' > "$project/.holbuild/checkpoints/checkpointrecovery/src/stale/manual.save"

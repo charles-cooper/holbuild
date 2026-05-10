@@ -52,8 +52,8 @@ if strings -a "$project/.holbuild/obj/src/ATheory.dat" | grep -q '\.holbuild.*st
   exit 1
 fi
 require_file "$project/.holbuild/dep/basic/src/AScript.sml.key"
-if find "$project/.holbuild/checkpoints" \( -name '*.save' -o -name '*.save.ok' \) -print -quit 2>/dev/null | grep -q .; then
-  echo "successful build retained checkpoint files" >&2
+if ! find "$project/.holbuild/checkpoints" \( -name '*.save' -o -name '*.save.ok' \) -print -quit 2>/dev/null | grep -q .; then
+  echo "successful build should retain checkpoint files for incremental rebuilds" >&2
   exit 1
 fi
 if grep -q "deps_loaded=\|final_context=\|theorem_boundary" "$project/.holbuild/dep/basic/src/AScript.sml.key"; then
@@ -116,10 +116,8 @@ require_grep "ATheory restored from cache" "$cache_log"
 require_file "$project/.holbuild/gen/src/ATheory.sig"
 require_file "$project/.holbuild/gen/src/ATheory.sml"
 require_file "$project/.holbuild/obj/src/ATheory.dat"
-if find "$project/.holbuild/checkpoints" \( -name '*.save' -o -name '*.save.ok' \) -print -quit 2>/dev/null | grep -q .; then
-  echo "cache restore retained checkpoint files" >&2
-  exit 1
-fi
+# cache restore does not create checkpoints (no HOL process runs),
+# but previously-saved checkpoints persist for incremental rebuilds
 if [[ ! "$cache_manifest" -nt "$cache_hit_marker" ]]; then
   echo "cache hit did not refresh action manifest retention time" >&2
   exit 1

@@ -168,8 +168,9 @@ if grep -q "theorem_boundary\|_end_of_proof.save\|deps_loaded=\|final_context=" 
   echo "successful metadata retained checkpoint paths" >&2
   exit 1
 fi
-if find "$project/.holbuild/checkpoints" \( -name '*.save' -o -name '*.save.ok' \) -print -quit 2>/dev/null | grep -q .; then
-  echo "successful theorem build retained checkpoint files" >&2
+# checkpoints persist after successful builds for incremental rebuilds
+if ! find "$project/.holbuild/checkpoints" -path '*_context.save' -print -quit 2>/dev/null | grep -q .; then
+  echo "successful theorem build should retain theorem context checkpoints" >&2
   exit 1
 fi
 
@@ -266,10 +267,8 @@ if grep -q "theorem_boundary a_thm" "$skip_goalfrag_project/.holbuild/dep/replay
   echo "--skip-goalfrag should not create theorem boundaries" >&2
   exit 1
 fi
-if find "$skip_goalfrag_project/.holbuild/checkpoints" \( -name '*.save' -o -name '*.save.ok' \) -print -quit 2>/dev/null | grep -q .; then
-  echo "--skip-goalfrag successful build retained checkpoints" >&2
-  exit 1
-fi
+# --skip-goalfrag does not create theorem context checkpoints,
+# but deps/final-context checkpoints persist for incremental rebuilds
 
 plain_replay_project=$tmpdir/plain-replay-project
 mkdir -p "$plain_replay_project/src"

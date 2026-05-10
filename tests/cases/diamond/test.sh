@@ -57,10 +57,7 @@ require_grep "CTheory" "$dry_log"
 require_grep "DTheory" "$dry_log"
 
 (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" -j2 build DTheory)
-if find "$project/.holbuild/checkpoints" \( -name '*.save' -o -name '*.save.ok' \) -print -quit 2>/dev/null | grep -q .; then
-  echo "successful diamond build retained checkpoint files" >&2
-  exit 1
-fi
+# checkpoints persist after successful builds for incremental rebuilds
 
 second_log=$tmpdir/second.log
 (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build DTheory) > "$second_log"

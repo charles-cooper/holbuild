@@ -1236,7 +1236,6 @@ fun materialize_theory_cache_key project plan input_key cache_key node =
        write_text sml_path (replace_all cache_sml_token data_path (read_text template));
        write_text (hfs_remapped_path sml_path) (read_text sml_path);
        write_local_theory_manifests plan node mldeps;
-       remove_checkpoint_family project node;
        HolbuildCache.touch manifest;
        cache_trace ("cache hit: " ^ logical_name node ^ " " ^ role ^ "=" ^ cache_key);
        true)
@@ -2109,12 +2108,10 @@ fun build_theory_node (options : build_options) tc project base_context plan key
     if not force andalso not (always_reexecute node) andalso
        up_to_date policy project plan keys input_key toolchain_key node metadata_checkpoints then
       (remove_tree_if_exists stage;
-       remove_checkpoint_family project node;
        HolbuildStatus.UpToDate)
     else if cache_restore_allowed andalso materialize_valid_cache () then
       (remove_tree stage;
        write_metadata policy project plan keys input_key toolchain_key node metadata_checkpoints;
-       remove_checkpoint_family project node;
        HolbuildStatus.Restored)
     else
       let
@@ -2125,12 +2122,10 @@ fun build_theory_node (options : build_options) tc project base_context plan key
       in
         ((build_theory cache_allowed policy tc project base_context plan keys toolchain_key node source_text theorem_checkpoints termination_diagnostics;
           write_metadata policy project plan keys input_key toolchain_key node metadata_checkpoints;
-          remove_checkpoint_family project node;
           HolbuildStatus.Built)
          handle RetryInvalidCheckpoint =>
            (build_theory cache_allowed policy tc project base_context plan keys toolchain_key node source_text theorem_checkpoints termination_diagnostics;
             write_metadata policy project plan keys input_key toolchain_key node metadata_checkpoints;
-            remove_checkpoint_family project node;
             HolbuildStatus.Built))
         handle GoalfragPlanPrinted => HolbuildStatus.Inspected
       end
