@@ -57,21 +57,44 @@ fun json_string_field name value =
 fun json_int_field name value =
   "\"" ^ name ^ "\":" ^ Int.toString value
 
+fun json_bool_field name value =
+  "\"" ^ name ^ "\":" ^ (if value then "true" else "false")
+
+fun json_object_field name fields =
+  "\"" ^ name ^ "\":{" ^ String.concatWith "," fields ^ "}"
+
 fun json_optional_string_field name value =
   case value of
       NONE => []
     | SOME text => [json_string_field name text]
 
+fun json_optional_int_field name value =
+  case value of
+      NONE => []
+    | SOME n => [json_int_field name n]
+
+fun json_optional_bool_field name value =
+  case value of
+      NONE => []
+    | SOME b => [json_bool_field name b]
+
 fun short_hash text = String.substring(HolbuildHash.string_sha1 text, 0, 12)
 
 fun json_node_key key label = label ^ "#" ^ short_hash key
 
-fun json_node_metadata key =
+fun json_node_package_source key =
   case String.fields (fn c => c = #"\000") key of
-      [package, source, _] =>
+      [package, source, _] => SOME {package = package, source = source}
+    | _ => NONE
+
+fun json_node_metadata key =
+  case json_node_package_source key of
+      SOME {package, source} =>
         json_optional_string_field "package" (SOME package) @
         json_optional_string_field "source" (SOME source)
-    | _ => []
+    | NONE => []
+
+fun json_node_source key = Option.map #source (json_node_package_source key)
 
 fun json_node_fields key label =
   [json_string_field "key" (json_node_key key label),
@@ -98,6 +121,121 @@ fun log_path_from_message message =
 
 fun json_log_field message = json_optional_string_field "log" (log_path_from_message message)
 
+fun find_substring needle haystack =
+  let
+    val n = size needle
+    val h = size haystack
+    fun at i = i + n <= h andalso String.substring(haystack, i, n) = needle
+    fun loop i = if i + n > h then NONE else if at i then SOME i else loop (i + 1)
+  in
+    if n = 0 then NONE else loop 0
+  end
+
+fun parse_decimal_prefix text start =
+  let
+    val n = size text
+    fun scan i =
+      if i < n andalso Char.isDigit (String.sub(text, i)) then scan (i + 1) else i
+    val stop = scan start
+  in
+    if stop = start then NONE
+    else Int.fromString (String.substring(text, start, stop - start))
+  end
+
+fun first_some f values =
+  case values of
+      [] => NONE
+    | x :: xs =>
+        case f x of
+            SOME y => SOME y
+          | NONE => first_some f xs
+
+fun line_after prefix line =
+  if String.isPrefix prefix line then SOME (String.extract(line, size prefix, NONE)) else NONE
+
+fun first_line_after prefix lines = first_some (line_after prefix) lines
+
+fun take_before marker text =
+  case find_substring marker text of
+      NONE => text
+    | SOME i => String.substring(text, 0, i)
+
+fun failure_kind message =
+  if String.isSubstring "tactic timed out" message then "tactic_timeout"
+  else if String.isSubstring "termination condition goal" message orelse
+          String.isSubstring "\ntermination: " message orelse String.isPrefix "termination: " message then
+    "termination_failure"
+  else if String.isSubstring "HOL source parse error" message orelse
+          String.isSubstring ": parse error:" message then
+    "parse_error"
+  else if String.isSubstring "static error:" message orelse String.isSubstring ": error:" message then
+    "type_error"
+  else if String.isSubstring "failed tactic top input goal:" message orelse
+          String.isSubstring "\ntheorem: " message orelse String.isPrefix "theorem: " message orelse
+          String.isSubstring "\nplan position: " message then
+    "proof_failure"
+  else if String.isSubstring "child failure:" message orelse
+          String.isSubstring "child log:" message orelse
+          String.isSubstring "Couldn't load HOL base-state" message orelse
+          String.isSubstring "Uncaught exception" message then
+    "child_failure"
+  else "unknown"
+
+fun theorem_from_lines lines =
+  Option.map (fn text => take_before " (line " text)
+             (first_line_after "theorem: " lines)
+
+fun plan_position_from_lines lines = first_line_after "plan position: " lines
+
+fun input_goal_count_from_lines lines =
+  Option.mapPartial (fn text => parse_decimal_prefix text 0)
+                    (first_line_after "failed tactic input goals: " lines)
+
+fun top_goal_truncated message =
+  if String.isSubstring "top goal exceeded 4 KiB" message then SOME true else NONE
+
+fun source_location_from_line line =
+  case line_after "source: " line of
+      NONE => NONE
+    | SOME rest =>
+        let
+          val n = size rest
+          fun scan i =
+            if i >= n then NONE
+            else if String.sub(rest, i) = #":" then
+              case parse_decimal_prefix rest (i + 1) of
+                  SOME line_no => SOME {file = String.substring(rest, 0, i), line = line_no}
+                | NONE => scan (i + 1)
+            else scan (i + 1)
+        in
+          scan 0
+        end
+
+fun source_location_from_lines lines = first_some source_location_from_line lines
+
+fun json_failure_fields source_override message =
+  let
+    val lines = String.fields (fn c => c = #"\n") message
+    val source_location = source_location_from_lines lines
+    val source_file =
+      case source_override of
+          SOME source => SOME source
+        | NONE => Option.map #file source_location
+    val source_line = Option.map #line source_location
+  in
+    [json_string_field "kind" (failure_kind message)] @
+    json_optional_string_field "theorem" (theorem_from_lines lines) @
+    json_optional_string_field "source_file" source_file @
+    json_optional_int_field "source_line" source_line @
+    json_optional_string_field "plan_position" (plan_position_from_lines lines) @
+    json_optional_int_field "input_goal_count" (input_goal_count_from_lines lines) @
+    json_optional_bool_field "top_goal_truncated" (top_goal_truncated message)
+  end
+
+fun json_failure_field message = [json_object_field "failure" (json_failure_fields NONE message)]
+fun json_failure_field_for_node key message =
+  [json_object_field "failure" (json_failure_fields (json_node_source key) message)]
+
 fun json_fields fields = "{" ^ String.concatWith "," fields ^ "}\n"
 
 fun emit_json stream event fields =
@@ -113,7 +251,7 @@ fun json_message stream_name stream text =
      json_string_field "message" text]
 
 fun error msg =
-  emit_json TextIO.stdErr "error" (json_string_field "message" msg :: json_log_field msg)
+  emit_json TextIO.stdErr "error" (json_string_field "message" msg :: json_log_field msg @ json_failure_field msg)
 
 fun env_truthy s = s = "1" orelse s = "true" orelse s = "yes" orelse s = "on"
 fun env_falsey s = s = "0" orelse s = "false" orelse s = "no" orelse s = "off"
@@ -384,7 +522,7 @@ fun fail status key label msg =
              (active := remove_active key (!active);
               if json_mode () then
                 emit_json TextIO.stdOut "node_failed"
-                  (json_node_fields key label @ json_log_field msg)
+                  (json_node_fields key label @ json_log_field msg @ json_failure_field_for_node key msg)
               else if enabled then
                 (TextIO.output (TextIO.stdOut, "\r" ^ clear_to_eol);
                  TextIO.flushOut TextIO.stdOut)

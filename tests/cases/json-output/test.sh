@@ -79,16 +79,19 @@ fi
 bad_project=$tmpdir/bad-project
 mkdir -p "$bad_project/src"
 cp "$project/holproject.toml" "$bad_project/holproject.toml"
-cat > "$bad_project/src/BadScript.sml" <<'SML'
-open HolKernel Parse boolLib bossLib;
+python3 - <<PY
+from pathlib import Path
+long_goal = "p" * 5000
+Path("$bad_project/src/BadScript.sml").write_text(f'''open HolKernel Parse boolLib bossLib;
 val _ = new_theory "Bad";
 Theorem bad_thm:
-  T
+  {long_goal}
 Proof
   FAIL_TAC "json failure"
 QED
 val _ = export_theory();
-SML
+''')
+PY
 
 fail_log=$tmpdir/fail.log
 if (cd "$bad_project" && "$HOLBUILD_BIN" --json --holdir "$HOLDIR" build BadTheory) > "$fail_log" 2>&1; then
@@ -98,6 +101,7 @@ fi
 
 python3 - "$fail_log" <<'PY'
 import json
+import os
 import sys
 
 path = sys.argv[1]
@@ -123,10 +127,37 @@ failed = [e for e in events if e.get('event') == 'node_failed' and e.get('target
 if not failed:
     raise SystemExit('missing node_failed event')
 for event in failed:
-    if not event.get('log'):
+    log = event.get('log')
+    if not log:
         raise SystemExit(f'node_failed missing log field: {event!r}')
+    if not os.path.exists(log):
+        raise SystemExit(f'node_failed log does not exist at command exit: {log!r}')
     if event.get('package') != 'json-output' or event.get('source') != 'src/BadScript.sml':
         raise SystemExit(f'node_failed lost source metadata: {event!r}')
     if '\x00' in event.get('key', '') or '\\u0000' in event.get('key', ''):
         raise SystemExit(f'node_failed key exposes internal NUL key: {event!r}')
+    failure = event.get('failure')
+    if not isinstance(failure, dict):
+        raise SystemExit(f'node_failed missing failure object: {event!r}')
+    if failure.get('kind') != 'proof_failure':
+        raise SystemExit(f'unexpected failure kind: {failure!r}')
+    if failure.get('theorem') != 'bad_thm':
+        raise SystemExit(f'failure lost theorem name: {failure!r}')
+    if failure.get('source_file') != 'src/BadScript.sml' or not isinstance(failure.get('source_line'), int):
+        raise SystemExit(f'failure lost source location: {failure!r}')
+    if 'FAIL_TAC "json failure"' not in failure.get('plan_position', ''):
+        raise SystemExit(f'failure lost plan position: {failure!r}')
+    if failure.get('input_goal_count') != 1:
+        raise SystemExit(f'failure lost input goal count: {failure!r}')
+    if failure.get('top_goal_truncated') is not True:
+        raise SystemExit(f'failure did not report top-goal truncation: {failure!r}')
+    log_text = open(log, encoding='utf-8', errors='replace').read()
+    for marker in [
+        'holbuild failed tactic input goal count: 1',
+        'holbuild failed tactic top input goal:',
+        'holbuild end failed tactic top input goal',
+        'p' * 5000,
+    ]:
+        if marker not in log_text:
+            raise SystemExit(f'failure log missing marker {marker[:80]!r}')
 PY
