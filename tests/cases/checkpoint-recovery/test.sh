@@ -154,6 +154,10 @@ second_failed_prefix_path() {
 
 run_expect_suffix_failure() {
   local log=$1
+  # Isolate each recovery scenario. Successful builds intentionally retain
+  # checkpoints now, so path helpers like first_context_path can otherwise find
+  # an older prefix's checkpoint instead of the one this scenario corrupts.
+  rm -rf "$project/.holbuild/checkpoints"
   write_bad_suffix_source
   if (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$log" 2>&1; then
     echo "expected second theorem failure" >&2
