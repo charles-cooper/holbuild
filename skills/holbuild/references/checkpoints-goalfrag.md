@@ -125,13 +125,14 @@ These are local project state, never the semantic identity of a build.
 
 ## JSON failure evidence
 
-With `--json`, failures are emitted as structured `error`/`node_failed` events on stdout/stderr as JSONL. Events carry `target`, `key`, `package`, and `source` where applicable so consumers can demux parallel builds by theory without separate log files. JSON mode does not retain or expose child/instrumented log paths. `node_failed.failure` may include:
+With `--json`, failures are emitted as structured `error`/`node_failed` JSONL events on stdout. Events carry `target`, `key`, `package`, and `source` where applicable so consumers can demux parallel builds by theory without separate log files. JSON mode does not retain or expose child/instrumented log paths by default. `build --retain-debug-artifacts` retains durable failure logs for human/harness debugging and reports them as `debug_artifacts.log`; these logs may contain full goals/output and are not bounded agent evidence. Internal stage directories are still cleaned. `node_failed.failure` may include:
 
 - `kind`: `proof_failure`, `tactic_timeout`, `termination_failure`, `parse_error`, `type_error`, `child_failure`, or `unknown`
 - `theorem`, `source_file`, `source_line`
 - `plan_position`
 - `input_goal_count`
 - `top_goal_truncated`
+- `top_goal_preview_bytes`, `evidence_mode = "preview_only"` when goal evidence is truncated
 
 ## Environment variables
 

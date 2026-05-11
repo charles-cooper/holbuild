@@ -47,7 +47,8 @@ members = ["src"]
 | `--skip-goalfrag` | No theorem instrumentation/proof IR; incompatible with timeout/plan/trace flags |
 | `--goalfrag` | Use legacy HOL GoalFrag runtime instead of default proof IR |
 | `--tactic-timeout SECONDS` | Root-package per-step timeout (default 2.5s, `0` disables); also manifest/local-config settable |
-| `--json` | Newline-delimited streaming JSON build events/errors on stdout; no retained log paths; not supported for dry-run/plan/trace/repl-on-failure |
+| `--json` | Newline-delimited streaming JSON build events/errors on stdout; no retained log paths by default; not supported for dry-run/plan/trace/repl-on-failure |
+| `--retain-debug-artifacts` | With `--json build`, retain durable failure logs and expose `debug_artifacts.log`; stage dirs still cleaned |
 | `--verbose` | Node start and per-node elapsed logs in non-TTY output |
 
 ## Output layout

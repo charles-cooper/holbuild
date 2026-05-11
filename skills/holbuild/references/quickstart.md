@@ -39,7 +39,8 @@ holbuild context                         # show manifest info
 holbuild execution-plan FooTheory:thm    # static proof-IR plan
 holbuild goalfrag-plan FooTheory:thm     # static legacy GoalFrag plan
 holbuild build --force --goalfrag-trace FooTheory
-holbuild --json build FooTheory          # JSON events/errors for build output
+holbuild --json build FooTheory          # bounded JSON events/errors for build output
+holbuild --json build --retain-debug-artifacts FooTheory  # also retain/report failure logs
 ```
 
 ## Global flags
@@ -48,7 +49,7 @@ holbuild --json build FooTheory          # JSON events/errors for build output
 - `--source-dir PATH` — source tree for manifest discovery; `.holbuild/` artifacts are written under the shell cwd
 - `--maxheap MB` / `--max-heap MB` — pass Poly/ML max heap to child HOL processes
 - `-jN` / `--jobs N` — parallel workers. Default: `.holconfig.toml [build].jobs` or `max(1, nproc/2)`
-- `--json` — newline-delimited streaming JSON `message`, `node_started`, `node_finished`, `node_failed`, `build_finished`, and `error` events on stdout (build only; no retained log paths; not dry-run/plan/trace/repl-on-failure)
+- `--json` — newline-delimited streaming JSON `message`, `node_started`, `node_finished`, `node_failed`, `build_finished`, and `error` events on stdout (build only; no retained log paths by default; not dry-run/plan/trace/repl-on-failure)
 - `--verbose` — node start and per-node elapsed logs when the live TTY status line is disabled
 
 ## Build flags
@@ -60,6 +61,7 @@ holbuild --json build FooTheory          # JSON events/errors for build output
 - `--goalfrag` — use the legacy HOL GoalFrag runtime instead of default proof IR
 - `--tactic-timeout SECONDS` — per-step timeout for root package (default 2.5s, `0` disables)
 - `--repl-on-failure` — serial build; on theory failure, start `hol repl` from failed-prefix or replay/deps checkpoint (requires checkpoints; no JSON)
+- `--retain-debug-artifacts` — with `--json build`, retain durable failure logs and report `debug_artifacts.log`; logs may contain full goals/output, stage dirs are still cleaned
 
 **Incompatible**: `--skip-goalfrag` + `--tactic-timeout`/`--goalfrag-plan`/`--goalfrag-trace`; `--json` + dry-run/plan/repl-on-failure.
 
