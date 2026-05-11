@@ -101,26 +101,6 @@ fun json_node_fields key label =
    json_string_field "target" label] @
   json_node_metadata key
 
-val instrumented_log_prefix = "instrumented log: "
-
-fun line_suffix prefix line =
-  if String.isPrefix prefix line then
-    SOME (String.extract(line, size prefix, NONE))
-  else NONE
-
-fun first_log_path lines =
-  case lines of
-      [] => NONE
-    | line :: rest =>
-        (case line_suffix instrumented_log_prefix line of
-             SOME path => SOME path
-           | NONE => first_log_path rest)
-
-fun log_path_from_message message =
-  first_log_path (String.fields (fn c => c = #"\n") message)
-
-fun json_log_field message = json_optional_string_field "log" (log_path_from_message message)
-
 fun find_substring needle haystack =
   let
     val n = size needle
@@ -238,20 +218,20 @@ fun json_failure_field_for_node key message =
 
 fun json_fields fields = "{" ^ String.concatWith "," fields ^ "}\n"
 
-fun emit_json stream event fields =
+fun emit_json event fields =
   (Mutex.lock json_mutex;
-   (TextIO.output(stream, json_fields (json_string_field "event" event :: fields));
-    TextIO.flushOut stream)
+   (TextIO.output(TextIO.stdOut, json_fields (json_string_field "event" event :: fields));
+    TextIO.flushOut TextIO.stdOut)
    before Mutex.unlock json_mutex)
   handle e => (Mutex.unlock json_mutex; raise e)
 
-fun json_message stream_name stream text =
-  emit_json stream "message"
+fun json_message stream_name text =
+  emit_json "message"
     [json_string_field "stream" stream_name,
      json_string_field "message" text]
 
 fun error msg =
-  emit_json TextIO.stdErr "error" (json_string_field "message" msg :: json_log_field msg @ json_failure_field msg)
+  emit_json "error" (json_string_field "message" msg :: json_failure_field msg)
 
 fun env_truthy s = s = "1" orelse s = "true" orelse s = "yes" orelse s = "on"
 fun env_falsey s = s = "0" orelse s = "false" orelse s = "no" orelse s = "off"
@@ -430,7 +410,7 @@ fun start_node status key label =
           else
             (active := {key = key, label = label, started_at = Time.now ()} :: remove_active key (!active);
              if json_mode () then
-               emit_json TextIO.stdOut "node_started" (json_node_fields key label)
+               emit_json "node_started" (json_node_fields key label)
              else if enabled then redraw status
              else if verbose_mode () then
                (TextIO.output (TextIO.stdOut, label ^ " started\n");
@@ -451,7 +431,7 @@ fun finish_node status key label outcome =
              count_outcome status outcome;
              active := remove_active key (!active);
              if json_mode () then
-               emit_json TextIO.stdOut "node_finished"
+               emit_json "node_finished"
                  (json_node_fields key label @
                   [json_string_field "outcome" (outcome_text outcome),
                    json_int_field "finished" (!finished),
@@ -472,7 +452,7 @@ fun finish status =
            if !ended then ()
            else
              (if json_mode () then
-                emit_json TextIO.stdOut "build_finished"
+                emit_json "build_finished"
                   [json_int_field "elapsed_ms" (elapsed_ms status),
                    json_int_field "total" total,
                    json_int_field "built" (!built),
@@ -489,7 +469,7 @@ fun finish status =
    current_status := NONE)
 
 fun message_to stream_name stream text =
-  if json_mode () then json_message stream_name stream text
+  if json_mode () then json_message stream_name text
   else
     case !current_status of
         NONE => (TextIO.output (stream, text); TextIO.flushOut stream)
@@ -521,8 +501,8 @@ fun fail status key label msg =
            else
              (active := remove_active key (!active);
               if json_mode () then
-                emit_json TextIO.stdOut "node_failed"
-                  (json_node_fields key label @ json_log_field msg @ json_failure_field_for_node key msg)
+                emit_json "node_failed"
+                  (json_node_fields key label @ json_failure_field_for_node key msg)
               else if enabled then
                 (TextIO.output (TextIO.stdOut, "\r" ^ clear_to_eol);
                  TextIO.flushOut TextIO.stdOut)

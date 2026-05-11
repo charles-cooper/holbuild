@@ -64,6 +64,24 @@ fun generator_stem package generator =
 fun metadata_path package generator = generator_stem package generator ^ ".key"
 fun log_path package generator = generator_stem package generator ^ ".log"
 
+fun remove_file path = FS.remove path handle OS.SysErr _ => ()
+
+fun command_output_path package generator =
+  if HolbuildStatus.json_mode () then FS.tmpName () else log_path package generator
+
+fun generator_output_detail output =
+  if HolbuildStatus.json_mode () then
+    let val text = read_text output handle _ => ""
+    in
+      if text = "" then ""
+      else "\n--- generator output ---\n" ^ text ^ "--- end generator output ---\n"
+    end
+  else
+    "; log: " ^ output
+
+fun cleanup_command_output output =
+  if HolbuildStatus.json_mode () then remove_file output else ()
+
 fun dependency_result deps name =
   case List.find (fn (dep_name, _) => dep_name = name) deps of
       SOME (_, result) => result
@@ -132,16 +150,22 @@ fun ensure_output_parents package generator =
 
 fun run_command package generator =
   let
-    val log = log_path package generator
-    val _ = ensure_parent log
+    val output = command_output_path package generator
+    val _ = ensure_parent output
     val _ = ensure_output_parents package generator
     val status = HolbuildToolchain.run_in_dir_to_file
                    (HolbuildProject.package_root package)
                    (HolbuildProject.generator_command generator)
-                   log
+                   output
   in
-    if HolbuildToolchain.success status then ()
-    else die ("generator " ^ HolbuildProject.generator_name generator ^ " failed; log: " ^ log)
+    if HolbuildToolchain.success status then
+      cleanup_command_output output
+    else
+      let val detail = generator_output_detail output
+          val _ = cleanup_command_output output
+      in
+        die ("generator " ^ HolbuildProject.generator_name generator ^ " failed" ^ detail)
+      end
   end
 
 fun verify_outputs package generator =

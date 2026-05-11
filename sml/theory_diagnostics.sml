@@ -493,31 +493,37 @@ fun truncate_goal_state text =
 fun remaining_goals_summary NONE = ""
   | remaining_goals_summary (SOME n) = "failed tactic input goals: " ^ Int.toString n ^ "\n"
 
-fun all_goals_log_summary (SOME n) =
-      if n > 1 then "all failed tactic input goals are in the instrumented log\n" else ""
-  | all_goals_log_summary NONE = ""
+fun all_goals_log_summary log_available (SOME n) =
+      if log_available andalso n > 1 then "all failed tactic input goals are in the instrumented log\n" else ""
+  | all_goals_log_summary _ NONE = ""
 
-fun goal_state_summary {remaining_goals, top_goal} =
+fun truncation_summary log_available preview =
+  if log_available then
+    String.concat ["top goal exceeded 4 KiB; showing first ",
+                   Int.toString (size preview), " bytes; full top goal is in the instrumented log above\n"]
+  else
+    String.concat ["top goal exceeded 4 KiB; showing first ",
+                   Int.toString (size preview), " bytes\n"]
+
+fun goal_state_summary log_available {remaining_goals, top_goal} =
   let
     val (truncated, preview) = truncate_goal_state top_goal
-    val truncation_line =
-      if truncated then
-        String.concat ["top goal exceeded 4 KiB; showing first ",
-                       Int.toString (size preview), " bytes; full top goal is in the instrumented log above\n"]
-      else ""
+    val truncation_line = if truncated then truncation_summary log_available preview else ""
   in
     String.concat
       ["failed tactic top input goal:\n",
        remaining_goals_summary remaining_goals,
-       all_goals_log_summary remaining_goals,
+       all_goals_log_summary log_available remaining_goals,
        truncation_line,
        preview,
        if size preview = 0 orelse String.sub(preview, size preview - 1) <> #"\n" then "\n" else ""]
   end
 
-fun summarize_goal_state path =
-  Option.map goal_state_summary (read_goal_state path)
+fun summarize_goal_state_with_log_reference log_available path =
+  Option.map (goal_state_summary log_available) (read_goal_state path)
   handle _ => NONE
+
+fun summarize_goal_state path = summarize_goal_state_with_log_reference true path
 
 fun plan_position_summary path =
   Option.map (fn position => "plan position: " ^ position ^ "\n")

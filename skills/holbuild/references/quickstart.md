@@ -48,7 +48,7 @@ holbuild --json build FooTheory          # JSON events/errors for build output
 - `--source-dir PATH` — source tree for manifest discovery; `.holbuild/` artifacts are written under the shell cwd
 - `--maxheap MB` / `--max-heap MB` — pass Poly/ML max heap to child HOL processes
 - `-jN` / `--jobs N` — parallel workers. Default: `.holconfig.toml [build].jobs` or `max(1, nproc/2)`
-- `--json` — newline-delimited JSON `message`, `node_started`, `node_finished`, `node_failed`, `build_finished`, and `error` events (build only; not dry-run/plan/repl-on-failure)
+- `--json` — newline-delimited streaming JSON `message`, `node_started`, `node_finished`, `node_failed`, `build_finished`, and `error` events on stdout (build only; no retained log paths; not dry-run/plan/trace/repl-on-failure)
 - `--verbose` — node start and per-node elapsed logs when the live TTY status line is disabled
 
 ## Build flags

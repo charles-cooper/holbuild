@@ -34,11 +34,17 @@ QED
 val _ = export_theory();
 SML
 
-json_log=$tmpdir/json.log
-(cd "$project" && "$HOLBUILD_BIN" --json --holdir "$HOLDIR" build JTheory) > "$json_log" 2>&1
+json_stdout=$tmpdir/json.stdout
+json_stderr=$tmpdir/json.stderr
+(cd "$project" && "$HOLBUILD_BIN" --json --holdir "$HOLDIR" build JTheory) > "$json_stdout" 2> "$json_stderr"
 require_file "$project/.holbuild/obj/src/JTheory.dat"
+if [[ -s "$json_stderr" ]]; then
+  echo "json mode wrote to stderr" >&2
+  cat "$json_stderr" >&2
+  exit 1
+fi
 
-python3 - "$json_log" <<'PY'
+python3 - "$json_stdout" <<'PY'
 import json
 import sys
 
@@ -71,7 +77,7 @@ if any('\\u0000' in line or '\x1b' in line or '\r' in line for line in lines):
     raise SystemExit('internal keys or status redraw escaped into json output')
 PY
 
-if grep -q "JTheory built" "$json_log"; then
+if grep -q "JTheory built" "$json_stdout"; then
   echo "plain status output escaped into json mode" >&2
   exit 1
 fi
@@ -93,18 +99,25 @@ val _ = export_theory();
 ''')
 PY
 
-fail_log=$tmpdir/fail.log
-if (cd "$bad_project" && "$HOLBUILD_BIN" --json --holdir "$HOLDIR" build BadTheory) > "$fail_log" 2>&1; then
+fail_stdout=$tmpdir/fail.stdout
+fail_stderr=$tmpdir/fail.stderr
+if (cd "$bad_project" && "$HOLBUILD_BIN" --json --holdir "$HOLDIR" build BadTheory) > "$fail_stdout" 2> "$fail_stderr"; then
   echo "expected json failure build to fail" >&2
   exit 1
 fi
+if [[ -s "$fail_stderr" ]]; then
+  echo "json failure mode wrote to stderr" >&2
+  cat "$fail_stderr" >&2
+  exit 1
+fi
 
-python3 - "$fail_log" <<'PY'
+python3 - "$fail_stdout" "$bad_project" <<'PY'
 import json
-import os
 import sys
+from pathlib import Path
 
 path = sys.argv[1]
+project = Path(sys.argv[2])
 events = []
 for line in open(path, encoding='utf-8'):
     line = line.rstrip('\n')
@@ -113,6 +126,8 @@ for line in open(path, encoding='utf-8'):
     if not line.startswith('{'):
         raise SystemExit(f'non-json failure output: {line!r}')
     events.append(json.loads(line))
+if any('log' in event for event in events):
+    raise SystemExit(f'json mode should not expose retained log paths: {events!r}')
 errors = [e for e in events if e.get('event') == 'error']
 if not errors:
     raise SystemExit('missing structured error event')
@@ -121,17 +136,12 @@ if 'failed tactic top input goal:' not in message:
     raise SystemExit('structured error did not include top-goal context')
 if 'json failure' not in message:
     raise SystemExit('structured error lost failure detail')
-if not any(e.get('log') and e.get('log') in e.get('message', '') for e in errors):
-    raise SystemExit('structured error did not expose failure log as separate key')
+if 'instrumented log:' in message or 'child log:' in message:
+    raise SystemExit(f'structured error exposed a log path: {message!r}')
 failed = [e for e in events if e.get('event') == 'node_failed' and e.get('target') == 'BadTheory']
 if not failed:
     raise SystemExit('missing node_failed event')
 for event in failed:
-    log = event.get('log')
-    if not log:
-        raise SystemExit(f'node_failed missing log field: {event!r}')
-    if not os.path.exists(log):
-        raise SystemExit(f'node_failed log does not exist at command exit: {log!r}')
     if event.get('package') != 'json-output' or event.get('source') != 'src/BadScript.sml':
         raise SystemExit(f'node_failed lost source metadata: {event!r}')
     if '\x00' in event.get('key', '') or '\\u0000' in event.get('key', ''):
@@ -151,13 +161,83 @@ for event in failed:
         raise SystemExit(f'failure lost input goal count: {failure!r}')
     if failure.get('top_goal_truncated') is not True:
         raise SystemExit(f'failure did not report top-goal truncation: {failure!r}')
-    log_text = open(log, encoding='utf-8', errors='replace').read()
-    for marker in [
-        'holbuild failed tactic input goal count: 1',
-        'holbuild failed tactic top input goal:',
-        'holbuild end failed tactic top input goal',
-        'p' * 5000,
-    ]:
-        if marker not in log_text:
-            raise SystemExit(f'failure log missing marker {marker[:80]!r}')
+for subdir in ['logs', 'stage']:
+    root = project / '.holbuild' / subdir
+    if root.exists() and any(root.rglob('*')):
+        raise SystemExit(f'json mode left stateful {subdir} files under {root}')
+PY
+
+trace_stdout=$tmpdir/trace.stdout
+trace_stderr=$tmpdir/trace.stderr
+if (cd "$project" && "$HOLBUILD_BIN" --json --holdir "$HOLDIR" build --goalfrag-trace JTheory) > "$trace_stdout" 2> "$trace_stderr"; then
+  echo "expected json trace stub to reject --goalfrag-trace" >&2
+  exit 1
+fi
+if [[ -s "$trace_stderr" ]]; then
+  echo "json trace rejection wrote to stderr" >&2
+  cat "$trace_stderr" >&2
+  exit 1
+fi
+python3 - "$trace_stdout" <<'PY'
+import json
+import sys
+
+events = [json.loads(line) for line in open(sys.argv[1], encoding='utf-8') if line.strip()]
+message = '\n'.join(e.get('message', '') for e in events if e.get('event') == 'error')
+if 'structured proof_trace events' not in message:
+    raise SystemExit(f'json trace rejection did not explain proof_trace stub: {message!r}')
+PY
+
+gen_fail_project=$tmpdir/gen-fail-project
+mkdir -p "$gen_fail_project"
+cat > "$gen_fail_project/holproject.toml" <<'TOML'
+[project]
+name = "json-generator-failure"
+
+[build]
+members = []
+
+[[generate]]
+name = "bad-gen"
+command = ["python3", "-c", "import sys; print('generator boom'); sys.exit(7)"]
+outputs = ["gen/out.txt"]
+TOML
+
+gen_fail_stdout=$tmpdir/gen-fail.stdout
+gen_fail_stderr=$tmpdir/gen-fail.stderr
+if (cd "$gen_fail_project" && "$HOLBUILD_BIN" --json --holdir "$HOLDIR" build) > "$gen_fail_stdout" 2> "$gen_fail_stderr"; then
+  echo "expected json generator failure to fail" >&2
+  exit 1
+fi
+if [[ -s "$gen_fail_stderr" ]]; then
+  echo "json generator failure wrote to stderr" >&2
+  cat "$gen_fail_stderr" >&2
+  exit 1
+fi
+
+python3 - "$gen_fail_stdout" "$gen_fail_project" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+path = sys.argv[1]
+project = Path(sys.argv[2])
+events = []
+for line in open(path, encoding='utf-8'):
+    line = line.rstrip('\n')
+    if not line:
+        continue
+    if not line.startswith('{'):
+        raise SystemExit(f'non-json generator failure output: {line!r}')
+    events.append(json.loads(line))
+if any('log' in event for event in events):
+    raise SystemExit(f'json generator failure exposed a log path: {events!r}')
+message = '\n'.join(e.get('message', '') for e in events if e.get('event') == 'error')
+if 'generator bad-gen failed' not in message or 'generator boom' not in message:
+    raise SystemExit(f'json generator failure lost message/output: {message!r}')
+if '.log' in message or 'log:' in message:
+    raise SystemExit(f'json generator failure exposed log text/path: {message!r}')
+holbuild = project / '.holbuild'
+if holbuild.exists() and any(holbuild.rglob('*.log')):
+    raise SystemExit(f'json generator failure left log files under {holbuild}')
 PY

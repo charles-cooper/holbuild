@@ -311,6 +311,8 @@ fun build tc cli_jobs args =
         raise Error "--json does not support build --dry-run yet"
       else if HolbuildStatus.json_mode () andalso Option.isSome goalfrag_plan then
         raise Error "--json does not support --goalfrag-plan yet"
+      else if HolbuildStatus.json_mode () andalso goalfrag_trace then
+        raise Error "--json does not support --goalfrag-trace until structured proof_trace events exist"
       else if Option.isSome goalfrag_plan andalso goalfrag_trace then
         raise Error "--goalfrag-plan and --goalfrag-trace are separate modes"
       else if dry_run andalso goalfrag_trace then

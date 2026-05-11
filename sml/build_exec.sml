@@ -703,11 +703,19 @@ fun tail_text path =
 
 fun child_log_detail path =
   if file_exists path then
-    String.concatWith "\n"
-      ["child log: " ^ path,
-       "--- child log tail ---",
-       tail_text path,
-       "--- end child log tail ---"]
+    if HolbuildStatus.json_mode () then
+      String.concatWith "\n"
+        ["--- child log tail ---",
+         tail_text path,
+         "--- end child log tail ---"]
+    else
+      String.concatWith "\n"
+        ["child log: " ^ path,
+         "--- child log tail ---",
+         tail_text path,
+         "--- end child log tail ---"]
+  else if HolbuildStatus.json_mode () then
+    "child log was not created"
   else
     "child log was not created: " ^ path
 
@@ -789,13 +797,44 @@ fun preserve_log src dst =
     handle _ => SOME src
   else NONE
 
-fun preserve_checkpoint_failure_log project node input_key stage =
-  preserve_log (Path.concat(stage, "holbuild-build.log"))
-               (retained_checkpoint_failure_log project node input_key)
+datatype captured_output = RetainedLog of string | EphemeralSpool of string
 
-fun preserve_goalfrag_trace_log project node input_key stage =
-  preserve_log (Path.concat(stage, "holbuild-build.log"))
-               (retained_goalfrag_trace_log project node input_key)
+fun captured_output_path (RetainedLog path) = path
+  | captured_output_path (EphemeralSpool path) = path
+
+fun captured_output_retained (RetainedLog _) = true
+  | captured_output_retained (EphemeralSpool _) = false
+
+fun stage_build_output stage = Path.concat(stage, "holbuild-build.log")
+
+fun available_stage_output stage =
+  let val path = stage_build_output stage
+  in if file_exists path then SOME path else NONE end
+
+fun checkpoint_failure_output project node input_key stage =
+  if HolbuildStatus.json_mode () then Option.map EphemeralSpool (available_stage_output stage)
+  else Option.map RetainedLog
+                  (preserve_log (stage_build_output stage)
+                                (retained_checkpoint_failure_log project node input_key))
+
+fun goalfrag_trace_output project node input_key stage =
+  if HolbuildStatus.json_mode () then Option.map EphemeralSpool (available_stage_output stage)
+  else Option.map RetainedLog
+                  (preserve_log (stage_build_output stage)
+                                (retained_goalfrag_trace_log project node input_key))
+
+fun retained_log_reference output =
+  case output of
+      SOME (RetainedLog path) => "instrumented log: " ^ path ^ "\n"
+    | _ => ""
+
+fun captured_output_path_option output = Option.map captured_output_path output
+
+fun captured_output_has_retained_log output =
+  case output of SOME captured => captured_output_retained captured | NONE => false
+
+fun cleanup_json_stage stage =
+  if HolbuildStatus.json_mode () then remove_tree stage else ()
 
 fun cache_root () = HolbuildCache.cache_root ()
 
@@ -1747,22 +1786,27 @@ fun build_theory cache_allowed policy tc project base_context plan keys toolchai
     fun tactic_timeout_error () =
       let
         val words = String.tokens Char.isSpace (read_text timeout_marker)
-        val failure_log = preserve_checkpoint_failure_log project node input_key stage
+        val failure_output = checkpoint_failure_output project node input_key stage
+        val failure_output_path = captured_output_path_option failure_output
         val source_context =
           Option.mapPartial
             (HolbuildTheoryDiagnostics.summarize_failed_fragment_source
                (source_file node) source_text theorem_checkpoints)
-            failure_log
-        val goal_state = Option.mapPartial HolbuildTheoryDiagnostics.summarize_goal_state failure_log
-        val plan_position = Option.mapPartial HolbuildTheoryDiagnostics.plan_position_summary failure_log
-        val child_failure = Option.mapPartial HolbuildTheoryDiagnostics.child_failure_summary failure_log
+            failure_output_path
+        val goal_state =
+          Option.mapPartial
+            (HolbuildTheoryDiagnostics.summarize_goal_state_with_log_reference
+               (captured_output_has_retained_log failure_output))
+            failure_output_path
+        val plan_position = Option.mapPartial HolbuildTheoryDiagnostics.plan_position_summary failure_output_path
+        val child_failure = Option.mapPartial HolbuildTheoryDiagnostics.child_failure_summary failure_output_path
         val detail =
           String.concat
             [case source_context of NONE => "" | SOME text => text,
              case plan_position of NONE => "" | SOME text => text,
              case goal_state of NONE => "" | SOME text => text,
              case child_failure of NONE => "" | SOME text => text,
-             case failure_log of NONE => "" | SOME path => "instrumented log: " ^ path ^ "\n"]
+             retained_log_reference failure_output]
         fun with_detail heading = heading ^ (if detail = "" then "" else "\n" ^ detail)
       in
         case rev words of
@@ -1775,20 +1819,25 @@ fun build_theory cache_allowed policy tc project base_context plan keys toolchai
       remove_invalid_checkpoints project node deps_key deps_loaded (#failure_checkpoints run_spec)
     fun checkpoint_failure_error msg =
       let
-        val failure_log = preserve_checkpoint_failure_log project node input_key stage
-        val goal_state = Option.mapPartial HolbuildTheoryDiagnostics.summarize_goal_state failure_log
-        val plan_position = Option.mapPartial HolbuildTheoryDiagnostics.plan_position_summary failure_log
-        val trace_context = if goalfrag_trace policy then Option.mapPartial HolbuildTheoryDiagnostics.summarize_goalfrag_trace failure_log else NONE
-        val static_error = Option.mapPartial (fn path => HolbuildTheoryDiagnostics.static_error_summary (source_file node) source_text (String.fields (fn c => c = #"\n") (read_text path))) failure_log
-        val source_context = Option.mapPartial (HolbuildTheoryDiagnostics.summarize_failed_fragment_source (source_file node) source_text theorem_checkpoints) failure_log
+        val failure_output = checkpoint_failure_output project node input_key stage
+        val failure_output_path = captured_output_path_option failure_output
+        val goal_state =
+          Option.mapPartial
+            (HolbuildTheoryDiagnostics.summarize_goal_state_with_log_reference
+               (captured_output_has_retained_log failure_output))
+            failure_output_path
+        val plan_position = Option.mapPartial HolbuildTheoryDiagnostics.plan_position_summary failure_output_path
+        val trace_context = if goalfrag_trace policy then Option.mapPartial HolbuildTheoryDiagnostics.summarize_goalfrag_trace failure_output_path else NONE
+        val static_error = Option.mapPartial (fn path => HolbuildTheoryDiagnostics.static_error_summary (source_file node) source_text (String.fields (fn c => c = #"\n") (read_text path))) failure_output_path
+        val source_context = Option.mapPartial (HolbuildTheoryDiagnostics.summarize_failed_fragment_source (source_file node) source_text theorem_checkpoints) failure_output_path
         val termination_context =
           Option.mapPartial
             (HolbuildTheoryDiagnostics.summarize_termination_goal_source
                (source_file node) source_text termination_diagnostics)
-            failure_log
+            failure_output_path
         val child_failure =
           if Option.isSome static_error then NONE
-          else Option.mapPartial HolbuildTheoryDiagnostics.child_failure_summary failure_log
+          else Option.mapPartial HolbuildTheoryDiagnostics.child_failure_summary failure_output_path
         val fallback =
           if Option.isSome child_failure then ""
           else
@@ -1805,7 +1854,7 @@ fun build_theory cache_allowed policy tc project base_context plan keys toolchai
              case plan_position of NONE => "" | SOME text => text,
              case goal_state of NONE => "" | SOME text => text,
              case child_failure of NONE => fallback | SOME text => text,
-             case failure_log of NONE => "" | SOME path => "instrumented log: " ^ path ^ "\n"]
+             retained_log_reference failure_output]
       in
         Error detail
       end
@@ -1832,6 +1881,7 @@ fun build_theory cache_allowed policy tc project base_context plan keys toolchai
               else if null theorem_checkpoints andalso null termination_diagnostics then Error msg
               else checkpoint_failure_error msg
             val _ = run_failure_repl tc policy theorem_checkpoints (#failure_checkpoints run_spec) deps_loaded
+            val _ = cleanup_json_stage stage
           in
             raise failure_error
           end
@@ -1842,9 +1892,12 @@ fun build_theory cache_allowed policy tc project base_context plan keys toolchai
       else if Option.isSome (goalfrag_plan policy) then
         HolbuildStatus.message_stdout (read_text build_log handle _ => "")
       else if goalfrag_trace policy then
-        (case preserve_goalfrag_trace_log project node input_key stage of
-             NONE => ()
-           | SOME path => HolbuildStatus.message_stdout ("goalfrag trace log: " ^ path ^ "\n"))
+        if HolbuildStatus.json_mode () then
+          HolbuildStatus.message_stdout (read_text build_log handle _ => "")
+        else
+          (case goalfrag_trace_output project node input_key stage of
+               NONE => ()
+             | SOME output => HolbuildStatus.message_stdout ("goalfrag trace log: " ^ captured_output_path output ^ "\n"))
       else ()
     val _ = copy_binary staged_dat data_path
     val _ = copy_binary staged_dat (hfs_remapped_path data_path)
