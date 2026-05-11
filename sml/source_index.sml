@@ -5,6 +5,7 @@ structure Path = OS.Path
 structure FS = OS.FileSys
 
 exception Error of string
+exception ErrorWithDebugArtifacts of string * HolbuildStatus.debug_artifacts
 
 datatype kind = TheoryScript | Sml | Sig
 
@@ -243,6 +244,8 @@ fun discover_package package acc =
     val excludes = HolbuildProject.package_excludes package
     val _ = HolbuildGenerators.run_package package
             handle HolbuildGenerators.Error msg => raise Error msg
+                 | HolbuildGenerators.ErrorWithDebugArtifacts (msg, artifacts) =>
+                     raise ErrorWithDebugArtifacts (msg, artifacts)
     val members =
       map (fn member => HolbuildProject.abs_under source_root member)
         (HolbuildProject.package_members package)

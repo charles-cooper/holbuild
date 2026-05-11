@@ -5,6 +5,7 @@ structure Path = OS.Path
 structure FS = OS.FileSys
 
 exception Error of string
+exception ErrorWithDebugArtifacts of string * HolbuildStatus.debug_artifacts
 exception GoalfragPlanPrinted
 exception RetryInvalidCheckpoint
 
@@ -797,6 +798,12 @@ fun preserve_log src dst =
     handle _ => SOME src
   else NONE
 
+fun preserve_debug_log src dst =
+  if file_exists src then
+    (ensure_parent dst; copy_binary src dst; SOME dst)
+    handle _ => NONE
+  else NONE
+
 datatype captured_output = RetainedLog of string | EphemeralSpool of string
 
 fun captured_output_path (RetainedLog path) = path
@@ -807,31 +814,55 @@ fun captured_output_retained (RetainedLog _) = true
 
 fun stage_build_output stage = Path.concat(stage, "holbuild-build.log")
 
-fun available_stage_output stage =
-  let val path = stage_build_output stage
-  in if file_exists path then SOME path else NONE end
+fun available_output path = if file_exists path then SOME path else NONE
+
+fun retained_or_ephemeral_output retain src dst =
+  if HolbuildStatus.json_mode () then
+    if retain then
+      case preserve_debug_log src dst of
+          SOME path => SOME (RetainedLog path)
+        | NONE => Option.map EphemeralSpool (available_output src)
+    else Option.map EphemeralSpool (available_output src)
+  else Option.map RetainedLog (preserve_log src dst)
 
 fun checkpoint_failure_output project node input_key stage =
-  if HolbuildStatus.json_mode () then Option.map EphemeralSpool (available_stage_output stage)
-  else Option.map RetainedLog
-                  (preserve_log (stage_build_output stage)
-                                (retained_checkpoint_failure_log project node input_key))
+  retained_or_ephemeral_output
+    (HolbuildStatus.retain_debug_artifacts ())
+    (stage_build_output stage)
+    (retained_checkpoint_failure_log project node input_key)
 
 fun goalfrag_trace_output project node input_key stage =
-  if HolbuildStatus.json_mode () then Option.map EphemeralSpool (available_stage_output stage)
-  else Option.map RetainedLog
-                  (preserve_log (stage_build_output stage)
-                                (retained_goalfrag_trace_log project node input_key))
+  retained_or_ephemeral_output
+    (HolbuildStatus.retain_debug_artifacts ())
+    (stage_build_output stage)
+    (retained_goalfrag_trace_log project node input_key)
 
 fun retained_log_reference output =
-  case output of
-      SOME (RetainedLog path) => "instrumented log: " ^ path ^ "\n"
-    | _ => ""
+  if HolbuildStatus.json_mode () then ""
+  else
+    case output of
+        SOME (RetainedLog path) => "instrumented log: " ^ path ^ "\n"
+      | _ => ""
 
 fun captured_output_path_option output = Option.map captured_output_path output
 
 fun captured_output_has_retained_log output =
-  case output of SOME captured => captured_output_retained captured | NONE => false
+  not (HolbuildStatus.json_mode ()) andalso
+  (case output of SOME captured => captured_output_retained captured | NONE => false)
+
+fun captured_output_debug_artifacts output =
+  if not (HolbuildStatus.json_mode ()) then HolbuildStatus.no_debug_artifacts
+  else
+    case output of
+        SOME (RetainedLog path) => {log = SOME path}
+      | _ => HolbuildStatus.no_debug_artifacts
+
+fun error_with_captured_output message output =
+  let val artifacts = captured_output_debug_artifacts output
+  in
+    if HolbuildStatus.debug_artifacts_empty artifacts then Error message
+    else ErrorWithDebugArtifacts (message, artifacts)
+  end
 
 fun cleanup_json_stage stage =
   if HolbuildStatus.json_mode () then remove_tree stage else ()
@@ -1811,9 +1842,14 @@ fun build_theory cache_allowed policy tc project base_context plan keys toolchai
       in
         case rev words of
             seconds :: rev_label_words =>
-              Error (with_detail ("tactic timed out after " ^ seconds ^ "s while building " ^
-                                  logical_name node ^ ": " ^ String.concatWith " " (rev rev_label_words)))
-          | [] => Error (with_detail ("tactic timed out while building " ^ logical_name node))
+              error_with_captured_output
+                (with_detail ("tactic timed out after " ^ seconds ^ "s while building " ^
+                              logical_name node ^ ": " ^ String.concatWith " " (rev rev_label_words)))
+                failure_output
+          | [] =>
+              error_with_captured_output
+                (with_detail ("tactic timed out while building " ^ logical_name node))
+                failure_output
       end
     fun discard_failure_checkpoints () =
       remove_invalid_checkpoints project node deps_key deps_loaded (#failure_checkpoints run_spec)
@@ -1856,7 +1892,7 @@ fun build_theory cache_allowed policy tc project base_context plan keys toolchai
              case child_failure of NONE => fallback | SOME text => text,
              retained_log_reference failure_output]
       in
-        Error detail
+        error_with_captured_output detail failure_output
       end
     val build_log = Path.concat(stage, "holbuild-build.log")
     val _ = validate_hol_context (#context run_spec)
@@ -2261,14 +2297,22 @@ fun build_serial status options tc project base_context plan keys toolchain_key 
     fun error_message e =
       case e of
           Error msg => msg
+        | ErrorWithDebugArtifacts (msg, _) => msg
         | _ => General.exnMessage e
+    fun error_debug_artifacts e =
+      case e of
+          ErrorWithDebugArtifacts (_, artifacts) => artifacts
+        | _ => HolbuildStatus.no_debug_artifacts
     fun one node =
       build_one status options tc project base_context plan keys toolchain_key node
       handle e =>
-        let val msg = error_message e
+        let
+          val msg = error_message e
+          val artifacts = error_debug_artifacts e
         in
-          HolbuildStatus.fail status (HolbuildBuildPlan.key node)
-                                (HolbuildBuildPlan.logical_name node) msg;
+          HolbuildStatus.fail_with_debug_artifacts
+            status (HolbuildBuildPlan.key node) (HolbuildBuildPlan.logical_name node)
+            msg artifacts;
           raise e
         end
     fun loop [] = ()
@@ -2300,7 +2344,13 @@ fun find_ready plan done pending =
 fun build_error_message e =
   case e of
       Error msg => msg
+    | ErrorWithDebugArtifacts (msg, _) => msg
     | _ => General.exnMessage e
+
+fun build_error_debug_artifacts e =
+  case e of
+      ErrorWithDebugArtifacts (_, artifacts) => artifacts
+    | _ => HolbuildStatus.no_debug_artifacts
 
 fun build_parallel status options tc project base_context plan keys toolchain_key jobs =
   let
@@ -2322,7 +2372,7 @@ fun build_parallel status options tc project base_context plan keys toolchain_ke
     val completed = ref 0
     val active = ref jobs
     val stopped = ref false
-    val failure = ref (NONE : string option)
+    val failure = ref (NONE : (string * HolbuildStatus.debug_artifacts) option)
     val failed_prefix_priority = Array.array (node_count, NONE : bool option)
 
     fun node_id node = HolbuildBuildPlan.indexed_key_id key_index (HolbuildBuildPlan.key node)
@@ -2481,7 +2531,7 @@ fun build_parallel status options tc project base_context plan keys toolchain_ke
     fun finish_cancelled_after_stop id =
       with_lock (fn () => (running := !running - 1; finish_priority id; signal ()))
 
-    fun finish_failure id msg =
+    fun finish_failure id msg artifacts =
       let
         val first_failure =
           with_lock
@@ -2494,7 +2544,7 @@ fun build_parallel status options tc project base_context plan keys toolchain_ke
                     else
                       case !failure of
                           SOME _ => false
-                        | NONE => (failure := SOME msg; true)
+                        | NONE => (failure := SOME (msg, artifacts); true)
                 in
                   signal ();
                   first
@@ -2524,10 +2574,12 @@ fun build_parallel status options tc project base_context plan keys toolchain_ke
                      else
                        let
                          val msg = build_error_message e
+                         val artifacts = build_error_debug_artifacts e
                        in
-                         HolbuildStatus.fail status (HolbuildBuildPlan.key node)
-                                               (HolbuildBuildPlan.logical_name node) msg;
-                         finish_failure id msg;
+                         HolbuildStatus.fail_with_debug_artifacts
+                           status (HolbuildBuildPlan.key node) (HolbuildBuildPlan.logical_name node)
+                           msg artifacts;
+                         finish_failure id msg artifacts;
                          worker_exit ()
                        end)
                 end
@@ -2547,7 +2599,9 @@ fun build_parallel status options tc project base_context plan keys toolchain_ke
       in
         case result of
             NONE => ()
-          | SOME msg => raise Error msg
+          | SOME (msg, artifacts) =>
+              if HolbuildStatus.debug_artifacts_empty artifacts then raise Error msg
+              else raise ErrorWithDebugArtifacts (msg, artifacts)
       end
   in
     List.app (fn _ => ignore (Thread.fork (worker, [])))

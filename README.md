@@ -101,6 +101,7 @@ bin/holbuild execution-plan MyTheory:my_theorem
 bin/holbuild goalfrag-plan MyTheory:my_theorem
 bin/holbuild build --force --goalfrag-trace MyTheory
 bin/holbuild --json build MyTheory
+bin/holbuild --json build --retain-debug-artifacts MyTheory
 ```
 
 Useful inspection/maintenance commands:
@@ -161,7 +162,7 @@ Combining `--skip-goalfrag` with
 `--tactic-timeout`, `--goalfrag-plan`, or `--goalfrag-trace` is an error because
 they are implemented by the theorem instrumentation runtime. Proof-engine/checkpoint/timeout
 policy affects execution and diagnostics, not final theory artifact action keys. `--json` emits newline-delimited
-streaming JSON status/message/error events on stdout; node events include target/source metadata for demuxing parallel builds and do not expose retained log paths. `--json --goalfrag-trace` is reserved until structured proof trace events exist. `gc` removes stale project-local
+streaming JSON status/message/error events on stdout; node events include target/source metadata for demuxing parallel builds and do not expose retained log paths by default. `build --retain-debug-artifacts` may be combined with `--json` to retain durable failure logs and report them as `debug_artifacts.log`; these debug artifacts are for human/harness debugging and may contain full goals/output, while JSON failure evidence remains bounded. `--json --goalfrag-trace` is reserved until structured proof trace events exist. `gc` removes stale project-local
 `.holbuild` stage/log/checkpoint residue and runs global cache GC using `$HOLBUILD_CACHE`,
 `$XDG_CACHE_HOME/holbuild`, or `$HOME/.cache/holbuild`; `gc --clean-only` skips the
 cache and `gc --cache-only` skips project discovery/locking and does not require a HOL

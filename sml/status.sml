@@ -24,7 +24,12 @@ type t = {
 val current_status : t option ref = ref NONE
 val json_mode_ref = ref false
 val verbose_mode_ref = ref false
+val retain_debug_artifacts_ref = ref false
 val json_mutex = Mutex.mutex ()
+
+type debug_artifacts = {log : string option}
+
+val no_debug_artifacts : debug_artifacts = {log = NONE}
 
 val clear_to_eol = "\027[0K"
 
@@ -32,6 +37,8 @@ fun set_json_mode enabled = json_mode_ref := enabled
 fun json_mode () = !json_mode_ref
 fun set_verbose_mode enabled = verbose_mode_ref := enabled
 fun verbose_mode () = !verbose_mode_ref
+fun set_retain_debug_artifacts enabled = retain_debug_artifacts_ref := enabled
+fun retain_debug_artifacts () = !retain_debug_artifacts_ref
 
 fun hex_digit n =
   String.sub("0123456789abcdef", n)
@@ -77,6 +84,12 @@ fun json_optional_bool_field name value =
   case value of
       NONE => []
     | SOME b => [json_bool_field name b]
+
+fun json_debug_artifacts_fields ({log} : debug_artifacts) =
+  let val fields = json_optional_string_field "log" log
+  in if null fields then [] else [json_object_field "debug_artifacts" fields] end
+
+fun debug_artifacts_empty artifacts = null (json_debug_artifacts_fields artifacts)
 
 fun short_hash text = String.substring(HolbuildHash.string_sha1 text, 0, 12)
 
@@ -171,8 +184,22 @@ fun input_goal_count_from_lines lines =
   Option.mapPartial (fn text => parse_decimal_prefix text 0)
                     (first_line_after "failed tactic input goals: " lines)
 
+val top_goal_preview_prefix = "top goal exceeded 4 KiB; showing first "
+
 fun top_goal_truncated message =
-  if String.isSubstring "top goal exceeded 4 KiB" message then SOME true else NONE
+  if String.isSubstring top_goal_preview_prefix message then SOME true else NONE
+
+fun top_goal_preview_bytes message =
+  case find_substring top_goal_preview_prefix message of
+      NONE => NONE
+    | SOME i => parse_decimal_prefix message (i + size top_goal_preview_prefix)
+
+fun json_evidence_limit_fields message =
+  case top_goal_truncated message of
+      SOME true =>
+        json_optional_int_field "top_goal_preview_bytes" (top_goal_preview_bytes message) @
+        [json_string_field "evidence_mode" "preview_only"]
+    | _ => []
 
 fun source_location_from_line line =
   case line_after "source: " line of
@@ -209,7 +236,8 @@ fun json_failure_fields source_override message =
     json_optional_int_field "source_line" source_line @
     json_optional_string_field "plan_position" (plan_position_from_lines lines) @
     json_optional_int_field "input_goal_count" (input_goal_count_from_lines lines) @
-    json_optional_bool_field "top_goal_truncated" (top_goal_truncated message)
+    json_optional_bool_field "top_goal_truncated" (top_goal_truncated message) @
+    json_evidence_limit_fields message
   end
 
 fun json_failure_field message = [json_object_field "failure" (json_failure_fields NONE message)]
@@ -230,8 +258,13 @@ fun json_message stream_name text =
     [json_string_field "stream" stream_name,
      json_string_field "message" text]
 
-fun error msg =
-  emit_json "error" (json_string_field "message" msg :: json_failure_field msg)
+fun error_with_debug_artifacts msg artifacts =
+  emit_json "error"
+    (json_string_field "message" msg ::
+     json_failure_field msg @
+     json_debug_artifacts_fields artifacts)
+
+fun error msg = error_with_debug_artifacts msg no_debug_artifacts
 
 fun env_truthy s = s = "1" orelse s = "true" orelse s = "yes" orelse s = "on"
 fun env_falsey s = s = "0" orelse s = "false" orelse s = "no" orelse s = "off"
@@ -492,7 +525,7 @@ fun message_stdout text = message_to "stdout" TextIO.stdOut text
 fun message_stderr text = message_to "stderr" TextIO.stdErr text
 fun message stream text = message_to "stdout" stream text
 
-fun fail status key label msg =
+fun fail_with_debug_artifacts status key label msg artifacts =
   (with_lock status
      (fn () =>
          let val {enabled, active, ended, ...} = status
@@ -502,7 +535,9 @@ fun fail status key label msg =
              (active := remove_active key (!active);
               if json_mode () then
                 emit_json "node_failed"
-                  (json_node_fields key label @ json_failure_field_for_node key msg)
+                  (json_node_fields key label @
+                   json_failure_field_for_node key msg @
+                   json_debug_artifacts_fields artifacts)
               else if enabled then
                 (TextIO.output (TextIO.stdOut, "\r" ^ clear_to_eol);
                  TextIO.flushOut TextIO.stdOut)
@@ -510,5 +545,8 @@ fun fail status key label msg =
               ended := true)
          end);
    current_status := NONE)
+
+fun fail status key label msg =
+  fail_with_debug_artifacts status key label msg no_debug_artifacts
 
 end

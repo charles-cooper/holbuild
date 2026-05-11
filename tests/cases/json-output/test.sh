@@ -126,8 +126,8 @@ for line in open(path, encoding='utf-8'):
     if not line.startswith('{'):
         raise SystemExit(f'non-json failure output: {line!r}')
     events.append(json.loads(line))
-if any('log' in event for event in events):
-    raise SystemExit(f'json mode should not expose retained log paths: {events!r}')
+if any('log' in event or 'debug_artifacts' in event for event in events):
+    raise SystemExit(f'json mode should not expose retained debug artifact paths: {events!r}')
 errors = [e for e in events if e.get('event') == 'error']
 if not errors:
     raise SystemExit('missing structured error event')
@@ -161,10 +161,56 @@ for event in failed:
         raise SystemExit(f'failure lost input goal count: {failure!r}')
     if failure.get('top_goal_truncated') is not True:
         raise SystemExit(f'failure did not report top-goal truncation: {failure!r}')
+    if failure.get('top_goal_preview_bytes') != 4096 or failure.get('evidence_mode') != 'preview_only':
+        raise SystemExit(f'failure lost bounded evidence metadata: {failure!r}')
 for subdir in ['logs', 'stage']:
     root = project / '.holbuild' / subdir
     if root.exists() and any(root.rglob('*')):
         raise SystemExit(f'json mode left stateful {subdir} files under {root}')
+PY
+
+retain_stdout=$tmpdir/retain.stdout
+retain_stderr=$tmpdir/retain.stderr
+if (cd "$bad_project" && "$HOLBUILD_BIN" --json --holdir "$HOLDIR" build --retain-debug-artifacts BadTheory) > "$retain_stdout" 2> "$retain_stderr"; then
+  echo "expected retained json failure build to fail" >&2
+  exit 1
+fi
+if [[ -s "$retain_stderr" ]]; then
+  echo "retained json failure mode wrote to stderr" >&2
+  cat "$retain_stderr" >&2
+  exit 1
+fi
+
+python3 - "$retain_stdout" "$bad_project" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+path = sys.argv[1]
+project = Path(sys.argv[2])
+events = [json.loads(line) for line in open(path, encoding='utf-8') if line.strip()]
+if any('log' in event for event in events):
+    raise SystemExit(f'retained json should not restore top-level log fields: {events!r}')
+failed = [e for e in events if e.get('event') == 'node_failed' and e.get('target') == 'BadTheory']
+errors = [e for e in events if e.get('event') == 'error']
+if not failed or not errors:
+    raise SystemExit(f'missing retained failure/error events: {events!r}')
+for event in failed + errors:
+    artifacts = event.get('debug_artifacts')
+    if not isinstance(artifacts, dict) or not artifacts.get('log'):
+        raise SystemExit(f'retained failure missing debug_artifacts.log: {event!r}')
+    log = project / artifacts['log'] if not Path(artifacts['log']).is_absolute() else Path(artifacts['log'])
+    if not log.is_file():
+        raise SystemExit(f'debug_artifacts.log does not exist: {log}')
+    text = log.read_text(encoding='utf-8', errors='replace')
+    if 'json failure' not in text or 'p' * 5000 not in text:
+        raise SystemExit('retained debug log lost full failure context')
+message = '\n'.join(e.get('message', '') for e in errors)
+if 'instrumented log:' in message or 'child log:' in message:
+    raise SystemExit(f'retained json message exposed legacy log text: {message!r}')
+stage = project / '.holbuild' / 'stage'
+if stage.exists() and any(stage.rglob('*')):
+    raise SystemExit(f'retained debug artifacts should not retain stage files under {stage}')
 PY
 
 trace_stdout=$tmpdir/trace.stdout
@@ -230,8 +276,8 @@ for line in open(path, encoding='utf-8'):
     if not line.startswith('{'):
         raise SystemExit(f'non-json generator failure output: {line!r}')
     events.append(json.loads(line))
-if any('log' in event for event in events):
-    raise SystemExit(f'json generator failure exposed a log path: {events!r}')
+if any('log' in event or 'debug_artifacts' in event for event in events):
+    raise SystemExit(f'json generator failure exposed a debug artifact path: {events!r}')
 message = '\n'.join(e.get('message', '') for e in events if e.get('event') == 'error')
 if 'generator bad-gen failed' not in message or 'generator boom' not in message:
     raise SystemExit(f'json generator failure lost message/output: {message!r}')
@@ -240,4 +286,44 @@ if '.log' in message or 'log:' in message:
 holbuild = project / '.holbuild'
 if holbuild.exists() and any(holbuild.rglob('*.log')):
     raise SystemExit(f'json generator failure left log files under {holbuild}')
+PY
+
+gen_retain_stdout=$tmpdir/gen-retain.stdout
+gen_retain_stderr=$tmpdir/gen-retain.stderr
+if (cd "$gen_fail_project" && "$HOLBUILD_BIN" --json --holdir "$HOLDIR" build --retain-debug-artifacts) > "$gen_retain_stdout" 2> "$gen_retain_stderr"; then
+  echo "expected retained json generator failure to fail" >&2
+  exit 1
+fi
+if [[ -s "$gen_retain_stderr" ]]; then
+  echo "retained json generator failure wrote to stderr" >&2
+  cat "$gen_retain_stderr" >&2
+  exit 1
+fi
+
+python3 - "$gen_retain_stdout" "$gen_fail_project" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+path = sys.argv[1]
+project = Path(sys.argv[2])
+events = [json.loads(line) for line in open(path, encoding='utf-8') if line.strip()]
+errors = [e for e in events if e.get('event') == 'error']
+if not errors:
+    raise SystemExit(f'missing retained generator error event: {events!r}')
+for event in errors:
+    if 'log' in event:
+        raise SystemExit(f'retained generator error restored top-level log: {event!r}')
+    artifacts = event.get('debug_artifacts')
+    if not isinstance(artifacts, dict) or not artifacts.get('log'):
+        raise SystemExit(f'retained generator error missing debug_artifacts.log: {event!r}')
+    log = project / artifacts['log'] if not Path(artifacts['log']).is_absolute() else Path(artifacts['log'])
+    if not log.is_file():
+        raise SystemExit(f'generator debug_artifacts.log does not exist: {log}')
+    text = log.read_text(encoding='utf-8', errors='replace')
+    if 'generator boom' not in text:
+        raise SystemExit(f'generator debug log lost output: {text!r}')
+message = '\n'.join(e.get('message', '') for e in errors)
+if 'generator bad-gen failed' not in message or 'generator boom' not in message:
+    raise SystemExit(f'retained generator failure lost bounded message/output: {message!r}')
 PY

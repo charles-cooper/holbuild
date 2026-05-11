@@ -651,7 +651,10 @@ not an action-key input. Planning/tracing are not action-key inputs. Because
 timeouts, planning, and tracing only exist in the theorem instrumentation runtime,
 `--skip-goalfrag --tactic-timeout ...`, `--skip-goalfrag --goalfrag-plan ...`, and
 `--skip-goalfrag --goalfrag-trace ...` are rejected instead of silently ignoring
-the request. Proof engine, checkpoint creation, tactic timeout, planning, and tracing are execution/debug policy,
+the request. In JSON mode, failure evidence is structured and bounded for agent/tool
+consumers by default; `build --retain-debug-artifacts` is an explicit human/harness
+debugging mode that retains durable failure logs and reports them as
+`debug_artifacts.log`, without retaining internal stage directories. Proof engine, checkpoint creation, tactic timeout, planning, and tracing are execution/debug policy,
 not final artifact semantics. They must not be included in the final theory
 action key or local metadata comparison for `.uo/.ui/.dat`: switching
 `--skip-goalfrag`, `--skip-checkpoints`, or root tactic timeout should not rebuild

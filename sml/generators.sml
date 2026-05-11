@@ -5,8 +5,12 @@ structure Path = OS.Path
 structure FS = OS.FileSys
 
 exception Error of string
+exception ErrorWithDebugArtifacts of string * HolbuildStatus.debug_artifacts
 
 fun die msg = raise Error msg
+fun die_with_debug_artifacts msg artifacts =
+  if HolbuildStatus.debug_artifacts_empty artifacts then die msg
+  else raise ErrorWithDebugArtifacts (msg, artifacts)
 
 fun member x xs = List.exists (fn y => x = y) xs
 
@@ -66,8 +70,12 @@ fun log_path package generator = generator_stem package generator ^ ".log"
 
 fun remove_file path = FS.remove path handle OS.SysErr _ => ()
 
+fun retain_debug_artifacts () =
+  HolbuildStatus.json_mode () andalso HolbuildStatus.retain_debug_artifacts ()
+
 fun command_output_path package generator =
-  if HolbuildStatus.json_mode () then FS.tmpName () else log_path package generator
+  if HolbuildStatus.json_mode () andalso not (retain_debug_artifacts ()) then FS.tmpName ()
+  else log_path package generator
 
 fun generator_output_detail output =
   if HolbuildStatus.json_mode () then
@@ -80,7 +88,11 @@ fun generator_output_detail output =
     "; log: " ^ output
 
 fun cleanup_command_output output =
-  if HolbuildStatus.json_mode () then remove_file output else ()
+  if HolbuildStatus.json_mode () andalso not (retain_debug_artifacts ()) then remove_file output else ()
+
+fun command_debug_artifacts output =
+  if retain_debug_artifacts () andalso readable output then {log = SOME output}
+  else HolbuildStatus.no_debug_artifacts
 
 fun dependency_result deps name =
   case List.find (fn (dep_name, _) => dep_name = name) deps of
@@ -161,10 +173,14 @@ fun run_command package generator =
     if HolbuildToolchain.success status then
       cleanup_command_output output
     else
-      let val detail = generator_output_detail output
-          val _ = cleanup_command_output output
+      let
+        val detail = generator_output_detail output
+        val artifacts = command_debug_artifacts output
+        val _ = cleanup_command_output output
       in
-        die ("generator " ^ HolbuildProject.generator_name generator ^ " failed" ^ detail)
+        die_with_debug_artifacts
+          ("generator " ^ HolbuildProject.generator_name generator ^ " failed" ^ detail)
+          artifacts
       end
   end
 
