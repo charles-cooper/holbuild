@@ -1,117 +1,138 @@
-# Checkpoints and goalfrag
+# Checkpoints, proof IR, and GoalFrag
 
-## What goalfrag does
+## Default theorem instrumentation
 
-When goalfrag is enabled (default), holbuild instruments modern theorem declarations at the AST level:
+When theorem instrumentation is enabled (default), holbuild instruments modern theorem declarations at the AST level:
 
-1. Parses source with `HOLSourceParser` before expansion
-2. Identifies `Theorem ... Proof ... QED` declarations and their tactic spans
-3. Rewrites source to insert theorem-boundary markers and load the goalfrag runtime
-4. At runtime, the goalfrag runtime parses tactic text into `TacticParse` fragments, plans per-fragment execution, and runs through the proof manager step by step
+1. Parses source with `HOLSourceParser` before expansion/recovery
+2. Identifies `Theorem ... Proof ... QED` declarations and tactic/source spans
+3. Rewrites source to insert theorem-boundary markers and load a runtime helper
+4. Runs theorem proofs through the selected runtime with per-step timeout, failure diagnostics, and optional checkpoint saves
+
+The default runtime is **proof IR**. It lowers `HOLSourceAST.exp` directly and executes exact HOL tactic/list-tactic boundaries for recognized constructs. Use `--goalfrag` only to select the legacy HOL GoalFrag/proof-manager runtime for comparison/debugging. The old `--new-ir` flag is a deprecated no-op because proof IR is default.
 
 This enables:
-- Per-tactic timeouts (`--tactic-timeout`)
-- PolyML checkpoint saves at theorem boundaries
-- Proof-step failure diagnostics with goal state
+- Per-step tactic timeouts (`--tactic-timeout`)
+- PolyML checkpoint saves at dependency/theorem/proof boundaries
+- Failed proof diagnostics: theorem, source line/span, plan position, input-goal count/top goal
+- Failed-prefix replay after proof edits
 
 ## What's NOT instrumented
 
-Simple theorem forms are **not** checkpoint-instrumented in v1:
+Simple theorem forms are **not** theorem-checkpoint-instrumented in v1:
 - `Theorem name = thm` (no proof body)
 - `store_thm`, `save_thm`, `Q.store_thm` calls
 - `Resume` / `Finalise` declarations
 
-These still execute normally during build, just without theorem-context or end-of-proof checkpoints.
+These still execute normally during build, just without theorem-context/end-of-proof/failed-prefix proof checkpoints.
 
-## Checkpoint lifetime
+## Checkpoint classes and retention
 
 During a theory build, checkpoints may be created at syntactic boundaries:
 
 | Checkpoint | After | Purpose |
 |------------|-------|---------|
 | `deps_loaded.save` | All resolved ancestors loaded in topological order | Resume from dependency context |
-| `<thm>_context.save` | Theorem stored in theory context | Resume from before next declaration |
-| `<thm>_end_of_proof.save` | Goalfrag proof replay complete, before `drop_all` | Proof navigation (not successor-ready) |
-| `final_context.save` | Generated theory sig/sml loaded; successor-ready | Resume dependents from this point |
+| `<thm>_context.save` | Theorem stored in theory context | Resume before the next declaration |
+| `<thm>_end_of_proof.save` | Instrumented proof replay complete, before `drop_all` | Proof navigation/debug state, not successor-ready |
+| `<thm>_failed_prefix.save` | Failed proof after a reusable prefix | Fast rebuild after editing a failing suffix |
+| `final_context.save` | Generated theory sig/sml loaded; successor-ready | Debug/successor breadcrumb |
 
-**Successful builds remove all checkpoint files** after artifacts and metadata are written.
-
-Failed/interrupted builds may leave `.save` + `.save.ok` files as debug breadcrumbs.
+Successful source builds retain reusable deps/theorem-context checkpoints for future proof edits and clear stale failed-prefix checkpoints for that source. Failed/interrupted builds may leave failed-prefix and partial debug breadcrumbs. `holbuild gc` removes old checkpoint families and enforces the default 5GB project checkpoint budget.
 
 ## Checkpoint validity
 
-`.ok` metadata contains:
-- Schema version (`holbuild-checkpoint-ok-v2`)
-- Checkpoint kind (`deps_loaded`, `theorem_context`, `end_of_proof`, `final_context`)
-- Dependency context key
-- Source prefix hash
-- Checkpoint key
+`.ok` metadata contains schema/versioned fields such as:
+- Checkpoint kind (`deps_loaded`, `theorem_context`, `end_of_proof`, `failed_prefix`, `final_context`)
+- Dependency context key (`deps_key`)
+- Proof engine (`proof_ir_*` or legacy GoalFrag engine key)
+- Source prefix/header/checkpoint keys
 
-Replay eligibility requires exact match on deps_key, prefix_hash, and checkpoint_key.
+Replay eligibility requires exact metadata match. Invalid selected checkpoints are discarded and retried from an earlier valid context instead of surfacing as proof failures. Parent/child checkpoint families are removed atomically: theorem descendants must not outlive their `deps_loaded.save` parent.
 
 ## `--skip-checkpoints`
 
-Runs goalfrag theorem proofs through the proof manager path without saving `.save` files at all. No `deps_loaded`, no `final_context`, no theorem checkpoints. Theory artifacts are still built normally.
+Runs theorem proofs through the selected instrumentation runtime without saving `.save`/`.ok` files. No `deps_loaded`, `final_context`, theorem-context, end-of-proof, or failed-prefix checkpoints are created. Theory artifacts are still built normally.
 
 ## `--skip-goalfrag`
 
-Opts out of all theorem instrumentation. Source is sent to `hol run` as-is. No checkpoints, no timeouts, no goalfrag runtime.
+Opts out of theorem instrumentation/proof IR. Source is sent through the plain `hol run` path. There is no per-tactic timeout, execution plan, trace, theorem-context/end-of-proof/failed-prefix proof navigation, or instrumented goal diagnostics. Non-theorem dependency/final-context checkpoint machinery may still be used when checkpoints are enabled.
 
-**Incompatible with `--tactic-timeout`** — the timeout requires the goalfrag runtime.
+**Incompatible**: `--skip-goalfrag` with `--tactic-timeout`, `--goalfrag-plan`, or `--goalfrag-trace`.
 
 ## Tactic timeout flow
 
 ```
---tactic-timeout 2.5   (default)
---tactic-timeout 60    for slow simplification steps
---tactic-timeout 0     disables timeout entirely
+--tactic-timeout 2.5   # default root-package timeout
+--tactic-timeout 60    # slower smoke/debug runs
+--tactic-timeout 0     # disables timeout entirely
 ```
 
+The timeout applies only to the root package; dependency packages build with no tactic timeout.
+
 On timeout:
-1. `smlTimeout` raises `FunctionTimeout`
-2. Marker file written with tactic label and timeout duration
-3. holbuild reports timed-out tactic and **does not retry** through the plain non-goalfrag fallback
+1. Runtime timeout wrapper raises the timeout marker/failure
+2. Child log records tactic label/plan position, source span, and input goal evidence where available
+3. holbuild reports the timed-out tactic and **does not retry** through the plain non-instrumented fallback
 4. Build fails
 
-For production builds of large projects: use `--tactic-timeout 0`.
+For full semantic production builds of large projects, use `--tactic-timeout 0`.
 
-## Checkpoint replay
+## Replay order
 
 On a rebuild after source edit:
-1. holbuild computes theorem boundaries from the source AST
-2. Checks for valid existing checkpoints (deps_loaded first, then theorem-context)
-3. If a valid checkpoint exists for an earlier theorem boundary whose source prefix is byte-identical and whose dependency context matches, resumes from that checkpoint
-4. Only the suffix after the checkpoint boundary is re-executed
+1. Compute theorem boundaries and dependency context from current source/project state
+2. Try a valid failed-prefix checkpoint first when one matches the theorem header/pre-theorem bytes
+3. Otherwise try the newest valid theorem-context checkpoint whose source prefix and dependency context match
+4. Otherwise try a valid `deps_loaded.save`
+5. Re-execute only the remaining suffix when replay succeeds
 
-`always_reexecute = true` disables checkpoint replay entirely — every build starts fresh.
+`always_reexecute = true` disables local up-to-date skipping and checkpoint replay for that action.
+
+## Plan and trace inspection
+
+```sh
+holbuild execution-plan FooTheory:thm          # proof IR, static, no build lock/proof execution
+holbuild goalfrag-plan FooTheory:thm           # legacy GoalFrag static plan
+holbuild goalfrag-plan --new-ir FooTheory:thm  # deprecated alias for execution-plan
+holbuild build --force --goalfrag-trace FooTheory
+holbuild build --goalfrag --goalfrag-trace FooTheory  # legacy trace shape
+```
+
+Plan lines are executable tactic/list-tactic operations. Indentation/body text is formatting only; if a source construct executes as one HOL combinator boundary, it should display as one numbered step.
+
+`--goalfrag-trace` executes a build and records runtime before/after goal counts and elapsed times in the child log. Use `--force` when an up-to-date artifact would otherwise skip source execution.
+
+## REPL on failure
+
+`build --repl-on-failure` serializes the build and, after a theory action fails, starts `hol repl` from the newest failed-prefix checkpoint when available, falling back to the replay/deps-loaded checkpoint. It requires checkpoints and is not supported with `--json`.
 
 ## Checkpoint paths
 
 ```
-.holbuild/checkpoints/<package>/<relative-path>/
-  .deps/<deps_key>/deps_loaded.save[.ok]
-  .theorems/<deps_key>/<prefix_hash>/
-    <safe_name>_context.save[.ok]
-    <safe_name>_end_of_proof.save[.ok]
-  .final_context.save[.ok]
+.holbuild/checkpoints/<package>/<relative-path>.deps/<deps_key>/deps_loaded.save[.ok]
+.holbuild/checkpoints/<package>/<relative-path>.theorems/<deps_key>/<proof_engine>/<prefix_key>/
+  <safe_name>_context.save[.ok]
+  <safe_name>_end_of_proof.save[.ok]
+.holbuild/checkpoints/<package>/<relative-path>.theorems/<deps_key>/<proof_engine>/.failed/
+  <safe_name>_failed_prefix.save[.ok]
+  <safe_name>_failed_prefix.save.meta
+  <safe_name>_failed_prefix.save.prefix
+.holbuild/checkpoints/<package>/<relative-path>.final_context.save[.ok]
 ```
 
 These are local project state, never the semantic identity of a build.
 
-## Goalfrag execution pipeline
+## JSON failure evidence
 
-For a modern `Theorem name: goal Proof tac QED`:
+With `--json`, failures are emitted as structured `error`/`node_failed` events. `node_failed.failure` may include:
 
-1. `holbuild_begin_theorem(name, tactic_text, context_path, context_ok, end_of_proof_path, end_of_proof_ok, has_attrs)`
-2. `Tactical.set_prover goalfrag_prover` redirects theorem proofs
-3. If `has_proof_attrs` or empty tactic text → atomic `TAC_PROOF` (no step-by-step)
-4. Otherwise → `goalfrag_prove`:
-   - Set goalfrag with the goal
-   - Parse tactic text into fragments
-   - Execute fragments step by step through proof manager
-   - Per-step timeout wraps each fragment
-   - On completion: save `end_of_proof` checkpoint, then `drop_all`
-   - Save `theorem_context` checkpoint after theorem is stored
+- `kind`: `proof_failure`, `tactic_timeout`, `termination_failure`, `parse_error`, `type_error`, `child_failure`, or `unknown`
+- `theorem`, `source_file`, `source_line`
+- `plan_position`
+- `input_goal_count`
+- `top_goal_truncated`
+- `log`: retained child/instrumented log path
 
 ## Environment variables
 
@@ -120,6 +141,7 @@ For a modern `Theorem name: goal Proof tac QED`:
 | `HOLBUILD_SHARE_COMMON_DATA` | Override `PolyML.shareCommonData` default for checkpoint saves |
 | `HOLBUILD_CHECKPOINT_TIMING` | `1`/`true` = print checkpoint save timing to stderr |
 | `HOLBUILD_ECHO_CHILD_LOGS` | `1`/`true` = echo child `hol run` log to stdout |
+| `HOLBUILD_CACHE_TRACE` | `1`/`true` = print cache decision trace |
 | `HOLBUILD_STATUS` | `1`/`true` = enable status display, `0`/`false` = disable |
 | `HOLBUILD_TIMING_LOG` | Path for structured timing data (tool + phase lines) |
-| `HOLBUILD_GOALFRAG_RUNTIME` | Override path to `goalfrag_runtime.sml` |
+| `HOLBUILD_GOALFRAG_RUNTIME` | Override path to legacy `goalfrag_runtime.sml` |

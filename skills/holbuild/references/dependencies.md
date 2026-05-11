@@ -15,20 +15,31 @@ Fields per dependency:
 |-------|----------|---------|
 | `git` | No | Source repository URL (informational in v1) |
 | `rev` | No | Git commit (informational in v1) |
-| `path` | No | Local path to dependency root (relative to manifest dir) |
-| `manifest` | No | Explicit manifest file path when dep lacks `holproject.toml` |
+| `path` | No | Local path to dependency root (relative to manifest dir; `$VAR`/`${VAR}` expanded) |
+| `manifest` | No | Explicit manifest file path when dep lacks `holproject.toml` (relative to consumer manifest dir; env expanded) |
 
-At least `path` (or a `.holconfig.toml` override) must resolve for the dependency to be found locally.
+At least `path` (or a `.holconfig.toml` override) must resolve for the dependency to be found locally, except reserved `[dependencies.HOLDIR]`.
+
+## Built-in HOLDIR dependency
+
+The dependency key `HOLDIR` is reserved. If `[dependencies.HOLDIR]` has no explicit `manifest`, holbuild uses a built-in manifest:
+
+```toml
+[dependencies.HOLDIR]
+# no path/manifest needed for the built-in manifest case
+```
+
+The package root defaults to the configured HOL tree (`--holdir`, `HOLBUILD_HOLDIR`, or `HOLDIR`) unless a local `path`/override is provided. This avoids maintaining a shim manifest for HOL itself.
 
 ## Local overrides
 
 ```toml
 # .holconfig.toml (not committed)
 [overrides.foo]
-path = "../foo-dev"
+path = "../foo-dev"   # $VAR/${VAR} allowed
 ```
 
-Override takes priority over `path` in the manifest. The override path must still validate as package `foo` (manifest with matching `project.name`).
+Override takes priority over `path` in the manifest. The override path must still validate as package `foo` (manifest with matching `project.name`). Env vars in override paths are expanded; unset variables are errors.
 
 ## Shim manifests
 
@@ -55,11 +66,11 @@ The `manifest` path is resolved relative to the consumer's manifest directory.
 ## Dependency resolution flow
 
 1. Parse `holproject.toml` and `.holconfig.toml`
-2. For each dependency: check override path → fallback to declared path
-3. Find manifest: `manifest` field (if set) → dependency's own `holproject.toml` → error
+2. For each dependency: check override path → fallback to declared path; reserved `HOLDIR` can resolve from the configured HOL tree
+3. Find manifest: built-in `HOLDIR` manifest → `manifest` field (if set) → dependency's own `holproject.toml` → error
 4. Validate: dependency manifest `project.name` must match dependency key name
 5. Resolve dependency's own dependencies recursively (transitive closure)
-6. Each package gets artifacts under `.holbuild/deps/<package-name>/`
+6. Each package gets artifacts under the root project's `.holbuild/deps/<package-name>/`
 7. Build the full resolved graph
 
 ## Transitive dependencies

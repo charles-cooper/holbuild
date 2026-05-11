@@ -1,5 +1,9 @@
 # holbuild build model
 
+## Source generation
+
+Before source discovery, holbuild runs stale `[[generate]]` steps in dependency order. Each step is keyed by command, declared inputs, declared generator deps, and declared output hashes. Declared outputs are verified after execution, then scanned/hashed as ordinary source files under `[build].members`.
+
 ## Dependency inference
 
 holbuild infers source dependencies from the resolved project graph:
@@ -19,7 +23,7 @@ Project build actions cannot use `use "file"`. It's an arbitrary path input outs
 
 Topological sort of the resolved dependency DAG. Cycle detection with full path reported.
 
-Build order: dependencies loaded first, then dependents. Parallel-ready: `-jN` workers pull from the ready frontier.
+Build order: dependencies loaded first, then dependents. Parallel-ready: `-jN` workers pull from the ready frontier. Nodes with retained failed-prefix checkpoints are prioritized so proof-fix feedback starts earlier.
 
 ## Source kinds & artifacts
 
@@ -52,6 +56,8 @@ hash(
 
 **Any source byte change** (including comments/proof edits) changes the action key and cascades to all dependents. This is conservative — v1 does not attempt semantic equivalence of generated outputs.
 
+Proof engine/checkpoint/timeout/trace flags are intentionally not final artifact action-key inputs. Switching `--skip-checkpoints`, `--skip-goalfrag`, `--goalfrag`, or root tactic timeout should not rebuild an otherwise up-to-date semantic artifact.
+
 ## Up-to-date check
 
 A node is up-to-date when:
@@ -74,7 +80,7 @@ locks/                          # publish + GC locks
 
 Cache publish: after a source build, theory artifacts (sig, sml-template, dat) are stored as blobs. The `.sml` is a template with the `.dat` path replaced by a placeholder.
 
-Cache restore: on action-key match, blobs are materialized into local `.holbuild/`, `.sml` template is rebased with local `.dat` path, `HOLFileSys` remap copies are created, `.uo/.ui` load manifests are written.
+Cache restore: on action-key or parent-output key match, blobs are materialized into local `.holbuild/`, `.sml` template is rebased with local `.dat` path, `HOLFileSys` remap copies are created, `.uo/.ui` load manifests are written.
 
 **A bad cache hit is worse than a missed cache hit.** Validation:
 - Action key must match
@@ -82,9 +88,14 @@ Cache restore: on action-key match, blobs are materialized into local `.holbuild
 - Manifest must have no transient stage paths in mldeps
 - On any validation failure: warn, delete local outputs, rebuild from source
 
-`--no-cache` disables both restore and publish but preserves local `.holbuild/` up-to-date checks.
+`--no-cache` disables both restore and publish but preserves local `.holbuild/` up-to-date checks. `--force` skips local up-to-date and cache restore for requested source execution, but still publishes cache unless `--no-cache` is also set.
 
-Cache GC: `holbuild cache gc [--retention-days N] [--cache-dir PATH]`. Default 7 days. Removes stale tmp, expired action manifests, unreachable blobs. Serializes with `locks/gc.lock`.
+GC:
+- `holbuild gc [--retention-days N] [--max-checkpoints-gb GB] [--cache-dir PATH] [--clean-only|--cache-only]`
+- Default: project clean + global cache GC, 7-day retention, 5GB checkpoint budget
+- Project clean removes stale `.holbuild/stage`, `.holbuild/logs`, checkpoint families, and evicts oldest checkpoint families above the size cap
+- Cache GC removes stale tmp, expired action manifests, and unreachable blobs, serialized with `locks/gc.lock`
+- Legacy `holbuild cache gc` remains cache-only
 
 ## Build root/dependency tactic timeout
 
@@ -92,4 +103,4 @@ Cache GC: `holbuild cache gc [--retention-days N] [--cache-dir PATH]`. Default 7
 
 ## Project write lock
 
-`build` and `heap` commands take a coarse project write lock at `.holbuild/locks/project.lock`. Concurrent holbuild processes mutating the same `.holbuild/` are serialized. Stale locks (same host, dead PID) are auto-removed.
+`build`, `heap`, and project-clean `gc` take a coarse project write lock at `.holbuild/locks/project.lock`. Concurrent holbuild processes mutating the same `.holbuild/` are serialized. Stale locks (same host, dead PID) are auto-removed. Permission errors report the lock path.
