@@ -61,7 +61,7 @@ Each dependency must resolve to a manifest:
    `--holdir`/`HOLBUILD_HOLDIR`/`HOLDIR` unless `path`/override is set. This
    built-in manifest excludes HOL examples/tests; model example subtrees such as
    `$HOLDIR/examples/Crypto/Keccak` as separate dependencies with shim manifests.
-2. If `manifest` field is set, that file is used — dependency's own `holproject.toml` is **never consulted**
+2. If `manifest` field is set, that file is used — dependency's own `holproject.toml` is **never consulted**. This remains true when `.holconfig.toml` overrides the dependency root path.
 3. Otherwise, tries `holproject.toml` in the dependency's directory
 4. If neither exists, build fails with a "no manifest" error
 
@@ -72,6 +72,7 @@ Dependency `name` in `[dependencies.X]` must match the `project.name` in the res
 - `build.members`, `build.exclude`, `build.roots`, `actions.*.extra_inputs`, `generate.*.inputs`, `generate.*.outputs` — **package-root-relative**
 - Absolute paths and `..` components are rejected in those package-relative fields
 - Dependency `path` and `manifest` in `[dependencies.*]` are resolved relative to the *consumer's* manifest directory
+- `.holconfig.toml [overrides.X].path` takes precedence over `[dependencies.X].path`; masked dependency paths are not env-expanded
 - Dependency `path`/`manifest` and `.holconfig.toml` override paths support `$VAR` and `${VAR}` environment expansion; unset vars are errors
 
 ## Source discovery

@@ -256,10 +256,14 @@ members = ["."]
 A downstream package can depend on `HOL_keccak` directly, or inherit it
 transitively through another dependency's manifest. There is no `.holpath`,
 ambient `HOLPATH`, or user-facing include-path schema in project mode;
-dependency locations are resolved through manifests plus local overrides. Path
-fields for dependency manifests/paths and local override paths support `$VAR`
-and `${VAR}` environment variable substitution; unset variables
-are errors. `[build].roots` lists
+dependency locations are resolved through manifests plus local overrides. An
+`[overrides.foo].path` takes precedence over `[dependencies.foo].path`; when an
+override exists, the manifest's `path` field is not env-expanded, so local
+config can mask a committed `path = "$FOO"` even when `FOO` is unset. Explicit
+`[dependencies.foo].manifest` entries are still used with an overridden path and
+their env refs must expand. Path fields for dependency manifests/paths and local
+override paths support only `$VAR` and `${VAR}` environment variable
+substitution; unset variables are errors. `[build].roots` lists
 package-root-relative source paths for default entry points when `holbuild build`
 has no CLI target; root source paths must be
 discoverable through `[build].members`. `[build].members` remains the source

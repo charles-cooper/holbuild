@@ -64,6 +64,7 @@ All under `.holbuild/`: `gen/` (generated theory files), `obj/` (artifacts), `de
 - Proof engine/checkpoint/timeout/trace flags are execution/debug policy, not final artifact action-key inputs
 - Reserved dependency `[dependencies.HOLDIR]` uses holbuild's built-in root-HOL manifest; no shim needed for core HOL sources
 - HOL examples/tests are intentionally outside built-in `HOLDIR`; declare example subtrees (e.g. `keccakTheory`) as separate shimmed dependencies
+- `.holconfig.toml [overrides.X].path` masks `[dependencies.X].path`; masked env vars are not expanded. Explicit `manifest` fields still apply.
 
 ## References
 

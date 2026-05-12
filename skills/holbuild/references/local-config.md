@@ -16,7 +16,14 @@ tactic_timeout = 30.0       # root-package per-step timeout (overrides manifest 
 
 `[overrides.X]` changes where package `X` is found locally. It does **not** change the package identity — the override path must still contain `X`'s manifest (own `holproject.toml` or consumer-supplied shim).
 
-Overrides take priority over `[dependencies.X].path` from the manifest. Override paths support `$VAR` and `${VAR}` expansion; unset variables are errors.
+Overrides take priority over `[dependencies.X].path` from the manifest. If an
+override exists, the manifest `path` is not expanded at all, so a committed
+`path = "$SOME_DEP"` can be masked locally even when `SOME_DEP` is unset.
+Override paths support `$VAR` and `${VAR}` expansion; unset variables are errors.
+
+An override changes only the dependency root. It does not mask an explicit
+`[dependencies.X].manifest`; consumer-relative shim manifests still apply and
+their environment references must expand.
 
 ## Build excludes
 

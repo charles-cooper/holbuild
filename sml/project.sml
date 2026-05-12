@@ -411,8 +411,8 @@ fun validate_local_config_table table =
 fun parse_dependency (name, table) =
   Dependency
     { name = name,
-      path = path_string_field ("dependencies." ^ name) table "path",
-      manifest = path_string_field ("dependencies." ^ name) table "manifest",
+      path = string_field table "path",
+      manifest = string_field table "manifest",
       git = string_field table "git",
       rev = string_field table "rev" }
 
@@ -599,18 +599,23 @@ fun action_policy_for policies logical =
       SOME policy => policy
     | NONE => default_action_policy logical
 
+fun dependency_path_context name = "dependencies." ^ name ^ ".path"
+fun dependency_manifest_context name = "dependencies." ^ name ^ ".manifest"
+
 fun dependency_local_path ({root, overrides, ...} : t) (Dependency {name, path, ...}) =
   Option.map (abs_under root)
     (case override_path overrides name of
          SOME override => SOME override
        | NONE =>
            case path of
-               SOME p => SOME p
+               SOME p => SOME (expand_env (dependency_path_context name) p)
              | NONE => if builtin_holdir_dependency name then !holdir_ref else NONE)
 
 fun dependency_manifest (project as {manifest = project_manifest, ...} : t) dep =
   case dep of
-      Dependency {manifest = SOME manifest, ...} => SOME (abs_under (manifest_root project_manifest) manifest)
+      Dependency {name, manifest = SOME manifest, ...} =>
+        SOME (abs_under (manifest_root project_manifest)
+                (expand_env (dependency_manifest_context name) manifest))
     | Dependency {name, manifest = NONE, ...} =>
         if builtin_holdir_dependency name then SOME (builtin_holdir_manifest ())
         else
