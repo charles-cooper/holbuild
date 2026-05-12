@@ -122,8 +122,9 @@ fun blob_ref line =
           else NONE
   end
 
-fun add_unique item items =
-  if List.exists (fn existing => existing = item) items then items else item :: items
+fun empty_blob_set () = Redblackset.empty String.compare
+
+fun add_blob (blob, blobs) = Redblackset.add(blobs, blob)
 
 fun manifest_path action_dir = Path.concat(action_dir, "manifest")
 
@@ -135,10 +136,10 @@ fun action_live_blobs action_dir =
         (fn (line, blobs) =>
             case blob_ref line of
                 NONE => blobs
-              | SOME blob => add_unique blob blobs)
-        []
+              | SOME blob => add_blob (blob, blobs))
+        (empty_blob_set ())
         (read_lines manifest)
-    else []
+    else empty_blob_set ()
   end
 
 fun collect_live_actions cutoff actions_dir =
@@ -150,9 +151,7 @@ fun collect_live_actions cutoff actions_dir =
           if stale cutoff manifest then
             (remove_tree action_dir; (live_blobs, removed + 1))
           else
-            (List.foldl (fn (blob, blobs) => add_unique blob blobs)
-                        live_blobs
-                        (action_live_blobs action_dir),
+            (Redblackset.union(live_blobs, action_live_blobs action_dir),
              removed)
         else if stale cutoff action_dir then
           (remove_tree action_dir; (live_blobs, removed + 1))
@@ -160,7 +159,7 @@ fun collect_live_actions cutoff actions_dir =
           (live_blobs, removed)
       end
   in
-    List.foldl one ([], 0) (children actions_dir)
+    List.foldl one (empty_blob_set (), 0) (children actions_dir)
   end
 
 fun remove_stale_children cutoff dir =
@@ -170,39 +169,102 @@ fun remove_stale_children cutoff dir =
     0
     (children dir)
 
+fun remove_stale_action_locks cutoff dir =
+  List.foldl
+    (fn (path, removed) =>
+        if has_prefix "action-" (Path.file path) andalso stale cutoff path then
+          (remove_tree path; removed + 1)
+        else removed)
+    0
+    (children dir)
+
 fun blob_name path = Path.file path
 
 fun sweep_blobs cutoff live_blobs blobs_dir =
   List.foldl
     (fn (path, removed) =>
-        if stale cutoff path andalso not (List.exists (fn blob => blob = blob_name path) live_blobs) then
+        if stale cutoff path andalso not (Redblackset.member(live_blobs, blob_name path)) then
           (remove_tree path; removed + 1)
         else removed)
     0
     (children blobs_dir)
 
 fun locks_dir root = Path.concat(root, "locks")
+fun gc_lock_path root = Path.concat(locks_dir root, "gc.lock")
+fun gc_lock_owner_path lock = lock ^ ".owner"
 
-fun acquire_lock_path {busy_message, lock} =
-  (FS.mkDir lock; lock)
-  handle OS.SysErr _ => raise Error busy_message
+fun path_is_dir path = FS.isDir path handle OS.SysErr _ => false
+
+fun remove_obsolete_gc_lock_dir lock =
+  if path_is_dir lock then
+    (HolbuildStatus.message_stderr
+       ("holbuild: warning: removing obsolete directory cache gc lock: " ^ lock ^ "\n");
+     remove_tree lock)
+  else ()
+
+datatype gc_lock = GcLock of {fd : Posix.IO.file_desc, lock : string}
+
+fun gc_lock_owner () =
+  String.concatWith "\n"
+    ["holbuild-cache-gc-lock-v1",
+     "command=cache gc",
+     "pid=" ^ HolbuildProjectLock.current_pid_text (),
+     "pid_ns=" ^ HolbuildProjectLock.current_pid_namespace (),
+     "starttime=" ^ HolbuildProjectLock.proc_starttime "self",
+     "boot_id=" ^ HolbuildProjectLock.current_boot_id (),
+     "cwd=" ^ FS.getDir (),
+     "host=" ^ HolbuildProjectLock.current_host (),
+     "started=" ^ Time.toString (Time.now ())] ^ "\n"
+
+fun current_gc_lock_owner lock =
+  SOME (HolbuildProjectLock.read_text (gc_lock_owner_path lock)) handle _ => NONE
+
+fun unavailable_gc_lock_owner fd =
+  String.concatWith "\n"
+    ["holbuild-cache-gc-lock-v1",
+     "command=cache gc",
+     "pid=" ^ Option.getOpt(HolbuildProjectLock.blocking_lock_owner fd, "unknown"),
+     "cwd=unknown"] ^ "\n"
+
+fun cache_gc_lock_error lock owner =
+  Error ("cache gc already running\n" ^
+         "lock: " ^ lock ^ "\n" ^
+         "owner: " ^ HolbuildProjectLock.owner_summary owner)
 
 fun acquire_lock root =
   let
-    val lock = Path.concat(locks_dir root, "gc.lock")
+    val lock = gc_lock_path root
   in
-    ensure_dir (locks_dir root);
-    acquire_lock_path {busy_message = "cache gc already running", lock = lock}
+    (ensure_dir (locks_dir root);
+     remove_obsolete_gc_lock_dir lock;
+     let
+       val fd = HolbuildProjectLock.open_project_lock_file lock
+       val _ = HolbuildProjectLock.set_close_on_exec fd
+     in
+       if HolbuildProjectLock.try_lock_fd fd then
+         ((HolbuildProjectLock.write_text (gc_lock_owner_path lock) (gc_lock_owner ());
+           GcLock {fd = fd, lock = lock})
+          handle e => (HolbuildProjectLock.close_fd fd; raise e))
+       else
+         let val owner = Option.getOpt(current_gc_lock_owner lock, unavailable_gc_lock_owner fd)
+         in HolbuildProjectLock.close_fd fd; raise cache_gc_lock_error lock owner end
+     end)
+    handle OS.SysErr (msg, _) =>
+      raise Error ("could not acquire cache gc lock: " ^ lock ^ ": " ^ msg)
   end
 
-fun release_lock lock = FS.rmDir lock handle OS.SysErr _ => ()
+fun release_gc_lock (GcLock {fd, lock}) =
+  (HolbuildProjectLock.remove_file (gc_lock_owner_path lock);
+   HolbuildProjectLock.close_fd fd)
 
 fun with_lock root f =
   let val lock = acquire_lock root
   in
-    (f () before release_lock lock)
-    handle e => (release_lock lock; raise e)
+    (f () before release_gc_lock lock)
+    handle e => (release_gc_lock lock; raise e)
   end
+
+fun release_dir_lock lock = FS.rmDir lock handle OS.SysErr _ => ()
 
 fun action_lock root key = Path.concat(locks_dir root, "action-" ^ key ^ ".lock")
 
@@ -216,8 +278,8 @@ fun try_acquire_action_lock root key =
 fun with_action_publish_lock root key publish skip =
   case try_acquire_action_lock root key of
       SOME lock =>
-        ((publish () before release_lock lock)
-         handle e => (release_lock lock; raise e))
+        ((publish () before release_dir_lock lock)
+         handle e => (release_dir_lock lock; raise e))
     | NONE => skip ()
 
 fun gc_root root days =
@@ -232,7 +294,7 @@ fun gc_root root days =
       fun run () =
         let
           val tmp_removed = remove_stale_children cutoff tmp_dir
-          val lock_removed = remove_stale_children cutoff (locks_dir root)
+          val lock_removed = remove_stale_action_locks cutoff (locks_dir root)
           val (live_blobs, actions_removed) = collect_live_actions cutoff actions_dir
           val blobs_removed = sweep_blobs cutoff live_blobs blobs_dir
         in

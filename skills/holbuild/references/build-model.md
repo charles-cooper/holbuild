@@ -94,7 +94,8 @@ GC:
 - `holbuild gc [--retention-days N] [--max-checkpoints-gb GB] [--cache-dir PATH] [--clean-only|--cache-only]`
 - Default: project clean + global cache GC, 7-day retention, 5GB checkpoint budget
 - Project clean removes stale `.holbuild/stage`, `.holbuild/logs`, checkpoint families, and evicts oldest checkpoint families above the size cap
-- Cache GC removes stale tmp, expired action manifests, and unreachable blobs, serialized with `locks/gc.lock`
+- Cache GC removes stale tmp, expired action manifests, and unreachable blobs, serialized with a POSIX file lock at `locks/gc.lock`
+- Interrupted cache GC does not leave a stale lock; older directory-style `locks/gc.lock` entries are removed/replaced automatically
 - Legacy `holbuild cache gc` remains cache-only
 
 ## Build root/dependency tactic timeout
