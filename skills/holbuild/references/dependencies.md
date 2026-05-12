@@ -29,7 +29,44 @@ The dependency key `HOLDIR` is reserved. If `[dependencies.HOLDIR]` has no expli
 # no path/manifest needed for the built-in manifest case
 ```
 
-The package root defaults to the configured HOL tree (`--holdir`, `HOLBUILD_HOLDIR`, or `HOLDIR`) unless a local `path`/override is provided. This avoids maintaining a shim manifest for HOL itself.
+The package root defaults to the configured HOL tree (`--holdir`,
+`HOLBUILD_HOLDIR`, or `HOLDIR`) unless a local `path`/override is provided. This
+avoids maintaining a shim manifest for HOL itself.
+
+Scope: the built-in `HOLDIR` manifest is for root HOL sources, not every file in
+the HOL checkout. It deliberately excludes examples, tests, manuals, and
+non-default tool variants. If a build fails with an undeclared example structure
+such as:
+
+```text
+Structure (keccakTheory) has not been declared
+```
+
+declare the example subtree as a separate dependency:
+
+```toml
+# holproject.toml
+[dependencies.HOLDIR]
+
+[dependencies.HOL_keccak]
+path = "$HOLDIR/examples/Crypto/Keccak"
+manifest = "shims/keccak.toml"
+```
+
+```toml
+# shims/keccak.toml
+[project]
+name = "HOL_keccak"
+
+[build]
+members = ["."]
+
+[dependencies.HOLDIR]
+```
+
+Downstream packages can depend on `HOL_keccak` directly or get it transitively
+from another dependency's manifest. The same pattern applies to other HOL example
+subtrees until they grow their own `holproject.toml` files.
 
 ## Local overrides
 

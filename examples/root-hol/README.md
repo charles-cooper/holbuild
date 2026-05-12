@@ -13,6 +13,32 @@ reserved `HOLDIR` dependency uses the equivalent manifest compiled into holbuild
 so users only set `--holdir`, `HOLBUILD_HOLDIR`, or `HOLDIR`; no HOLDIR shim
 manifest file is required.
 
+This manifest deliberately excludes `$HOLDIR/examples`, tests, manuals, and
+non-default tool variants. Example theories are separate package boundaries. For
+example, code that needs `keccakTheory` should declare a shimmed dependency on
+`$HOLDIR/examples/Crypto/Keccak` rather than expecting it from
+`[dependencies.HOLDIR]`:
+
+```toml
+# consumer holproject.toml
+[dependencies.HOLDIR]
+
+[dependencies.HOL_keccak]
+path = "$HOLDIR/examples/Crypto/Keccak"
+manifest = "shims/keccak.toml"
+```
+
+```toml
+# shims/keccak.toml
+[project]
+name = "HOL_keccak"
+
+[build]
+members = ["."]
+
+[dependencies.HOLDIR]
+```
+
 Probe shape:
 
 ```sh

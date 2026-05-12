@@ -228,10 +228,37 @@ The override changes only where the package is found locally. The package still
 needs its own `holproject.toml` or an explicit shim manifest from the consumer,
 except for the reserved `[dependencies.HOLDIR]` package, which uses holbuild's
 built-in root-HOL manifest and the runtime `--holdir`/`HOLBUILD_HOLDIR` path.
-There is no `.holpath`, ambient `HOLPATH`, or user-facing include-path schema in
-project mode; dependency locations are resolved through manifests plus local
-overrides. Path fields for dependency manifests/paths and local override paths
-support `$VAR` and `${VAR}` environment variable substitution; unset variables
+The built-in `HOLDIR` manifest intentionally models the root HOL sources only;
+it excludes examples, tests, manuals, and non-default tool variants. If a project
+needs a HOL example theory such as `keccakTheory` from
+`$HOLDIR/examples/Crypto/Keccak`, declare that subtree as a separate dependency:
+
+```toml
+# holproject.toml
+[dependencies.HOLDIR]
+
+[dependencies.HOL_keccak]
+path = "$HOLDIR/examples/Crypto/Keccak"
+manifest = "shims/keccak.toml"
+```
+
+```toml
+# shims/keccak.toml
+[project]
+name = "HOL_keccak"
+
+[build]
+members = ["."]
+
+[dependencies.HOLDIR]
+```
+
+A downstream package can depend on `HOL_keccak` directly, or inherit it
+transitively through another dependency's manifest. There is no `.holpath`,
+ambient `HOLPATH`, or user-facing include-path schema in project mode;
+dependency locations are resolved through manifests plus local overrides. Path
+fields for dependency manifests/paths and local override paths support `$VAR`
+and `${VAR}` environment variable substitution; unset variables
 are errors. `[build].roots` lists
 package-root-relative source paths for default entry points when `holbuild build`
 has no CLI target; root source paths must be

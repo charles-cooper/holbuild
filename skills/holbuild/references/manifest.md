@@ -56,7 +56,11 @@ Tables validated: `[holbuild]`, `[project]`, `[build]`, `[run]`, `[dependencies.
 ## Dependency resolution
 
 Each dependency must resolve to a manifest:
-1. Reserved `[dependencies.HOLDIR]` with no `manifest` uses holbuild's built-in root-HOL manifest; the package root defaults to `--holdir`/`HOLBUILD_HOLDIR`/`HOLDIR` unless `path`/override is set
+1. Reserved `[dependencies.HOLDIR]` with no `manifest` uses holbuild's built-in
+   root-HOL manifest; the package root defaults to
+   `--holdir`/`HOLBUILD_HOLDIR`/`HOLDIR` unless `path`/override is set. This
+   built-in manifest excludes HOL examples/tests; model example subtrees such as
+   `$HOLDIR/examples/Crypto/Keccak` as separate dependencies with shim manifests.
 2. If `manifest` field is set, that file is used — dependency's own `holproject.toml` is **never consulted**
 3. Otherwise, tries `holproject.toml` in the dependency's directory
 4. If neither exists, build fails with a "no manifest" error
