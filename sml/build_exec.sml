@@ -591,6 +591,10 @@ fun collect_checkpoint_families dir =
 fun total_checkpoint_bytes families =
   List.foldl (fn ({bytes, ...} : checkpoint_family, total) => total + bytes) (0 : Position.int) families
 
+fun checkpoint_bytes dir = total_checkpoint_bytes (collect_checkpoint_families dir)
+
+fun bytes_text bytes = IntInf.toString bytes
+
 fun sort_families_by_mtime_ascending families =
   let
     fun insert x [] = [x]
@@ -648,19 +652,41 @@ fun evict_oldest_checkpoints dir max_bytes =
         end
     end
 
+type checkpoint_eviction =
+  {before_bytes : IntInf.int, after_bytes : IntInf.int,
+   max_bytes : IntInf.int, evicted : int}
+
+fun evict_oldest_checkpoints_with_stats dir max_bytes =
+  let
+    val before_bytes = checkpoint_bytes dir
+    val evicted = evict_oldest_checkpoints dir max_bytes
+    val after_bytes = checkpoint_bytes dir
+  in
+    {before_bytes = before_bytes, after_bytes = after_bytes,
+     max_bytes = max_bytes, evicted = evicted}
+  end
+
+fun checkpoint_eviction_text ({before_bytes, after_bytes, max_bytes, evicted} : checkpoint_eviction) =
+  "checkpoint_bytes_before=" ^ bytes_text before_bytes ^
+  " checkpoint_bytes_after=" ^ bytes_text after_bytes ^
+  " checkpoint_max_bytes=" ^ bytes_text max_bytes ^
+  " evicted=" ^ Int.toString evicted
+
 fun clean_project project days max_checkpoints_gb =
   let
     val cutoff = retention_cutoff days
+    val checkpoint_dir = project_state_dir project "checkpoints"
+    val checkpoint_bytes_initial = checkpoint_bytes checkpoint_dir
     val stage_removed = remove_stale_children cutoff (project_state_dir project "stage")
     val log_removed = remove_stale_children cutoff (project_state_dir project "logs")
-    val checkpoint_removed = remove_stale_checkpoint_families cutoff (project_state_dir project "checkpoints")
-    val evicted = evict_oldest_checkpoints (project_state_dir project "checkpoints")
-                                       (gb_to_bytes max_checkpoints_gb)
+    val checkpoint_removed = remove_stale_checkpoint_families cutoff checkpoint_dir
+    val eviction = evict_oldest_checkpoints_with_stats checkpoint_dir (gb_to_bytes max_checkpoints_gb)
   in
     print ("project clean: removed stage=" ^ Int.toString stage_removed ^
            " logs=" ^ Int.toString log_removed ^
            " checkpoints=" ^ Int.toString checkpoint_removed ^
-           " evicted=" ^ Int.toString evicted ^ "\n")
+           " checkpoint_bytes_initial=" ^ bytes_text checkpoint_bytes_initial ^
+           " " ^ checkpoint_eviction_text eviction ^ "\n")
   end
 
 fun file_exists path = FS.access(path, [FS.A_READ]) handle OS.SysErr _ => false
@@ -2611,19 +2637,22 @@ fun build_parallel status options tc project base_context plan keys toolchain_ke
 
 fun enforce_checkpoint_budget project =
   let
-    val evicted =
-      evict_oldest_checkpoints (project_state_dir project "checkpoints")
-                              (gb_to_bytes default_max_checkpoints_gb)
+    val max_bytes = gb_to_bytes default_max_checkpoints_gb
+    val eviction = evict_oldest_checkpoints_with_stats (project_state_dir project "checkpoints") max_bytes
+    val {before_bytes, after_bytes, evicted, ...} = eviction
   in
-    if evicted > 0 then
-      warn ("evicted " ^ Int.toString evicted ^
-            " checkpoint family/families to keep .holbuild/checkpoints under " ^
-            Int.toString default_max_checkpoints_gb ^ "GB")
+    if before_bytes > max_bytes orelse evicted > 0 then
+      warn ("checkpoint budget: " ^ checkpoint_eviction_text eviction ^
+            " checkpoint_max_gb=" ^ Int.toString default_max_checkpoints_gb)
+    else ();
+    if after_bytes > max_bytes then
+      warn ("checkpoint budget still exceeds limit after eviction; check permissions or oversized live families")
     else ()
   end
 
 fun build (options : build_options) tc project plan toolchain_key jobs =
   let
+    val _ = enforce_checkpoint_budget project
     val base_context = toolchain_base_context tc
     val keys = HolbuildBuildPlan.input_keys (build_config_lines_for_node options project) toolchain_key plan
   in
