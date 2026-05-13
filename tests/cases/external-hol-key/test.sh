@@ -23,9 +23,10 @@ cat > "$fake_holdir/src/ext/ExtLib.sml" <<'SML'
 val _ = load "ExtDepTheory";
 fun ext_value () = 1;
 SML
-: > "$fake_holdir/src/ext/.hol/objs/ExtLib.uo"
+printf 'ext-lib-artifact-v1\n' > "$fake_holdir/src/ext/.hol/objs/ExtLib.uo"
 ln -s "$fake_holdir/src/ext/.hol/objs/ExtLib.uo" "$fake_holdir/sigobj/ExtLib.uo"
-: > "$fake_holdir/src/ext/.hol/objs/ExtDepTheory.uo"
+printf 'ext-dep-theory-artifact-v1\n' > "$fake_holdir/src/ext/.hol/objs/ExtDepTheory.uo"
+printf 'ext-dep-dat-v1\n' > "$fake_holdir/src/ext/.hol/objs/ExtDepTheory.dat"
 printf 'ext-dep-cachekey-v1\n' > "$fake_holdir/src/ext/.hol/objs/ExtDepTheory.cachekey"
 ln -s "$fake_holdir/src/ext/.hol/objs/ExtDepTheory.uo" "$fake_holdir/sigobj/ExtDepTheory.uo"
 
@@ -51,26 +52,30 @@ input_key() {
 }
 
 key_v1=$(input_key)
-printf 'changed compiled object bytes\n' > "$fake_holdir/src/ext/.hol/objs/ExtLib.uo"
-key_after_artifact_change=$(input_key)
-if [[ "$key_after_artifact_change" != "$key_v1" ]]; then
-  echo "external HOL key should not hash .uo/.ui artifact bytes" >&2
+printf 'changed theory compiled object bytes\n' > "$fake_holdir/src/ext/.hol/objs/ExtDepTheory.uo"
+key_after_theory_artifact_change=$(input_key)
+if [[ "$key_after_theory_artifact_change" != "$key_v1" ]]; then
+  echo "external theory key should not hash .uo/.ui artifact bytes" >&2
   exit 1
 fi
 
 printf 'ext-dep-cachekey-v2\n' > "$fake_holdir/src/ext/.hol/objs/ExtDepTheory.cachekey"
 key_after_dep_cachekey_change=$(input_key)
 if [[ "$key_after_dep_cachekey_change" == "$key_v1" ]]; then
-  echo "external HOL key ignored transitive root-HOL cachekey/source graph" >&2
+  echo "external HOL key ignored transitive root-HOL cachekey" >&2
   exit 1
 fi
 
-cat > "$fake_holdir/src/ext/ExtLib.sml" <<'SML'
-val _ = load "ExtDepTheory";
-fun ext_value () = 2;
-SML
-key_after_lib_source_change=$(input_key)
-if [[ "$key_after_lib_source_change" == "$key_after_dep_cachekey_change" ]]; then
-  echo "external HOL key ignored non-bootstrap external library source" >&2
+printf 'ext-dep-dat-v2\n' > "$fake_holdir/src/ext/.hol/objs/ExtDepTheory.dat"
+key_after_dep_dat_change=$(input_key)
+if [[ "$key_after_dep_dat_change" == "$key_after_dep_cachekey_change" ]]; then
+  echo "external HOL key ignored transitive root-HOL dat" >&2
+  exit 1
+fi
+
+printf 'ext-lib-artifact-v2\n' > "$fake_holdir/src/ext/.hol/objs/ExtLib.uo"
+key_after_lib_artifact_change=$(input_key)
+if [[ "$key_after_lib_artifact_change" == "$key_after_dep_dat_change" ]]; then
+  echo "external HOL key ignored non-bootstrap external library artifact" >&2
   exit 1
 fi

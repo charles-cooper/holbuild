@@ -474,59 +474,19 @@ fun source_dir_for_object_stem stem =
     else NONE
   end
 
-fun theory_script_source_name name =
-  if theory_name name then
-    String.substring(name, 0, size name - size "Theory") ^ "Script.sml"
-  else name ^ ".sml"
-
-fun external_source_candidates kind stem name =
-  let
-    fun from_dir dir =
-      if kind = "theory" then
-        [Path.concat(dir, theory_script_source_name name),
-         Path.concat(dir, name ^ ".sig"),
-         Path.concat(dir, name ^ ".sml")]
-      else
-        [Path.concat(dir, name ^ ".sig"), Path.concat(dir, name ^ ".sml")]
-  in
-    case source_dir_for_object_stem stem of
-        SOME dir => from_dir dir
-      | NONE => [stem ^ ".sig", stem ^ ".sml"]
-  end
-
 fun external_object_id kind name = kind ^ ":" ^ name
 
 fun external_memo_id dirs kind name =
   String.concatWith "\030" dirs ^ "\029" ^ external_object_id kind name
 
+fun external_source_candidates stem name =
+  case source_dir_for_object_stem stem of
+      SOME dir => [Path.concat(dir, name ^ ".sig"), Path.concat(dir, name ^ ".sml")]
+    | NONE => [stem ^ ".sig", stem ^ ".sml"]
+
 fun external_source_deps path =
   HolbuildDependencies.extract path
   handle HolbuildDependencies.Error msg => raise Error msg
-
-fun path_is_absolute path = Path.isAbsolute path handle Path.InvalidArc => false
-
-fun external_use_path source path =
-  normalize_path
-    (if path_is_absolute path then path else Path.concat(Path.dir source, path))
-
-fun external_source_closure sources =
-  let
-    fun seen path paths = List.exists (fn existing => existing = path) paths
-    fun visit (path, (seen_paths, kept)) =
-      let val path = normalize_path path
-      in
-        if seen path seen_paths orelse not (readable path) then (seen_paths, kept)
-        else
-          let
-            val deps = external_source_deps path
-            val uses = map (external_use_path path) (#uses deps)
-          in
-            List.foldl visit (path :: seen_paths, path :: kept) uses
-          end
-      end
-  in
-    rev (#2 (List.foldl visit ([], []) sources))
-  end
 
 fun external_dependency_names sources =
   let
@@ -539,24 +499,36 @@ fun external_dependency_names sources =
 
 fun external_dependency_kind name = if theory_name name then "theory" else "lib"
 
-(* External HOL objects are loaded from HOLDIR/sigobj, but their bytes are not
-   portable cache keys.  Prefer Holmake's source/action .cachekey for theories;
-   otherwise hash source files plus recursively mentioned external loads.  If an
-   object is not in sigobj, treat it as part of the hol.state bootstrap boundary. *)
+(* External HOL objects are loaded from HOLDIR/sigobj, so their keys must reflect
+   what HOL will load.  For theories, Holmake's .cachekey and the .dat hash are
+   both acceptable semantic boundaries; recording both when available is stricter
+   and catches stale/divergent stamps.  For ML libs there is no Holmake stamp, so
+   the compiled artifact hash is the correctness fallback, with source-derived
+   load deps included to track theories loaded by that artifact.  If an object is
+   not in sigobj, treat it as part of the hol.state bootstrap boundary. *)
 fun external_key_lookup toolchain_key =
   let
     val memo = ref ([] : (string * string) list)
     fun memoized id = Option.map #2 (List.find (fn (key, _) => key = id) (!memo))
     fun remember id value = (memo := (id, value) :: !memo; value)
     fun in_stack id stack = List.exists (fn active => active = id) stack
-    fun cachekey_lines cachekey =
-      ["cachekey=" ^ String.translate (fn #"\n" => " " | c => str c) (read_text cachekey)]
-    fun source_lines sources =
-      map (fn path => "source-sha1=" ^ Path.file path ^ "@" ^ file_hash path) sources
+    fun cachekey_line cachekey =
+      "cachekey=" ^ String.translate (fn #"\n" => " " | c => str c) (read_text cachekey)
+    fun artifact_line artifact = "artifact-sha1=" ^ file_hash artifact
+    fun dat_line dat = "dat-sha1=" ^ file_hash dat
+    fun theory_key_lines cachekey dat =
+      (if readable cachekey then [cachekey_line cachekey] else []) @
+      (if readable dat then [dat_line dat] else [])
     fun dependency_lines dirs stack deps =
       map (fn dep =>
              "dep=" ^ dep ^ "@" ^ compute dirs stack (external_dependency_kind dep) dep)
           deps
+    and lib_key_lines dirs stack artifact stem name =
+      let
+        val sources = List.filter readable (external_source_candidates stem name)
+      in
+        artifact_line artifact :: dependency_lines dirs stack (external_dependency_names sources)
+      end
     and compute dirs stack kind name =
       let val id = external_memo_id dirs kind name
       in
@@ -574,15 +546,14 @@ fun external_key_lookup toolchain_key =
               val resolved = resolved_link_path artifact
               val stem = drop_object_suffix resolved
               val cachekey = stem ^ ".cachekey"
-              val sources =
-                external_source_closure
-                  (List.filter readable (external_source_candidates kind stem name))
+              val dat = stem ^ ".dat"
               val key_lines =
-                if readable cachekey then cachekey_lines cachekey
-                else if not (null sources) then
-                  source_lines sources @ dependency_lines dirs stack (external_dependency_names sources)
-                else
-                  raise Error ("could not derive source key for external HOL " ^ kind ^ " " ^ name)
+                if kind = "theory" then theory_key_lines cachekey dat
+                else lib_key_lines dirs stack resolved stem name
+              val _ =
+                if null key_lines then
+                  raise Error ("could not derive key for external HOL " ^ kind ^ " " ^ name)
+                else ()
               val text = String.concatWith "\n"
                            (["holbuild-external-source-v1",
                              "kind=" ^ kind,
