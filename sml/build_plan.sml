@@ -424,6 +424,176 @@ fun file_hash path =
   if readable path then HolbuildHash.file_sha1 path
   else raise Error ("extra input not found: " ^ path)
 
+fun read_text path =
+  let
+    val input = TextIO.openIn path
+      handle e => raise Error ("could not read " ^ path ^ ": " ^ General.exnMessage e)
+  in
+    TextIO.inputAll input before TextIO.closeIn input
+    handle e => (TextIO.closeIn input; raise e)
+  end
+
+fun resolved_link_path path =
+  if FS.isLink path handle OS.SysErr _ => false then
+    let val target = FS.readLink path
+    in
+      normalize_path
+        (if Path.isAbsolute target then target else Path.concat(Path.dir path, target))
+    end
+  else normalize_path path
+
+fun first_readable_path paths = List.find readable paths
+
+fun external_artifact_path_in dirs name =
+  first_readable_path
+    (List.concat
+       (map (fn dir => [Path.concat(dir, name ^ ".uo"),
+                        Path.concat(dir, name ^ ".ui")])
+            dirs))
+
+fun string_has_suffix suffix text =
+  let
+    val n = size text
+    val m = size suffix
+  in
+    n >= m andalso String.substring(text, n - m, m) = suffix
+  end
+
+fun drop_object_suffix path =
+  if string_has_suffix ".uo" path then String.substring(path, 0, size path - 3)
+  else if string_has_suffix ".ui" path then String.substring(path, 0, size path - 3)
+  else path
+
+fun source_dir_for_object_stem stem =
+  let
+    val object_dir = Path.dir stem
+    val hol_dir = Path.dir object_dir
+  in
+    if Path.file object_dir = "objs" andalso Path.file hol_dir = ".hol" then
+      SOME (Path.dir hol_dir)
+    else NONE
+  end
+
+fun theory_script_source_name name =
+  if theory_name name then
+    String.substring(name, 0, size name - size "Theory") ^ "Script.sml"
+  else name ^ ".sml"
+
+fun external_source_candidates kind stem name =
+  let
+    fun from_dir dir =
+      if kind = "theory" then
+        [Path.concat(dir, theory_script_source_name name),
+         Path.concat(dir, name ^ ".sig"),
+         Path.concat(dir, name ^ ".sml")]
+      else
+        [Path.concat(dir, name ^ ".sig"), Path.concat(dir, name ^ ".sml")]
+  in
+    case source_dir_for_object_stem stem of
+        SOME dir => from_dir dir
+      | NONE => [stem ^ ".sig", stem ^ ".sml"]
+  end
+
+fun external_object_id kind name = kind ^ ":" ^ name
+
+fun external_memo_id dirs kind name =
+  String.concatWith "\030" dirs ^ "\029" ^ external_object_id kind name
+
+fun external_source_deps path =
+  HolbuildDependencies.extract path
+  handle HolbuildDependencies.Error msg => raise Error msg
+
+fun path_is_absolute path = Path.isAbsolute path handle Path.InvalidArc => false
+
+fun external_use_path source path =
+  normalize_path
+    (if path_is_absolute path then path else Path.concat(Path.dir source, path))
+
+fun external_source_closure sources =
+  let
+    fun seen path paths = List.exists (fn existing => existing = path) paths
+    fun visit (path, (seen_paths, kept)) =
+      let val path = normalize_path path
+      in
+        if seen path seen_paths orelse not (readable path) then (seen_paths, kept)
+        else
+          let
+            val deps = external_source_deps path
+            val uses = map (external_use_path path) (#uses deps)
+          in
+            List.foldl visit (path :: seen_paths, path :: kept) uses
+          end
+      end
+  in
+    rev (#2 (List.foldl visit ([], []) sources))
+  end
+
+fun external_dependency_names sources =
+  let
+    fun deps_for_source path =
+      let val deps = external_source_deps path
+      in #loads deps @ #holdep_mentions deps end
+  in
+    unique_strings (List.concat (map deps_for_source sources))
+  end
+
+fun external_dependency_kind name = if theory_name name then "theory" else "lib"
+
+(* External HOL objects are loaded from HOLDIR/sigobj, but their bytes are not
+   portable cache keys.  Prefer Holmake's source/action .cachekey for theories;
+   otherwise hash source files plus recursively mentioned external loads.  If an
+   object is not in sigobj, treat it as part of the hol.state bootstrap boundary. *)
+fun external_key_lookup toolchain_key =
+  let
+    val memo = ref ([] : (string * string) list)
+    fun memoized id = Option.map #2 (List.find (fn (key, _) => key = id) (!memo))
+    fun remember id value = (memo := (id, value) :: !memo; value)
+    fun in_stack id stack = List.exists (fn active => active = id) stack
+    fun cachekey_lines cachekey =
+      ["cachekey=" ^ String.translate (fn #"\n" => " " | c => str c) (read_text cachekey)]
+    fun source_lines sources =
+      map (fn path => "source-sha1=" ^ Path.file path ^ "@" ^ file_hash path) sources
+    fun dependency_lines dirs stack deps =
+      map (fn dep =>
+             "dep=" ^ dep ^ "@" ^ compute dirs stack (external_dependency_kind dep) dep)
+          deps
+    and compute dirs stack kind name =
+      let val id = external_memo_id dirs kind name
+      in
+        case memoized id of
+            SOME key => key
+          | NONE =>
+              if in_stack id stack then "cycle:" ^ external_object_id kind name
+              else remember id (compute_uncached dirs (id :: stack) kind name)
+      end
+    and compute_uncached dirs stack kind name =
+      case external_artifact_path_in dirs name of
+          NONE => toolchain_key
+        | SOME artifact =>
+            let
+              val resolved = resolved_link_path artifact
+              val stem = drop_object_suffix resolved
+              val cachekey = stem ^ ".cachekey"
+              val sources =
+                external_source_closure
+                  (List.filter readable (external_source_candidates kind stem name))
+              val key_lines =
+                if readable cachekey then cachekey_lines cachekey
+                else if not (null sources) then
+                  source_lines sources @ dependency_lines dirs stack (external_dependency_names sources)
+                else
+                  raise Error ("could not derive source key for external HOL " ^ kind ^ " " ^ name)
+              val text = String.concatWith "\n"
+                           (["holbuild-external-source-v1",
+                             "kind=" ^ kind,
+                             "name=" ^ name] @ key_lines) ^ "\n"
+            in
+              HolbuildHash.string_sha1 text
+            end
+  in
+    fn node => fn kind => fn name => compute (external_dirs_of node) [] kind name
+  end
+
 fun bool_text true = "true"
   | bool_text false = "false"
 
@@ -434,15 +604,19 @@ fun lookup_key keys dep =
       SOME (_, input_key) => input_key
     | NONE => raise Error ("missing action key for dependency: " ^ logical_name dep)
 
-fun action_text_with lookup config_lines_for_node toolchain_key nodes keys node =
+fun action_text_with lookup config_lines_for_node toolchain_key external_key nodes keys node =
   let
     val source = source_of node
     val source_hash = source_hash_of node
     val project_deps =
       map (fn dep => package dep ^ ":" ^ logical_name dep ^ "@" ^ lookup_key keys dep)
         (direct_project_deps_with lookup nodes node)
-    val external_deps = map (fn name => "HOL:" ^ name ^ "@" ^ toolchain_key) (direct_external_theories_with lookup node)
-    val external_libs = map (fn name => "HOLLIB:" ^ name ^ "@" ^ toolchain_key) (direct_external_libs_with lookup node)
+    val external_deps =
+      map (fn name => "HOL:" ^ name ^ "@" ^ external_key node "theory" name)
+        (direct_external_theories_with lookup node)
+    val external_libs =
+      map (fn name => "HOLLIB:" ^ name ^ "@" ^ external_key node "lib" name)
+        (direct_external_libs_with lookup node)
     val policy = #policy source
     val declared_deps = HolbuildProject.action_deps policy
     val declared_loads = HolbuildProject.action_loads policy
@@ -474,16 +648,19 @@ fun action_text_with lookup config_lines_for_node toolchain_key nodes keys node 
   end
 
 fun action_text config_lines_for_node toolchain_key nodes keys node =
-  action_text_with (nodes_named nodes) config_lines_for_node toolchain_key nodes keys node
+  let val external_key = external_key_lookup toolchain_key
+  in action_text_with (nodes_named nodes) config_lines_for_node toolchain_key external_key nodes keys node end
 
-fun add_input_key_with lookup config_lines_for_node toolchain_key nodes (node, keys) =
-  (key node, hash_text (action_text_with lookup config_lines_for_node toolchain_key nodes keys node)) :: keys
+fun add_input_key_with lookup config_lines_for_node toolchain_key external_key nodes (node, keys) =
+  (key node, hash_text (action_text_with lookup config_lines_for_node toolchain_key external_key nodes keys node)) :: keys
 
 fun add_input_key config_lines_for_node toolchain_key nodes (node, keys) =
-  add_input_key_with (nodes_named nodes) config_lines_for_node toolchain_key nodes (node, keys)
+  let val external_key = external_key_lookup toolchain_key
+  in add_input_key_with (nodes_named nodes) config_lines_for_node toolchain_key external_key nodes (node, keys) end
 
 fun input_keys_with lookup config_lines_for_node toolchain_key nodes =
-  List.foldl (fn (node, keys) => add_input_key_with lookup config_lines_for_node toolchain_key nodes (node, keys)) [] nodes
+  let val external_key = external_key_lookup toolchain_key
+  in List.foldl (fn (node, keys) => add_input_key_with lookup config_lines_for_node toolchain_key external_key nodes (node, keys)) [] nodes end
 
 fun input_keys config_lines_for_node toolchain_key nodes =
   input_keys_with (nodes_named nodes) config_lines_for_node toolchain_key nodes
