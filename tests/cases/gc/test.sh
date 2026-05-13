@@ -44,9 +44,10 @@ gc_log=$tmpdir/gc.log
   "$HOLBUILD_BIN" gc --retention-days 0 --cache-dir "$cache") > "$gc_log" 2>&1
 
 require_grep "project clean: removed" "$gc_log"
-require_grep "checkpoint_bytes_before=" "$gc_log"
-require_grep "checkpoint_bytes_after=" "$gc_log"
-require_grep "checkpoint_max_bytes=" "$gc_log"
+require_grep "checkpoint_gb_initial=" "$gc_log"
+require_grep "checkpoint_gb_before=" "$gc_log"
+require_grep "checkpoint_gb_after=" "$gc_log"
+require_grep "checkpoint_max_gb=" "$gc_log"
 require_grep "cache gc: removed" "$gc_log"
 [[ ! -e "$project/.holbuild/stage/old-stage" ]] || { echo "gc left stale stage dir" >&2; exit 1; }
 [[ ! -e "$project/.holbuild/logs/old.log" ]] || { echo "gc left stale log" >&2; exit 1; }
@@ -74,7 +75,7 @@ printf 'cache residue\n' > "$clean_only_cache/tmp/old/file"
 (cd "$clean_only_project" && env -u HOLDIR -u HOLBUILD_HOLDIR HOLBUILD_CACHE="$clean_only_cache" \
   "$HOLBUILD_BIN" gc --clean-only --retention-days 0 --cache-dir "$clean_only_cache") > "$tmpdir/clean-only.log" 2>&1
 require_grep "project clean: removed" "$tmpdir/clean-only.log"
-require_grep "checkpoint_bytes_before=" "$tmpdir/clean-only.log"
+require_grep "checkpoint_gb_before=" "$tmpdir/clean-only.log"
 if grep -q "cache gc:" "$tmpdir/clean-only.log"; then
   echo "--clean-only ran cache gc" >&2
   exit 1
@@ -114,8 +115,9 @@ if (cd "$budget_project" && "$HOLBUILD_BIN" --holdir "$_HOLDIR" build BadTheory)
   exit 1
 fi
 require_grep "checkpoint budget: .*evicted=" "$tmpdir/budget.log"
-require_grep "checkpoint_bytes_before=" "$tmpdir/budget.log"
-require_grep "checkpoint_bytes_after=" "$tmpdir/budget.log"
+require_grep "checkpoint_gb_before=" "$tmpdir/budget.log"
+require_grep "checkpoint_gb_after=" "$tmpdir/budget.log"
+require_grep "checkpoint_limit_gb=5" "$tmpdir/budget.log"
 if [[ -e "$budget_family.deps/old-deps-key" || -e "$budget_family.theorems/old-deps-key" ]]; then
   echo "checkpoint budget evicted stale parent/child heap family only partially" >&2
   exit 1

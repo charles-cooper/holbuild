@@ -595,6 +595,15 @@ fun checkpoint_bytes dir = total_checkpoint_bytes (collect_checkpoint_families d
 
 fun bytes_text bytes = IntInf.toString bytes
 
+fun gb_decimal_text bytes =
+  let
+    val tenths = (bytes * 10 + 536870912) div 1073741824
+    val whole = tenths div 10
+    val frac = tenths mod 10
+  in
+    IntInf.toString whole ^ "." ^ IntInf.toString frac
+  end
+
 fun sort_families_by_mtime_ascending families =
   let
     fun insert x [] = [x]
@@ -667,7 +676,10 @@ fun evict_oldest_checkpoints_with_stats dir max_bytes =
   end
 
 fun checkpoint_eviction_text ({before_bytes, after_bytes, max_bytes, evicted} : checkpoint_eviction) =
-  "checkpoint_bytes_before=" ^ bytes_text before_bytes ^
+  "checkpoint_gb_before=" ^ gb_decimal_text before_bytes ^
+  " checkpoint_gb_after=" ^ gb_decimal_text after_bytes ^
+  " checkpoint_max_gb=" ^ gb_decimal_text max_bytes ^
+  " checkpoint_bytes_before=" ^ bytes_text before_bytes ^
   " checkpoint_bytes_after=" ^ bytes_text after_bytes ^
   " checkpoint_max_bytes=" ^ bytes_text max_bytes ^
   " evicted=" ^ Int.toString evicted
@@ -685,6 +697,7 @@ fun clean_project project days max_checkpoints_gb =
     print ("project clean: removed stage=" ^ Int.toString stage_removed ^
            " logs=" ^ Int.toString log_removed ^
            " checkpoints=" ^ Int.toString checkpoint_removed ^
+           " checkpoint_gb_initial=" ^ gb_decimal_text checkpoint_bytes_initial ^
            " checkpoint_bytes_initial=" ^ bytes_text checkpoint_bytes_initial ^
            " " ^ checkpoint_eviction_text eviction ^ "\n")
   end
@@ -2643,7 +2656,7 @@ fun enforce_checkpoint_budget project =
   in
     if before_bytes > max_bytes orelse evicted > 0 then
       warn ("checkpoint budget: " ^ checkpoint_eviction_text eviction ^
-            " checkpoint_max_gb=" ^ Int.toString default_max_checkpoints_gb)
+            " checkpoint_limit_gb=" ^ Int.toString default_max_checkpoints_gb)
     else ();
     if after_bytes > max_bytes then
       warn ("checkpoint budget still exceeds limit after eviction; check permissions or oversized live families")
