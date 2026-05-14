@@ -71,7 +71,7 @@ if grep -q "tactic timed out while building ATheory" "$build_log"; then
 fi
 
 changed_root_timeout_log=$tmpdir/changed-root-timeout.log
-(cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --tactic-timeout 0.2 BTheory) > "$changed_root_timeout_log" 2>&1
+(cd "$project" && "$HOLBUILD_BIN" --verbose --holdir "$HOLDIR" build --tactic-timeout 0.2 BTheory) > "$changed_root_timeout_log" 2>&1
 require_grep "ATheory is up to date" "$changed_root_timeout_log"
 require_grep "BTheory is up to date" "$changed_root_timeout_log"
 if grep -q "tactic_timeout=\|goalfrag=" "$project/.holbuild/dep/dep/src/AScript.sml.key" "$project/.holbuild/dep/consumer/src/BScript.sml.key"; then

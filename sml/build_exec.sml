@@ -1567,7 +1567,9 @@ fun best_failed_prefix_checkpoint checkpoints =
       [] => NONE
     | first :: rest => SOME (List.foldl later_failed_prefix_candidate first rest)
 
-type build_options = {use_cache : bool, force : bool, skip_checkpoints : bool, goalfrag : bool, new_ir : bool, tactic_timeout : real option, goalfrag_plan : string option, goalfrag_trace : bool, repl_on_failure : bool}
+datatype force_level = ForceNone | ForceTargets | ForceProject | ForceAll
+
+type build_options = {use_cache : bool, force : force_level, force_targets : string list, skip_checkpoints : bool, goalfrag : bool, new_ir : bool, tactic_timeout : real option, goalfrag_plan : string option, goalfrag_trace : bool, repl_on_failure : bool}
 
 datatype checkpoint_policy =
   CheckpointPolicy of {checkpoint : bool, goalfrag : bool, new_ir : bool, tactic_timeout : real option, goalfrag_plan : string option, goalfrag_trace : bool, repl_on_failure : bool}
@@ -2180,6 +2182,16 @@ fun root_package_name project =
 fun root_package_node project node =
   HolbuildBuildPlan.package node = root_package_name project
 
+fun force_target_node targets node =
+  List.exists (fn target => target = HolbuildBuildPlan.logical_name node) targets
+
+fun force_node ({force, force_targets, ...} : build_options) project node =
+  case force of
+      ForceNone => false
+    | ForceTargets => force_target_node force_targets node
+    | ForceProject => root_package_node project node
+    | ForceAll => true
+
 fun effective_tactic_timeout goalfrag root_package tactic_timeout =
   if goalfrag andalso root_package then tactic_timeout else NONE
 
@@ -2229,15 +2241,15 @@ fun build_theory_node (options : build_options) tc project base_context plan key
     val policy = checkpoint_policy_for_node options project node
     val metadata_checkpoints = []
     val stage = stage_dir project input_key
-    val force = #force options
+    val forced = force_node options project node
     val cache_allowed = #use_cache options andalso cache_enabled node
-    val cache_restore_allowed = cache_allowed andalso not force
+    val cache_restore_allowed = cache_allowed andalso not forced
     fun materialize_valid_cache () =
       materialize_theory_cache tc project plan input_key node andalso
       (if theory_parent_hashes_match plan node then true
        else (remove_failed_cache_outputs project node; false))
   in
-    if not force andalso not (always_reexecute node) andalso
+    if not forced andalso not (always_reexecute node) andalso
        up_to_date policy project plan keys input_key toolchain_key node metadata_checkpoints then
       (remove_tree_if_exists stage;
        HolbuildStatus.UpToDate)
@@ -2272,14 +2284,14 @@ fun build_node options tc project base_context plan keys toolchain_key node =
         HolbuildSourceIndex.TheoryScript =>
           build_theory_node options tc project base_context plan keys toolchain_key node input_key
       | HolbuildSourceIndex.Sml =>
-          if not (#force options) andalso not (always_reexecute node) andalso
+          if not (force_node options project node) andalso not (always_reexecute node) andalso
              up_to_date no_checkpoint_policy project plan keys input_key toolchain_key node [] then
             HolbuildStatus.UpToDate
           else (build_sml_like plan node ".uo";
                 write_metadata no_checkpoint_policy project plan keys input_key toolchain_key node [];
                 HolbuildStatus.Built)
       | HolbuildSourceIndex.Sig =>
-          if not (#force options) andalso not (always_reexecute node) andalso
+          if not (force_node options project node) andalso not (always_reexecute node) andalso
              up_to_date no_checkpoint_policy project plan keys input_key toolchain_key node [] then
             HolbuildStatus.UpToDate
           else (build_sml_like plan node ".ui";
@@ -2294,7 +2306,7 @@ fun node_policy options project node =
     | HolbuildSourceIndex.Sig => no_checkpoint_policy
 
 fun node_is_up_to_date options project plan keys toolchain_key node =
-  not (#force options) andalso not (always_reexecute node) andalso
+  not (force_node options project node) andalso not (always_reexecute node) andalso
   up_to_date (node_policy options project node)
              project plan keys (HolbuildBuildPlan.input_key_for keys node)
              toolchain_key node []

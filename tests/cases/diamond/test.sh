@@ -60,5 +60,5 @@ require_grep "DTheory" "$dry_log"
 # checkpoints persist after successful builds for incremental rebuilds
 
 second_log=$tmpdir/second.log
-(cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build DTheory) > "$second_log"
+(cd "$project" && "$HOLBUILD_BIN" --verbose --holdir "$HOLDIR" build DTheory) > "$second_log"
 require_grep "DTheory is up to date" "$second_log"

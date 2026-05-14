@@ -41,7 +41,9 @@ members = ["src"]
 | `--holdir PATH` | HOL checkout/install; fallback envs: `HOLBUILD_HOLDIR`, `HOLDIR` |
 | `--source-dir PATH` | Source tree for manifest discovery; artifacts still under the shell cwd `.holbuild/` |
 | `-jN` / `--jobs N` | Parallel workers (default: `.holconfig.toml [build].jobs` or `max(1, nproc/2)`) |
-| `--force` | Ignore local up-to-date state and cache restore; still publishes cache unless `--no-cache` |
+| `--force=theory` / `--force-theory` | Rebuild only requested/default target nodes from source; deps still use up-to-date/cache |
+| `--force=project` / `--force-project` | Rebuild root-project nodes in the requested plan; dependency packages still use up-to-date/cache |
+| `--force=full` / `--force-full` / `--force` | Rebuild the whole requested plan from source; forced nodes still publish cache unless `--no-cache` |
 | `--no-cache` | Skip global cache restore/publish; local up-to-date checks still work |
 | `--skip-checkpoints` | No `.save`/`.ok` checkpoint files; theorem instrumentation still runs |
 | `--skip-goalfrag` | No theorem instrumentation/proof IR; incompatible with timeout/plan/trace flags |
@@ -49,7 +51,8 @@ members = ["src"]
 | `--tactic-timeout SECONDS` | Root-package per-step timeout (default 2.5s, `0` disables); also manifest/local-config settable |
 | `--json` | Newline-delimited streaming JSON build events/errors on stdout; no retained log paths by default; not supported for dry-run/plan/trace/repl-on-failure |
 | `--retain-debug-artifacts` | With `--json build`, retain durable failure logs and expose `debug_artifacts.log`; stage dirs still cleaned |
-| `--verbose` | Node start and per-node elapsed logs in non-TTY output |
+| `--quiet` / `--verbosity quiet` | Suppress per-node success lines in non-TTY output |
+| `--verbose` / `--verbosity verbose` | Node starts plus all finishes, including unchanged nodes, with per-node elapsed times in non-TTY output |
 
 ## Output layout
 

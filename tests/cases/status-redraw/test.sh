@@ -78,12 +78,20 @@ fi
 
 plain_log=$tmpdir/plain.log
 (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$plain_log" 2>&1
-require_grep "ATheory is up to date" "$plain_log"
+if grep -q "ATheory is up to date" "$plain_log"; then
+  echo "normal non-tty output should suppress unchanged node lines" >&2
+  exit 1
+fi
 require_grep "holbuild finished in " "$plain_log"
 if grep -q $'\033\\[0K' "$plain_log"; then
   echo "status redraw escaped into non-tty output" >&2
   exit 1
 fi
+
+verbose_up_to_date_log=$tmpdir/verbose-up-to-date.log
+(cd "$project" && "$HOLBUILD_BIN" --verbosity=verbose --holdir "$HOLDIR" build ATheory) > "$verbose_up_to_date_log" 2>&1
+require_grep "ATheory started" "$verbose_up_to_date_log"
+require_grep "ATheory is up to date in " "$verbose_up_to_date_log"
 
 plain_build_project=$tmpdir/plain-build-project
 mkdir -p "$plain_build_project/src"
@@ -115,6 +123,14 @@ if grep -q $'\033\\[0K' "$plain_build_log"; then
   echo "status redraw escaped into non-tty build output" >&2
   exit 1
 fi
+
+quiet_build_log=$tmpdir/quiet-build.log
+(cd "$plain_build_project" && "$HOLBUILD_BIN" --quiet --holdir "$HOLDIR" build --force BTheory) > "$quiet_build_log" 2>&1
+if grep -q "BTheory built" "$quiet_build_log"; then
+  echo "quiet non-tty output should suppress per-node success lines" >&2
+  exit 1
+fi
+require_grep "holbuild finished in " "$quiet_build_log"
 
 verbose_build_log=$tmpdir/verbose-build.log
 (cd "$plain_build_project" && "$HOLBUILD_BIN" --verbose --holdir "$HOLDIR" build --force BTheory) > "$verbose_build_log" 2>&1

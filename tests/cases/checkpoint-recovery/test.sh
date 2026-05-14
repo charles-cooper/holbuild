@@ -394,7 +394,7 @@ printf 'stale residue\n' > "$project/.holbuild/checkpoints/checkpointrecovery/sr
 printf 'holbuild-checkpoint-ok-v2\nkind=manual\n' > "$project/.holbuild/checkpoints/checkpointrecovery/src/stale/manual.save.ok"
 residue_before_up_to_date=$(checkpoint_count)
 up_to_date_log=$tmpdir/up-to-date.log
-(cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$up_to_date_log" 2>&1
+(cd "$project" && "$HOLBUILD_BIN" --verbose --holdir "$HOLDIR" build ATheory) > "$up_to_date_log" 2>&1
 require_grep "ATheory is up to date" "$up_to_date_log"
 residue_after_up_to_date=$(checkpoint_count)
 [[ "$residue_before_up_to_date" == "$residue_after_up_to_date" ]] || {

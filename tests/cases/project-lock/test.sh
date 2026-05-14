@@ -115,19 +115,19 @@ wait "$first_pid"
 require_file "$project/.holbuild/obj/src/ATheory.dat"
 
 third_log=$tmpdir/third.log
-(cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$third_log" 2>&1
+(cd "$project" && "$HOLBUILD_BIN" --verbose --holdir "$HOLDIR" build ATheory) > "$third_log" 2>&1
 require_grep "ATheory is up to date" "$third_log"
 
 rm -f "$lock" "$owner"
 mkdir -p "$lock"
 obsolete_dir_log=$tmpdir/obsolete-dir.log
-(cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$obsolete_dir_log" 2>&1
+(cd "$project" && "$HOLBUILD_BIN" --verbose --holdir "$HOLDIR" build ATheory) > "$obsolete_dir_log" 2>&1
 require_grep "removing obsolete directory project lock" "$obsolete_dir_log"
 require_grep "ATheory is up to date" "$obsolete_dir_log"
 [[ -f "$lock" ]] || { echo "obsolete directory lock was not replaced by lock file" >&2; exit 1; }
 
 rm -f "$owner"
 missing_owner_log=$tmpdir/missing-owner.log
-(cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$missing_owner_log" 2>&1
+(cd "$project" && "$HOLBUILD_BIN" --verbose --holdir "$HOLDIR" build ATheory) > "$missing_owner_log" 2>&1
 require_grep "ATheory is up to date" "$missing_owner_log"
 [[ ! -e "$owner" ]] || { echo "project lock owner survived missing-owner recovery build" >&2; exit 1; }

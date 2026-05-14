@@ -77,7 +77,7 @@ require_grep "generated spec: first" "$project/gen/GScript.sml"
 [[ "$(wc -c < "$project/data/theory.count" | tr -d ' ')" = "1" ]] || { echo "theory generator did not run once" >&2; exit 1; }
 
 second_log=$tmpdir/second.log
-(cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build GTheory) > "$second_log"
+(cd "$project" && "$HOLBUILD_BIN" --verbose --holdir "$HOLDIR" build GTheory) > "$second_log"
 require_grep "GTheory is up to date" "$second_log"
 [[ "$(wc -c < "$project/data/copy.count" | tr -d ' ')" = "1" ]] || { echo "copy generator reran despite unchanged inputs" >&2; exit 1; }
 [[ "$(wc -c < "$project/data/theory.count" | tr -d ' ')" = "1" ]] || { echo "theory generator reran despite unchanged inputs" >&2; exit 1; }

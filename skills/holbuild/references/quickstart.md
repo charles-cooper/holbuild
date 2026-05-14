@@ -50,11 +50,15 @@ holbuild --json build --retain-debug-artifacts FooTheory  # also retain/report f
 - `--maxheap MB` / `--max-heap MB` — pass Poly/ML max heap to child HOL processes
 - `-jN` / `--jobs N` — parallel workers. Default: `.holconfig.toml [build].jobs` or `max(1, nproc/2)`
 - `--json` — newline-delimited streaming JSON `message`, `node_started`, `node_finished`, `node_failed`, `build_finished`, and `error` events on stdout (build only; no retained log paths by default; not dry-run/plan/trace/repl-on-failure)
-- `--verbose` — node start and per-node elapsed logs when the live TTY status line is disabled
+- normal non-TTY output suppresses unchanged node lines
+- `--quiet` / `--verbosity quiet` — suppress per-node success lines
+- `--verbose` / `--verbosity verbose` — node starts plus all finishes, including unchanged nodes, with per-node elapsed times when the live TTY status line is disabled
 
 ## Build flags
 
-- `--force` — ignore local up-to-date state and cache restore so requested nodes execute from source; cache publication still happens unless `--no-cache`
+- `--force=theory` / `--force-theory` — rebuild only requested/default target nodes from source; deps still use up-to-date/cache
+- `--force=project` / `--force-project` — rebuild root-project nodes in the requested plan; dependency packages still use up-to-date/cache
+- `--force=full` / `--force-full` / `--force` — rebuild the whole requested plan from source; forced nodes still publish cache unless `--no-cache`
 - `--no-cache` — skip global cache restore/publish; local `.holbuild/` up-to-date checks still work
 - `--skip-checkpoints` — no `.save`/`.ok` checkpoint files; theorem instrumentation still runs
 - `--skip-goalfrag` — no theorem instrumentation/proof IR, hence no tactic timeout/plan/trace support

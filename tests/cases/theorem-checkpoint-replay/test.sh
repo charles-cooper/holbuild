@@ -175,11 +175,11 @@ if ! find "$project/.holbuild/checkpoints" -path '*_context.save' -print -quit 2
 fi
 
 second_log=$tmpdir/second.log
-(cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$second_log"
+(cd "$project" && "$HOLBUILD_BIN" --verbose --holdir "$HOLDIR" build ATheory) > "$second_log"
 require_grep "ATheory is up to date" "$second_log"
 
 same_artifact_skip_goalfrag_log=$tmpdir/same-artifact-skip-goalfrag.log
-(cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --skip-goalfrag ATheory) > "$same_artifact_skip_goalfrag_log"
+(cd "$project" && "$HOLBUILD_BIN" --verbose --holdir "$HOLDIR" build --skip-goalfrag ATheory) > "$same_artifact_skip_goalfrag_log"
 require_grep "ATheory is up to date" "$same_artifact_skip_goalfrag_log"
 
 trace_project=$tmpdir/trace-project
@@ -693,7 +693,7 @@ fi
 first_dep_count=$(wc -c < "$failed_root_counter" | tr -d ' ')
 [[ "$first_dep_count" = "1" ]] || { echo "expected dependency to build once, got $first_dep_count" >&2; exit 1; }
 failed_root_again_log=$tmpdir/failed-root-again.log
-if (cd "$failed_root_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build BTheory) > "$failed_root_again_log" 2>&1; then
+if (cd "$failed_root_project" && "$HOLBUILD_BIN" --verbose --holdir "$HOLDIR" build BTheory) > "$failed_root_again_log" 2>&1; then
   echo "expected repeated failed root project to fail build" >&2
   exit 1
 fi

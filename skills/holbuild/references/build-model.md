@@ -88,7 +88,7 @@ Cache restore: on action-key or parent-output key match, blobs are materialized 
 - Manifest must have no transient stage paths in mldeps
 - On any validation failure: warn, delete local outputs, rebuild from source
 
-`--no-cache` disables both restore and publish but preserves local `.holbuild/` up-to-date checks. `--force` skips local up-to-date and cache restore for requested source execution, but still publishes cache unless `--no-cache` is also set.
+`--no-cache` disables both restore and publish but preserves local `.holbuild/` up-to-date checks. Force levels skip local up-to-date and cache restore only for the selected node set, and still publish cache unless `--no-cache` is also set: `--force=theory` (or `--force-theory`) forces requested/default target nodes, `--force=project` forces root-project nodes in the requested plan, and `--force=full`/bare `--force` forces the whole requested plan including dependency packages.
 
 GC:
 - `holbuild gc [--retention-days N] [--max-checkpoints-gb GB] [--cache-dir PATH] [--clean-only|--cache-only]`

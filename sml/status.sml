@@ -23,7 +23,9 @@ type t = {
 
 val current_status : t option ref = ref NONE
 val json_mode_ref = ref false
-val verbose_mode_ref = ref false
+datatype verbosity = Quiet | Normal | Verbose
+
+val verbosity_ref = ref Normal
 val retain_debug_artifacts_ref = ref false
 val json_mutex = Mutex.mutex ()
 
@@ -35,8 +37,11 @@ val clear_to_eol = "\027[0K"
 
 fun set_json_mode enabled = json_mode_ref := enabled
 fun json_mode () = !json_mode_ref
-fun set_verbose_mode enabled = verbose_mode_ref := enabled
-fun verbose_mode () = !verbose_mode_ref
+fun set_verbosity verbosity = verbosity_ref := verbosity
+fun set_verbose_mode enabled = set_verbosity (if enabled then Verbose else Normal)
+fun verbosity () = !verbosity_ref
+fun verbose_mode () = verbosity () = Verbose
+fun quiet_mode () = verbosity () = Quiet
 fun set_retain_debug_artifacts enabled = retain_debug_artifacts_ref := enabled
 fun retain_debug_artifacts () = !retain_debug_artifacts_ref
 
@@ -470,6 +475,8 @@ fun finish_node status key label outcome =
                    json_int_field "finished" (!finished),
                    json_int_field "total" total])
              else if enabled then redraw status
+             else if quiet_mode () then ()
+             else if outcome = UpToDate andalso not (verbose_mode ()) then ()
              else
                (TextIO.output (TextIO.stdOut,
                   label ^ " " ^ outcome_text outcome ^

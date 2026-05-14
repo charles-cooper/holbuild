@@ -126,10 +126,15 @@ root for manifest discovery while `.holbuild` artifacts are written under the sh
 current directory. `-jN`, `-j N`, or `--jobs N` controls build parallelism for `build`
 and for the build phase of `heap` targets; the default comes from local
 `.holconfig.toml` `[build].jobs` when set, otherwise from CPU detection as
-`max(1, nproc / 2)`. `--force` ignores local up-to-date state and global cache
-restore so the requested plan executes from source; cache publication still
-happens unless `--no-cache` is also set. `--no-cache` disables global cache
-restore/publish while preserving local `.holbuild` up-to-date checks. `--maxheap MB` and
+`max(1, nproc / 2)`. `--force=theory` rebuilds only the requested/default target
+nodes from source, `--force=project` rebuilds root-project nodes in the requested
+plan, and `--force=full` rebuilds the whole requested plan including dependency
+packages; bare `--force` is kept as an alias for `--force=full`. Forced nodes skip
+local up-to-date state and global cache restore but still publish cache unless
+`--no-cache` is also set. `--no-cache` disables global cache restore/publish while
+preserving local `.holbuild` up-to-date checks. Normal non-TTY output suppresses
+unchanged node lines; use `--verbose` to show starts/all finishes with elapsed time,
+or `--quiet` to suppress per-node success lines. `--maxheap MB` and
 `--max-heap MB` pass Poly/ML's maximum heap size to child HOL processes before
 `run`/`repl`, matching HOL's requirement that runtime options precede the
 subcommand.

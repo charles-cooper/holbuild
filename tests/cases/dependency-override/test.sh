@@ -104,7 +104,7 @@ require_file "$project/.holbuild/gen/src/BTheory.sml"
 require_file "$project/.holbuild/obj/src/BTheory.dat"
 
 second_log=$tmpdir/second.log
-(cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build BTheory) > "$second_log"
+(cd "$project" && "$HOLBUILD_BIN" --verbose --holdir "$HOLDIR" build BTheory) > "$second_log"
 require_grep "ATheory is up to date" "$second_log"
 require_grep "BTheory is up to date" "$second_log"
 

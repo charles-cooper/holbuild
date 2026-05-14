@@ -62,7 +62,7 @@ if grep -q "deps_loaded=\|final_context=\|theorem_boundary" "$project/.holbuild/
 fi
 
 second_log=$tmpdir/second.log
-(cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$second_log"
+(cd "$project" && "$HOLBUILD_BIN" --verbose --holdir "$HOLDIR" build ATheory) > "$second_log"
 require_grep "ATheory is up to date" "$second_log"
 
 source_dir_context_log=$tmpdir/source-dir-context.log
@@ -98,7 +98,7 @@ metadata="$project/.holbuild/dep/basic/src/AScript.sml.key"
 require_grep "^output-sha1=" "$metadata"
 sed -i 's/^output-sha1=.*/output-sha1=stale-diagnostic-hash/' "$metadata"
 stale_hash_log=$tmpdir/stale-output-hash.log
-(cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$stale_hash_log"
+(cd "$project" && "$HOLBUILD_BIN" --verbose --holdir "$HOLDIR" build ATheory) > "$stale_hash_log"
 require_grep "ATheory is up to date" "$stale_hash_log"
 
 input_key=$(grep '^input_key=' "$project/.holbuild/dep/basic/src/AScript.sml.key" | cut -d= -f2)
@@ -255,6 +255,6 @@ fi
 require_grep "requires theorem instrumentation" "$bad_flags_log"
 
 deprecated_new_ir_log=$tmpdir/deprecated-new-ir.log
-(cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --new-ir ATheory) > "$deprecated_new_ir_log" 2>&1
+(cd "$project" && "$HOLBUILD_BIN" --verbose --holdir "$HOLDIR" build --new-ir ATheory) > "$deprecated_new_ir_log" 2>&1
 require_grep "new-ir is deprecated and has no effect; proof IR is the default" "$deprecated_new_ir_log"
 require_grep "ATheory is up to date" "$deprecated_new_ir_log"

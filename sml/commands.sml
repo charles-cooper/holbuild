@@ -15,21 +15,22 @@ fun warn msg = HolbuildStatus.message_stderr ("holbuild: warning: " ^ msg ^ "\n"
 fun usage () = print
   "holbuild: experimental project-aware build frontend for HOL4\n\n\
   \Usage:\n\
-  \  holbuild [--json] [--verbose] [--source-dir PATH] [--holdir PATH] [--maxheap MB] [-jN] context\n\
-  \  holbuild [--json] [--verbose] [--source-dir PATH] [--holdir PATH] [--maxheap MB] [-jN] execution-plan THEORY:THEOREM\n\
-  \  holbuild [--json] [--verbose] [--source-dir PATH] [--holdir PATH] [--maxheap MB] [-jN] goalfrag-plan THEORY:THEOREM\n\
-  \  holbuild [--json] [--verbose] [--source-dir PATH] [--holdir PATH] [--maxheap MB] [-jN] build [--dry-run] [--force] [--no-cache] [--skip-checkpoints] [--skip-goalfrag] [--goalfrag] [--tactic-timeout SECONDS] [--goalfrag-plan THEORY:THEOREM] [--goalfrag-trace] [--repl-on-failure] [--retain-debug-artifacts] [TARGET ...]\n\
-  \  holbuild [--json] [--verbose] [--source-dir PATH] [--holdir PATH] [--maxheap MB] [-jN] heap NAME\n\
-  \  holbuild [--json] [--verbose] [--source-dir PATH] [--holdir PATH] [--maxheap MB] run [ARG ...]\n\
-  \  holbuild [--json] [--verbose] [--source-dir PATH] [--holdir PATH] [--maxheap MB] repl [ARG ...]\n\
+  \  holbuild [--json] [--quiet|--verbose|--verbosity LEVEL] [--source-dir PATH] [--holdir PATH] [--maxheap MB] [-jN] context\n\
+  \  holbuild [--json] [--quiet|--verbose|--verbosity LEVEL] [--source-dir PATH] [--holdir PATH] [--maxheap MB] [-jN] execution-plan THEORY:THEOREM\n\
+  \  holbuild [--json] [--quiet|--verbose|--verbosity LEVEL] [--source-dir PATH] [--holdir PATH] [--maxheap MB] [-jN] goalfrag-plan THEORY:THEOREM\n\
+  \  holbuild [--json] [--quiet|--verbose|--verbosity LEVEL] [--source-dir PATH] [--holdir PATH] [--maxheap MB] [-jN] build [--dry-run] [--force[=theory|project|full]] [--no-cache] [--skip-checkpoints] [--skip-goalfrag] [--goalfrag] [--tactic-timeout SECONDS] [--goalfrag-plan THEORY:THEOREM] [--goalfrag-trace] [--repl-on-failure] [--retain-debug-artifacts] [TARGET ...]\n\
+  \  holbuild [--json] [--quiet|--verbose|--verbosity LEVEL] [--source-dir PATH] [--holdir PATH] [--maxheap MB] [-jN] heap NAME\n\
+  \  holbuild [--json] [--quiet|--verbose|--verbosity LEVEL] [--source-dir PATH] [--holdir PATH] [--maxheap MB] run [ARG ...]\n\
+  \  holbuild [--json] [--quiet|--verbose|--verbosity LEVEL] [--source-dir PATH] [--holdir PATH] [--maxheap MB] repl [ARG ...]\n\
   \  holbuild gc [--retention-days DAYS] [--max-checkpoints-gb GB] [--cache-dir PATH] [--clean-only|--cache-only]\n\n\
   \HOLDIR is found from --holdir, HOLBUILD_HOLDIR, or HOLDIR for HOL commands.\n\
   \Project sources are found from --source-dir, HOLBUILD_SOURCE_DIR, or cwd.\n\
   \-j/--jobs controls build parallelism. Default is .holconfig.toml [build].jobs,\n\
   \or max(1, detected processor count / 2). --maxheap/--max-heap passes Poly/ML\n\
   \maximum heap size in MB to child HOL processes. --json emits newline-delimited\n\
-  \JSON for build status, messages, and errors. --verbose logs node starts and\n\
-  \per-node elapsed times in non-TTY build output.\n"
+  \JSON for build status, messages, and errors. Non-TTY normal output suppresses\n\
+  \unchanged node lines; --verbose logs node starts, all finishes, and per-node\n\
+  \elapsed times; --quiet suppresses per-node success lines.\n"
 
 fun nonnegative_real label text =
   case Real.fromString text of
@@ -41,6 +42,16 @@ fun nonnegative_real label text =
 fun tactic_timeout_value text =
   let val seconds = nonnegative_real "--tactic-timeout" text
   in if seconds <= 0.0 then NONE else SOME seconds end
+
+fun force_level_value text =
+  case text of
+      "none" => HolbuildBuildExec.ForceNone
+    | "theory" => HolbuildBuildExec.ForceTargets
+    | "target" => HolbuildBuildExec.ForceTargets
+    | "project" => HolbuildBuildExec.ForceProject
+    | "full" => HolbuildBuildExec.ForceAll
+    | "all" => HolbuildBuildExec.ForceAll
+    | _ => raise Error "--force must be one of: theory, project, full"
 
 fun split_flags args =
   let
@@ -58,7 +69,13 @@ fun split_flags args =
         | "--dry-run" :: xs =>
             loop true force use_cache skip_checkpoints goalfrag new_ir tactic_timeout tactic_timeout_set goalfrag_plan goalfrag_trace repl_on_failure retain_debug_artifacts xs
         | "--force" :: xs =>
-            loop dry true use_cache skip_checkpoints goalfrag new_ir tactic_timeout tactic_timeout_set goalfrag_plan goalfrag_trace repl_on_failure retain_debug_artifacts xs
+            loop dry HolbuildBuildExec.ForceAll use_cache skip_checkpoints goalfrag new_ir tactic_timeout tactic_timeout_set goalfrag_plan goalfrag_trace repl_on_failure retain_debug_artifacts xs
+        | "--force-theory" :: xs =>
+            loop dry HolbuildBuildExec.ForceTargets use_cache skip_checkpoints goalfrag new_ir tactic_timeout tactic_timeout_set goalfrag_plan goalfrag_trace repl_on_failure retain_debug_artifacts xs
+        | "--force-project" :: xs =>
+            loop dry HolbuildBuildExec.ForceProject use_cache skip_checkpoints goalfrag new_ir tactic_timeout tactic_timeout_set goalfrag_plan goalfrag_trace repl_on_failure retain_debug_artifacts xs
+        | "--force-full" :: xs =>
+            loop dry HolbuildBuildExec.ForceAll use_cache skip_checkpoints goalfrag new_ir tactic_timeout tactic_timeout_set goalfrag_plan goalfrag_trace repl_on_failure retain_debug_artifacts xs
         | "--no-cache" :: xs =>
             loop dry force false skip_checkpoints goalfrag new_ir tactic_timeout tactic_timeout_set goalfrag_plan goalfrag_trace repl_on_failure retain_debug_artifacts xs
         | "--skip-checkpoints" :: xs =>
@@ -83,7 +100,9 @@ fun split_flags args =
             loop dry force use_cache skip_checkpoints goalfrag new_ir (tactic_timeout_value seconds) true goalfrag_plan goalfrag_trace repl_on_failure retain_debug_artifacts xs
         | "--tactic-timeout" :: [] => raise Error "--tactic-timeout requires SECONDS"
         | x :: xs =>
-            if String.isPrefix "--tactic-timeout=" x then
+            if String.isPrefix "--force=" x then
+              loop dry (force_level_value (String.extract (x, size "--force=", NONE))) use_cache skip_checkpoints goalfrag new_ir tactic_timeout tactic_timeout_set goalfrag_plan goalfrag_trace repl_on_failure retain_debug_artifacts xs
+            else if String.isPrefix "--tactic-timeout=" x then
               loop dry force use_cache skip_checkpoints goalfrag new_ir
                    (tactic_timeout_value (String.extract (x, size "--tactic-timeout=", NONE)))
                    true goalfrag_plan goalfrag_trace repl_on_failure retain_debug_artifacts xs
@@ -98,7 +117,7 @@ fun split_flags args =
               let val (flags, ys) = loop dry force use_cache skip_checkpoints goalfrag new_ir tactic_timeout tactic_timeout_set goalfrag_plan goalfrag_trace repl_on_failure retain_debug_artifacts xs
               in (flags, x :: ys) end
   in
-    loop false false true false true true NONE false NONE false false false args
+    loop false HolbuildBuildExec.ForceNone true false true true NONE false NONE false false false args
   end
 
 fun has_suffix suffix s =
@@ -222,19 +241,29 @@ fun positive_int label text =
       SOME n => if n >= 1 then n else raise Error (label ^ " must be a positive integer")
     | NONE => raise Error (label ^ " must be a positive integer")
 
+fun verbosity_value text =
+  case text of
+      "quiet" => HolbuildStatus.Quiet
+    | "normal" => HolbuildStatus.Normal
+    | "verbose" => HolbuildStatus.Verbose
+    | _ => raise Error "--verbosity must be one of: quiet, normal, verbose"
+
 fun parse_global_options args =
   let
-    fun loop holdir source_dir jobs maxheap json verbose rest =
+    fun loop holdir source_dir jobs maxheap json verbosity rest =
       case rest of
-          [] => ({holdir = holdir, source_dir = source_dir, jobs = jobs, maxheap = maxheap, json = json, verbose = verbose}, [])
-        | "--json" :: xs => loop holdir source_dir jobs maxheap true verbose xs
-        | "--verbose" :: xs => loop holdir source_dir jobs maxheap json true xs
-        | "--holdir" :: path :: xs => loop (SOME path) source_dir jobs maxheap json verbose xs
-        | "--source-dir" :: path :: xs => loop holdir (SOME path) jobs maxheap json verbose xs
-        | "--jobs" :: n :: xs => loop holdir source_dir (SOME (positive_int "--jobs" n)) maxheap json verbose xs
-        | "-j" :: n :: xs => loop holdir source_dir (SOME (positive_int "-j" n)) maxheap json verbose xs
-        | "--maxheap" :: n :: xs => loop holdir source_dir jobs (SOME (positive_int "--maxheap" n)) json verbose xs
-        | "--max-heap" :: n :: xs => loop holdir source_dir jobs (SOME (positive_int "--max-heap" n)) json verbose xs
+          [] => ({holdir = holdir, source_dir = source_dir, jobs = jobs, maxheap = maxheap, json = json, verbosity = verbosity}, [])
+        | "--json" :: xs => loop holdir source_dir jobs maxheap true verbosity xs
+        | "--quiet" :: xs => loop holdir source_dir jobs maxheap json HolbuildStatus.Quiet xs
+        | "--verbose" :: xs => loop holdir source_dir jobs maxheap json HolbuildStatus.Verbose xs
+        | "--verbosity" :: level :: xs => loop holdir source_dir jobs maxheap json (verbosity_value level) xs
+        | "--holdir" :: path :: xs => loop (SOME path) source_dir jobs maxheap json verbosity xs
+        | "--source-dir" :: path :: xs => loop holdir (SOME path) jobs maxheap json verbosity xs
+        | "--jobs" :: n :: xs => loop holdir source_dir (SOME (positive_int "--jobs" n)) maxheap json verbosity xs
+        | "-j" :: n :: xs => loop holdir source_dir (SOME (positive_int "-j" n)) maxheap json verbosity xs
+        | "--maxheap" :: n :: xs => loop holdir source_dir jobs (SOME (positive_int "--maxheap" n)) json verbosity xs
+        | "--max-heap" :: n :: xs => loop holdir source_dir jobs (SOME (positive_int "--max-heap" n)) json verbosity xs
+        | "--verbosity" :: [] => raise Error "--verbosity requires LEVEL"
         | "--holdir" :: [] => raise Error "--holdir requires PATH"
         | "--source-dir" :: [] => raise Error "--source-dir requires PATH"
         | "--jobs" :: [] => raise Error "--jobs requires N"
@@ -242,22 +271,24 @@ fun parse_global_options args =
         | "--maxheap" :: [] => raise Error "--maxheap requires MB"
         | "--max-heap" :: [] => raise Error "--max-heap requires MB"
         | arg :: xs =>
-            if String.isPrefix "--holdir=" arg then
-              loop (SOME (String.extract (arg, size "--holdir=", NONE))) source_dir jobs maxheap json verbose xs
+            if String.isPrefix "--verbosity=" arg then
+              loop holdir source_dir jobs maxheap json (verbosity_value (String.extract (arg, size "--verbosity=", NONE))) xs
+            else if String.isPrefix "--holdir=" arg then
+              loop (SOME (String.extract (arg, size "--holdir=", NONE))) source_dir jobs maxheap json verbosity xs
             else if String.isPrefix "--source-dir=" arg then
-              loop holdir (SOME (String.extract (arg, size "--source-dir=", NONE))) jobs maxheap json verbose xs
+              loop holdir (SOME (String.extract (arg, size "--source-dir=", NONE))) jobs maxheap json verbosity xs
             else if String.isPrefix "--jobs=" arg then
-              loop holdir source_dir (SOME (positive_int "--jobs" (String.extract (arg, size "--jobs=", NONE)))) maxheap json verbose xs
+              loop holdir source_dir (SOME (positive_int "--jobs" (String.extract (arg, size "--jobs=", NONE)))) maxheap json verbosity xs
             else if String.isPrefix "--maxheap=" arg then
-              loop holdir source_dir jobs (SOME (positive_int "--maxheap" (String.extract (arg, size "--maxheap=", NONE)))) json verbose xs
+              loop holdir source_dir jobs (SOME (positive_int "--maxheap" (String.extract (arg, size "--maxheap=", NONE)))) json verbosity xs
             else if String.isPrefix "--max-heap=" arg then
-              loop holdir source_dir jobs (SOME (positive_int "--max-heap" (String.extract (arg, size "--max-heap=", NONE)))) json verbose xs
+              loop holdir source_dir jobs (SOME (positive_int "--max-heap" (String.extract (arg, size "--max-heap=", NONE)))) json verbosity xs
             else if String.isPrefix "-j" arg andalso size arg > 2 then
-              loop holdir source_dir (SOME (positive_int "-j" (String.extract (arg, 2, NONE)))) maxheap json verbose xs
+              loop holdir source_dir (SOME (positive_int "-j" (String.extract (arg, 2, NONE)))) maxheap json verbosity xs
             else
-              let val (opts, args') = loop holdir source_dir jobs maxheap json verbose xs in (opts, arg :: args') end
+              let val (opts, args') = loop holdir source_dir jobs maxheap json verbosity xs in (opts, arg :: args') end
   in
-    loop NONE NONE NONE NONE false false args
+    loop NONE NONE NONE NONE false HolbuildStatus.Normal args
   end
 
 fun with_input path f =
@@ -336,19 +367,21 @@ fun build tc cli_jobs args =
       else if not goalfrag andalso (Option.isSome goalfrag_plan orelse goalfrag_trace) then
         raise Error "--goalfrag-plan/--goalfrag-trace require theorem instrumentation; remove --skip-goalfrag"
       else ()
-    val build_options = {use_cache = use_cache,
-                         force = force,
-                         skip_checkpoints = skip_checkpoints,
-                         goalfrag = goalfrag,
-                         new_ir = new_ir,
-                         tactic_timeout =
-                           if tactic_timeout_set then tactic_timeout
-                           else (case #build_tactic_timeout project of
-                                   NONE => SOME 2.5
-                                 | some => some),
-                         goalfrag_plan = goalfrag_plan,
-                         goalfrag_trace = goalfrag_trace,
-                         repl_on_failure = repl_on_failure}
+    fun build_options_for force_targets =
+      {use_cache = use_cache,
+       force = force,
+       force_targets = force_targets,
+       skip_checkpoints = skip_checkpoints,
+       goalfrag = goalfrag,
+       new_ir = new_ir,
+       tactic_timeout =
+         if tactic_timeout_set then tactic_timeout
+         else (case #build_tactic_timeout project of
+                 NONE => SOME 2.5
+               | some => some),
+       goalfrag_plan = goalfrag_plan,
+       goalfrag_trace = goalfrag_trace,
+       repl_on_failure = repl_on_failure}
     fun prepare_plan () =
       let
         val index = timed_phase "source.discover" (fn () => HolbuildSourceIndex.discover project)
@@ -361,16 +394,18 @@ fun build tc cli_jobs args =
                 else ()
         val toolchain_key = timed_phase "toolchain.key" (fn () => HolbuildToolchain.toolchain_key tc)
       in
-        (plan, toolchain_key)
+        (targets, plan, toolchain_key)
       end
     fun describe_dry_run () =
-      let val (plan, toolchain_key) = prepare_plan ()
+      let val (force_targets, plan, toolchain_key) = prepare_plan ()
+          val build_options = build_options_for force_targets
       in
         timed_phase "dry_run.describe"
           (fn () => HolbuildBuildPlan.describe (HolbuildBuildExec.build_config_lines_for_node build_options project) toolchain_key plan)
       end
     fun execute_build () =
-      let val (plan, toolchain_key) = prepare_plan ()
+      let val (force_targets, plan, toolchain_key) = prepare_plan ()
+          val build_options = build_options_for force_targets
       in
         timed_phase "build.execute"
           (fn () => HolbuildBuildExec.build build_options tc project plan toolchain_key jobs)
@@ -405,7 +440,7 @@ fun build_heap tc cli_jobs target =
         val toolchain_key = timed_phase "toolchain.key" (fn () => HolbuildToolchain.toolchain_key tc)
         val output_path = HolbuildProject.abs_under (#root project) output
       in
-        HolbuildBuildExec.build {use_cache = true, force = false, skip_checkpoints = false, goalfrag = true, new_ir = true, tactic_timeout = SOME 2.5, goalfrag_plan = NONE, goalfrag_trace = false, repl_on_failure = false}
+        HolbuildBuildExec.build {use_cache = true, force = HolbuildBuildExec.ForceNone, force_targets = [], skip_checkpoints = false, goalfrag = true, new_ir = true, tactic_timeout = SOME 2.5, goalfrag_plan = NONE, goalfrag_trace = false, repl_on_failure = false}
                                tc project plan toolchain_key jobs;
         HolbuildBuildExec.export_heap tc project plan output_path
       end
@@ -509,9 +544,9 @@ fun gc args =
     ()
   end
 
-fun dispatch_with_options {holdir, source_dir, jobs, maxheap, json, verbose} args =
+fun dispatch_with_options {holdir, source_dir, jobs, maxheap, json, verbosity} args =
   (HolbuildStatus.set_json_mode json;
-   HolbuildStatus.set_verbose_mode verbose;
+   HolbuildStatus.set_verbosity verbosity;
    HolbuildStatus.set_retain_debug_artifacts false;
    Option.app HolbuildProject.set_source_dir source_dir;
    case args of

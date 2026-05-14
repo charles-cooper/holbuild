@@ -47,7 +47,7 @@ extra_inputs = ["extra.txt"]'
 echo one > "$extra_project/extra.txt"
 (cd "$extra_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$tmpdir/extra1.log" 2>&1
 key1=$(metadata_key "$extra_project")
-(cd "$extra_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$tmpdir/extra2.log" 2>&1
+(cd "$extra_project" && "$HOLBUILD_BIN" --verbose --holdir "$HOLDIR" build ATheory) > "$tmpdir/extra2.log" 2>&1
 require_grep "ATheory is up to date" "$tmpdir/extra2.log"
 echo two > "$extra_project/extra.txt"
 (cd "$extra_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$tmpdir/extra3.log" 2>&1
