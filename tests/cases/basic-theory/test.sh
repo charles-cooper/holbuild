@@ -38,11 +38,13 @@ this source-tree generated theory artifact must be ignored by discovery
 SML
 
 first_log=$tmpdir/first.log
+first_timing=$tmpdir/first.tool-timing
 (cd "$project" && \
-  HOLBUILD_CHECKPOINT_TIMING=1 HOLBUILD_SHARE_COMMON_DATA=0 HOLBUILD_ECHO_CHILD_LOGS=1 \
+  HOLBUILD_TIMING_LOG="$first_timing" HOLBUILD_CHECKPOINT_TIMING=1 HOLBUILD_SHARE_COMMON_DATA=0 HOLBUILD_ECHO_CHILD_LOGS=1 \
   "$HOLBUILD_BIN" --holdir "$HOLDIR" --maxheap 4096 build ATheory) > "$first_log" 2>&1
 require_grep "holbuild checkpoint kind=deps_loaded share=false" "$first_log"
 require_grep "holbuild checkpoint kind=final_context share=false" "$first_log"
+require_grep $'^phase\tname=build\.keys\tstatus=ok\tms=' "$first_timing"
 
 require_file "$project/.holbuild/gen/src/ATheory.sig"
 require_file "$project/.holbuild/gen/src/ATheory.sml"

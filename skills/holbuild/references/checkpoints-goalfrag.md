@@ -143,5 +143,5 @@ With `--json`, failures are emitted as structured `error`/`node_failed` JSONL ev
 | `HOLBUILD_ECHO_CHILD_LOGS` | `1`/`true` = echo child `hol run` log to stdout |
 | `HOLBUILD_CACHE_TRACE` | `1`/`true` = print cache decision trace |
 | `HOLBUILD_STATUS` | `1`/`true` = enable status display, `0`/`false` = disable |
-| `HOLBUILD_TIMING_LOG` | Path for structured timing data (tool + phase lines) |
+| `HOLBUILD_TIMING_LOG` | Path for structured timing data (tool + phase lines, including `build.keys` action-key computation) |
 | `HOLBUILD_GOALFRAG_RUNTIME` | Override path to legacy `goalfrag_runtime.sml` |

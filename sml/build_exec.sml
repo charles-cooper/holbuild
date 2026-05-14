@@ -2677,7 +2677,10 @@ fun build (options : build_options) tc project plan toolchain_key jobs =
   let
     val _ = enforce_checkpoint_budget project
     val base_context = toolchain_base_context tc
-    val keys = HolbuildBuildPlan.input_keys (build_config_lines_for_node options project) toolchain_key plan
+    val keys = HolbuildToolchain.time_phase "build.keys"
+                 (fn () => HolbuildBuildPlan.input_keys
+                            (build_config_lines_for_node options project)
+                            toolchain_key plan)
   in
     let
       val status = HolbuildStatus.create {total = length plan, jobs = jobs}
