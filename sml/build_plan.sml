@@ -485,7 +485,7 @@ fun external_source_candidates stem name =
     | NONE => [stem ^ ".sig", stem ^ ".sml"]
 
 fun external_source_deps path =
-  HolbuildDependencies.extract path
+  HolbuildDependencies.extract_global_cached path
   handle HolbuildDependencies.Error msg => raise Error msg
 
 fun external_dependency_names sources =
@@ -629,9 +629,13 @@ fun add_input_key config_lines_for_node toolchain_key nodes (node, keys) =
   let val external_key = external_key_lookup toolchain_key
   in add_input_key_with (nodes_named nodes) config_lines_for_node toolchain_key external_key nodes (node, keys) end
 
-fun input_keys_with lookup config_lines_for_node toolchain_key nodes =
+fun compute_input_keys_with lookup config_lines_for_node toolchain_key nodes =
   let val external_key = external_key_lookup toolchain_key
   in List.foldl (fn (node, keys) => add_input_key_with lookup config_lines_for_node toolchain_key external_key nodes (node, keys)) [] nodes end
+
+fun input_keys_with lookup config_lines_for_node toolchain_key nodes =
+  HolbuildToolchain.time_phase "build.keys"
+    (fn () => compute_input_keys_with lookup config_lines_for_node toolchain_key nodes)
 
 fun input_keys config_lines_for_node toolchain_key nodes =
   input_keys_with (nodes_named nodes) config_lines_for_node toolchain_key nodes
