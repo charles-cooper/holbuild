@@ -1549,9 +1549,7 @@ fun failed_prefix_checkpoint checkpoint =
     case (failed_prefix_metadata (#failed_prefix_path checkpoint),
           failed_prefix_text (#failed_prefix_path checkpoint)) of
         (SOME step_count, SOME prefix_text) =>
-          if String.isPrefix prefix_text (#tactic_text checkpoint) then
-            SOME {checkpoint = checkpoint, step_count = step_count, prefix_text = prefix_text}
-          else NONE
+          SOME {checkpoint = checkpoint, step_count = step_count, prefix_text = prefix_text}
       | _ => NONE
   else NONE
 

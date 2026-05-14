@@ -610,6 +610,7 @@ fun bump_counter () =
   let val out = TextIO.openAppend slow_prefix_counter
   in TextIO.output(out, "x"); TextIO.closeOut out end;
 fun slow_tac g = (bump_counter(); OS.Process.sleep (Time.fromReal 0.35); ALL_TAC g);
+fun slow_tac_alt g = (bump_counter(); OS.Process.sleep (Time.fromReal 0.35); ALL_TAC g);
 Theorem slow_prefix_failure:
   T
 Proof
@@ -637,6 +638,19 @@ second_slow_count=$(wc -c < "$slow_prefix_counter" | tr -d ' ')
 require_grep "from: failed-prefix checkpoint in slow_prefix_failure" "$slow_prefix_again_log"
 require_grep "failed tactic top input goal:" "$slow_prefix_again_log"
 require_grep "failed tactic input goals: 1" "$slow_prefix_again_log"
+python3 - <<PY
+from pathlib import Path
+path = Path("$slow_prefix_project/src/AScript.sml")
+path.write_text(path.read_text().replace(
+    'slow_tac >> slow_tac >> FAIL_TAC "after slow prefix"',
+    'slow_tac >> slow_tac_alt >> ACCEPT_TAC TRUTH'))
+PY
+slow_prefix_changed_log=$tmpdir/slow-prefix-changed.log
+(cd "$slow_prefix_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$slow_prefix_changed_log" 2>&1
+changed_slow_count=$(wc -c < "$slow_prefix_counter" | tr -d ' ')
+[[ "$changed_slow_count" = "3" ]] || { echo "failed-prefix replay reran unchanged slow prefix after mid-proof edit; count $changed_slow_count" >&2; exit 1; }
+require_grep "from: failed-prefix checkpoint in slow_prefix_failure" "$slow_prefix_changed_log"
+require_grep "ATheory built" "$slow_prefix_changed_log"
 
 failed_root_project=$tmpdir/failed-root-project
 failed_root_counter=$tmpdir/failed-root-dep-count.txt
@@ -733,12 +747,9 @@ s = s.replace('>- (FAIL_TAC "intentional")', '>- (rpt strip_tac >> simp[])')
 path.write_text(s)
 PY
 changed_prefix_fixed_log=$tmpdir/changed-prefix-fixed.log
-(cd "$changed_prefix_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --force --no-cache --goalfrag --tactic-timeout 0 --goalfrag-trace ATheory) > "$changed_prefix_fixed_log" 2>&1
+(cd "$changed_prefix_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --force --no-cache --tactic-timeout 0 ATheory) > "$changed_prefix_fixed_log" 2>&1
+require_grep "from: failed-prefix checkpoint in changed_prefix" "$changed_prefix_fixed_log"
 require_grep "ATheory built" "$changed_prefix_fixed_log"
-if grep -q "from: failed-prefix checkpoint in changed_prefix" "$changed_prefix_fixed_log"; then
-  echo "changed failed-prefix checkpoint was reused after proof text changed before the saved prefix" >&2
-  exit 1
-fi
 
 priority_project=$tmpdir/priority-project
 priority_counter=$tmpdir/priority-counter.txt
