@@ -160,8 +160,8 @@ if grep -q '^[0-9][0-9]* subgoals:$' "$first_log"; then
   echo "proof IR child log leaked interactive goal-stack progress" >&2
   exit 1
 fi
-require_file "$project/.holbuild/gen/src/ATheory.sig"
-require_file "$project/.holbuild/gen/src/ATheory.sml"
+require_file "$project/.holbuild/obj/src/ATheory.sig"
+require_file "$project/.holbuild/obj/src/ATheory.sml"
 require_file "$project/.holbuild/obj/src/ATheory.dat"
 require_grep "dependency_context_key=" "$project/.holbuild/dep/replay/src/AScript.sml.key"
 if grep -q "theorem_boundary\|_end_of_proof.save\|deps_loaded=\|final_context=" "$project/.holbuild/dep/replay/src/AScript.sml.key"; then
@@ -260,8 +260,8 @@ mkdir -p "$skip_goalfrag_project/src"
 cp "$project/holproject.toml" "$skip_goalfrag_project/holproject.toml"
 cp "$project/src/AScript.sml" "$skip_goalfrag_project/src/AScript.sml"
 (cd "$skip_goalfrag_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --skip-goalfrag ATheory)
-require_file "$skip_goalfrag_project/.holbuild/gen/src/ATheory.sig"
-require_file "$skip_goalfrag_project/.holbuild/gen/src/ATheory.sml"
+require_file "$skip_goalfrag_project/.holbuild/obj/src/ATheory.sig"
+require_file "$skip_goalfrag_project/.holbuild/obj/src/ATheory.sml"
 require_file "$skip_goalfrag_project/.holbuild/obj/src/ATheory.dat"
 if grep -q "theorem_boundary a_thm" "$skip_goalfrag_project/.holbuild/dep/replay/src/AScript.sml.key"; then
   echo "--skip-goalfrag should not create theorem boundaries" >&2
@@ -955,7 +955,7 @@ require_grep "HOL source parse error:" "$malformed_log"
 require_grep "expected 'QED'" "$malformed_log"
 require_grep "source: .*AScript.sml:" "$malformed_log"
 require_grep "ATheory built" "$malformed_log"
-require_file "$malformed_project/.holbuild/gen/src/ATheory.sig"
+require_file "$malformed_project/.holbuild/obj/src/ATheory.sig"
 if grep -q 'Fail "malformed"\|instrumented log:' "$malformed_log"; then
   echo "parser-recovery fallback fell through to instrumented-script failure" >&2
   exit 1

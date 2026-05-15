@@ -97,7 +97,7 @@ require_file "$project/.holbuild/obj/src/Bar.uo"
 require_file "$project/.holbuild/obj/src/Baz.uo"
 require_file "$project/.holbuild/obj/src/Quux.uo"
 require_file "$project/.holbuild/obj/src/RawLoad.uo"
-require_file "$project/.holbuild/gen/src/ATheory.sml"
+require_file "$project/.holbuild/obj/src/ATheory.sml"
 require_file "$project/.holbuild/obj/src/ATheory.dat"
 
 require_grep ".holbuild/obj/src/Foo" "$project/.holbuild/obj/src/Bar.uo"

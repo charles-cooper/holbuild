@@ -57,8 +57,8 @@ if grep -q 'build\.keys\.external' "$coarse_timing"; then
   exit 1
 fi
 
-require_file "$project/.holbuild/gen/src/ATheory.sig"
-require_file "$project/.holbuild/gen/src/ATheory.sml"
+require_file "$project/.holbuild/obj/src/ATheory.sig"
+require_file "$project/.holbuild/obj/src/ATheory.sml"
 require_file "$project/.holbuild/obj/src/ATheory.dat"
 if strings -a "$project/.holbuild/obj/src/ATheory.dat" | grep -q '\.holbuild.*stage'; then
   echo "theory dat should not record transient holbuild stage paths" >&2
@@ -94,15 +94,15 @@ if strings -a "$tmpdir/.holbuild/obj/src/ATheory.dat" | grep -q '\.holbuild.*sta
   exit 1
 fi
 
-: > "$project/.holbuild/gen/src/ATheory.sml"
-: > "$project/.holbuild/gen/src/ATheory.sig"
+: > "$project/.holbuild/obj/src/ATheory.sml"
+: > "$project/.holbuild/obj/src/ATheory.sig"
 zero_output_log=$tmpdir/zero-output.log
 (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$zero_output_log"
 if grep -q "ATheory is up to date" "$zero_output_log"; then
   echo "zero-byte theory outputs were treated as up to date" >&2
   exit 1
 fi
-if [[ ! -s "$project/.holbuild/gen/src/ATheory.sml" || ! -s "$project/.holbuild/gen/src/ATheory.sig" ]]; then
+if [[ ! -s "$project/.holbuild/obj/src/ATheory.sml" || ! -s "$project/.holbuild/obj/src/ATheory.sig" ]]; then
   echo "zero-byte theory outputs were not repaired" >&2
   exit 1
 fi
@@ -126,8 +126,8 @@ cache_log=$tmpdir/cache-restore.log
 (cd "$project" && HOLBUILD_CACHE_TRACE=1 "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$cache_log"
 require_grep "cache hit: ATheory source/dependency key=$input_key" "$cache_log"
 require_grep "ATheory restored from cache" "$cache_log"
-require_file "$project/.holbuild/gen/src/ATheory.sig"
-require_file "$project/.holbuild/gen/src/ATheory.sml"
+require_file "$project/.holbuild/obj/src/ATheory.sig"
+require_file "$project/.holbuild/obj/src/ATheory.sml"
 require_file "$project/.holbuild/obj/src/ATheory.dat"
 # cache restore does not create checkpoints (no HOL process runs),
 # but previously-saved checkpoints persist for incremental rebuilds
@@ -166,7 +166,7 @@ kind=theory
 mldeps
 mldep /stale/.holbuild/stage/$bad_key/ATheory
 blob sig 0000000000000000000000000000000000000000
-blob sml-template 0000000000000000000000000000000000000000
+blob sml 0000000000000000000000000000000000000000
 blob dat 0000000000000000000000000000000000000000
 EOF
 rm -rf "$project/.holbuild"
@@ -218,8 +218,8 @@ Proof
 QED
 SML
 (cd "$no_export_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --no-cache ATheory) > "$tmpdir/no-export.log"
-require_file "$no_export_project/.holbuild/gen/src/ATheory.sig"
-require_file "$no_export_project/.holbuild/gen/src/ATheory.sml"
+require_file "$no_export_project/.holbuild/obj/src/ATheory.sig"
+require_file "$no_export_project/.holbuild/obj/src/ATheory.sml"
 require_file "$no_export_project/.holbuild/obj/src/ATheory.dat"
 
 skip_project=$tmpdir/skip-project
@@ -234,8 +234,8 @@ if grep -q "holbuild checkpoint kind=deps_loaded\|holbuild checkpoint kind=final
   echo "--skip-checkpoints created theory checkpoints" >&2
   exit 1
 fi
-require_file "$skip_project/.holbuild/gen/src/ATheory.sig"
-require_file "$skip_project/.holbuild/gen/src/ATheory.sml"
+require_file "$skip_project/.holbuild/obj/src/ATheory.sig"
+require_file "$skip_project/.holbuild/obj/src/ATheory.sml"
 require_file "$skip_project/.holbuild/obj/src/ATheory.dat"
 if find "$skip_project/.holbuild/checkpoints" \( -name '*.save' -o -name '*.save.ok' \) -print -quit 2>/dev/null | grep -q .; then
   echo "--skip-checkpoints left checkpoint files" >&2

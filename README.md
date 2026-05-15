@@ -366,9 +366,10 @@ build their declared logical objects, load the generated theory modules, and sav
 the requested heap with PolyML SaveState.
 
 The optional global cache stores simple theory semantic artifacts by action key:
-`Theory.sig`, a path-rebased `Theory.sml` template, and `Theory.dat`. On a cache
-hit, holbuild materializes artifacts into local `.holbuild/`, writes local load
-manifests, and validates hashes before dependents use them. It does not restore
+`Theory.sig`, `Theory.sml`, and `Theory.dat`. For newer HOL toolchains the cached
+`Theory.sml` is the upstream relocatable file; for older toolchains holbuild
+rebases its `.dat` reference when publishing. On a cache hit, holbuild materializes
+artifacts into local `.holbuild/`, writes local load manifests, and validates hashes before dependents use them. It does not restore
 successful-build checkpoint files by default. Successful cache hits refresh the
 action manifest mtime for retention, rather than relying on filesystem atime.
 `holbuild gc` removes stale project-local build residue and stale global-cache
