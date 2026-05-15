@@ -254,16 +254,17 @@ fun cache_root () =
 fun external_cache_path root source_hash =
   Path.concat(root, Path.concat("deps", Path.concat("external", source_hash ^ ".deps")))
 
+fun extract_global_cached_with_hash {source_path, source_hash} =
+  case cache_root () of
+      NONE => extract_uncached source_path
+    | SOME root =>
+        extract_cached_with_hash {cache_path = external_cache_path root source_hash,
+                                  source_path = source_path,
+                                  source_hash = source_hash}
+
 fun extract_global_cached source_path =
-  let val source_hash = HolbuildHash.file_sha1 source_path
-  in
-    case cache_root () of
-        NONE => extract_uncached source_path
-      | SOME root =>
-          extract_cached_with_hash {cache_path = external_cache_path root source_hash,
-                                    source_path = source_path,
-                                    source_hash = source_hash}
-  end
+  extract_global_cached_with_hash {source_path = source_path,
+                                   source_hash = HolbuildHash.file_sha1 source_path}
 
 fun extract path = extract_uncached path
 

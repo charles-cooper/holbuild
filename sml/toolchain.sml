@@ -47,20 +47,60 @@ fun timing_line {kind, argv, output, status, start, finish} =
     String.concatWith "\t" fields ^ "\n"
   end
 
+fun timing_log_path () = OS.Process.getEnv "HOLBUILD_TIMING_LOG"
+
 fun append_timing entry =
-  case OS.Process.getEnv "HOLBUILD_TIMING_LOG" of
+  case timing_log_path () of
       NONE => ()
     | SOME path =>
         let val out = TextIO.openAppend path
         in TextIO.output(out, entry); TextIO.closeOut out end
         handle _ => ()
 
-fun phase_line {name, status, start, finish} =
+fun timing_log_enabled () = Option.isSome (timing_log_path ())
+
+fun lower_text text = String.map Char.toLower text
+
+fun timing_detail_level () =
+  case OS.Process.getEnv "HOLBUILD_TIMING_DETAIL" of
+      SOME value => detail_level_value value
+    | NONE =>
+        (case OS.Process.getEnv "HOLBUILD_TIMING_LEVEL" of
+             SOME value => detail_level_value value
+           | NONE => 0)
+and detail_level_value value =
+  case lower_text value of
+      "" => 0
+    | "coarse" => 0
+    | "normal" => 0
+    | "fine" => 1
+    | "detail" => 1
+    | "trace" => 2
+    | text =>
+        (case Int.fromString text of
+             SOME n => Int.max(0, n)
+           | NONE => 0)
+
+fun timing_detail_at level = timing_log_enabled () andalso timing_detail_level () >= level
+
+fun phase_line_milliseconds {name, status, ms, fields} =
   String.concatWith "\t"
-    ["phase",
-     "name=" ^ timing_field name,
-     "status=" ^ timing_field status,
-     "ms=" ^ LargeInt.toString (Time.toMilliseconds (Time.-(finish, start)))] ^ "\n"
+    (["phase",
+      "name=" ^ timing_field name,
+      "status=" ^ timing_field status,
+      "ms=" ^ LargeInt.toString ms] @ map timing_field fields) ^ "\n"
+
+fun phase_line {name, status, start, finish} =
+  phase_line_milliseconds
+    {name = name, status = status,
+     ms = Time.toMilliseconds (Time.-(finish, start)), fields = []}
+
+fun record_phase_detail level name elapsed fields =
+  if timing_detail_at level then
+    append_timing
+      (phase_line_milliseconds
+         {name = name, status = "ok", ms = Time.toMilliseconds elapsed, fields = fields})
+  else ()
 
 fun time_phase name f =
   let val start = Time.now ()
