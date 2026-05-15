@@ -28,7 +28,9 @@ Heap export flow:
 
 ## `holbuild run` / `holbuild repl` — prototype status
 
-These commands exist but are incomplete. They generate a context file and pass `[run].loads` as arguments to `hol run`/`hol repl`, but do not set up load paths for built project artifacts. The generated context file is effectively empty (`val _ = ()`). They are not ready for general consumer use.
+These commands generate `.holbuild/holbuild-run-context.sml`, add built project artifact object directories to HOL `loadPath`, and load `[run].loads` before user-supplied files/interactive input. Build requested targets first; `run`/`repl` do not trigger hidden rebuilds.
+
+`holbuild repl` uses an interactive HOL process runner so stdin/stdout stay attached to the terminal.
 
 Global flags apply: `--holdir`, `--source-dir`, and `--maxheap`/`--max-heap`.
 

@@ -456,18 +456,24 @@ fun hol_args_for_project tc project subcommand user_args =
           NONE => ["--holstate", HolbuildToolchain.base_state tc]
         | SOME heap => ["--holstate", heap]
   in
-    HolbuildToolchain.hol_subcommand_argv tc subcommand @ heap_args @ [context] @ #run_loads project @ user_args
+    HolbuildToolchain.hol_subcommand_argv tc subcommand @ heap_args @ [context] @ user_args
   end
 
-fun run_hol tc subcommand user_args =
+fun run_hol_with runner tc subcommand user_args =
   let
     val project = timed_phase "project.discover" load_project
     val argv = hol_args_for_project tc project subcommand user_args
-    val status = HolbuildToolchain.run argv
+    val status = runner argv
   in
     if HolbuildToolchain.success status then ()
     else raise Error ("hol " ^ subcommand ^ " failed")
   end
+
+fun run_hol tc subcommand user_args =
+  run_hol_with HolbuildToolchain.run tc subcommand user_args
+
+fun repl_hol tc user_args =
+  run_hol_with HolbuildToolchain.run_interactive tc "repl" user_args
 
 fun goalfrag_plan_command args =
   case args of
@@ -497,7 +503,7 @@ fun dispatch tc jobs args =
     | "heap" :: [target] => (reject_json "heap"; build_heap tc jobs target)
     | "heap" :: _ => raise Error "usage: holbuild heap NAME"
     | "run" :: rest => (reject_json "run"; run_hol tc "run" rest)
-    | "repl" :: rest => (reject_json "repl"; run_hol tc "repl" rest)
+    | "repl" :: rest => (reject_json "repl"; repl_hol tc rest)
     | cmd :: _ => raise Error ("unknown command: " ^ cmd)
 
 fun parse_gc_args args =
