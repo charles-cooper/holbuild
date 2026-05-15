@@ -199,8 +199,8 @@ src/FooScript.sml -> FooTheory
 A theory target owns the logical artifacts:
 
 ```text
-.holbuild/gen/src/FooTheory.sml
-.holbuild/gen/src/FooTheory.sig
+.holbuild/obj/src/FooTheory.sml
+.holbuild/obj/src/FooTheory.sig
 .holbuild/obj/src/FooTheory.dat
 .holbuild/obj/src/FooTheory.uo
 .holbuild/obj/src/FooTheory.ui
@@ -304,16 +304,16 @@ Project `.holbuild/` is the complete local build view:
 
 ```text
 project/.holbuild/
-  gen/          generated source/signature files
-  obj/          local ML/theory artifacts
+  obj/          local ML/theory artifacts, including theory .sig/.sml/.dat bundles
   dep/          action metadata and dependency facts
   heap/         project-local heaps
   checkpoints/  materialized PolyML SaveState checkpoints
 ```
 
-Path-sensitive files are generated or rebased for this local layout. In
-particular, `.uo`/`.ui` files and generated `Theory.sml` files may contain paths
-and should not be treated as portable semantic truth. Project SML/SIG modules are
+Path-sensitive files are generated or rebased for this local layout. Older HOL
+`Theory.sml` files may contain paths and are rebased when installed; newer HOL
+`Theory.sml` files locate their adjacent `.dat` file and are copied unchanged.
+Project SML/SIG modules are
 built as internal load manifests: `load "Module"`, `open Module`, and qualified
 module references are resolved through HOL's `Holdep` scanner against the project
 graph plus the configured HOL toolchain objects, not against ambient include
@@ -408,12 +408,11 @@ else:
 
 The cache should store semantic bundles, shareable state bundles, and metadata.
 Local path-sensitive files are regenerated or rebased during materialization. The
-prototype currently publishes simple theory bundles containing `Theory.sig`,
-`Theory.dat`, and a `Theory.sml` template with the `.dat` load path replaced by a
-placeholder. The target model also publishes validated successor-ready checkpoint
-state for shareable dependencies. On a cache hit, holbuild copies blobs into local
-`.holbuild/`, rewrites local path references, writes local `.uo/.ui` load
-manifests plus `HOLFileSys` remap copies, and materializes the checkpoint/state
+prototype currently publishes simple theory bundles containing adjacent
+`Theory.sig`, `Theory.sml`, and `Theory.dat` files. The target model also
+publishes validated successor-ready checkpoint state for shareable dependencies.
+On a cache hit, holbuild copies blobs into local `.holbuild/`, writes local
+`.uo/.ui` load manifests plus `HOLFileSys` remap copies, and materializes the checkpoint/state
 needed by downstream actions. Missing or corrupt cache entries warn and fall back
 to source build. Cache manifests that contain transient `.holbuild/stage` mldeps
 are removed under the per-action cache lock as soon as restore detects them, so

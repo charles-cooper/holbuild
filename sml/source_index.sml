@@ -58,12 +58,11 @@ fun obj_path artifact_root rel ext =
   let val {base, ...} = Path.splitBaseExt rel
   in join artifact_root (join "obj" (base ^ ext)) end
 
-fun gen_path artifact_root rel name ext = join artifact_root (join "gen" (join (dirname rel) (name ^ ext)))
 fun theory_obj_path artifact_root rel name ext = join artifact_root (join "obj" (join (dirname rel) (name ^ ext)))
 fun dat_path root rel name = theory_obj_path root rel name ".dat"
 
 fun theory_artifacts root rel theory =
-  { generated = [gen_path root rel theory ".sig", gen_path root rel theory ".sml"],
+  { generated = [theory_obj_path root rel theory ".sig", theory_obj_path root rel theory ".sml"],
     objects = [obj_path root rel ".uo", theory_obj_path root rel theory ".ui",
                theory_obj_path root rel theory ".uo"],
     theory_data = [dat_path root rel theory] }

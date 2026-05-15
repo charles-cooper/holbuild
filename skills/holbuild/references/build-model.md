@@ -72,15 +72,15 @@ Global cache path: `$HOLBUILD_CACHE` > `$XDG_CACHE_HOME/holbuild` > `~/.cache/ho
 
 Layout:
 ```
-actions/<action-key>/manifest   # cache manifest (sig/sml-template/dat blob hashes + mldeps)
+actions/<action-key>/manifest   # cache manifest (sig/sml/dat blob hashes + mldeps)
 blobs/<content-hash>            # content-addressed storage
 tmp/                            # temporary files
 locks/                          # publish + GC locks
 ```
 
-Cache publish: after a source build, theory artifacts (sig, sml-template, dat) are stored as blobs. The `.sml` is a template with the `.dat` path replaced by a placeholder.
+Cache publish: after a source build, theory artifacts (sig, sml, dat) are stored as blobs. New HOL `Theory.sml` files are relocatable and copied unchanged; old HOL `Theory.sml` files are rebased to the local adjacent `.dat` path before publishing.
 
-Cache restore: on action-key or parent-output key match, blobs are materialized into local `.holbuild/`, `.sml` template is rebased with local `.dat` path, `HOLFileSys` remap copies are created, `.uo/.ui` load manifests are written.
+Cache restore: on action-key or parent-output key match, blobs are materialized into local `.holbuild/`, `HOLFileSys` remap copies are created, and `.uo/.ui` load manifests are written.
 
 **A bad cache hit is worse than a missed cache hit.** Validation:
 - Action key must match

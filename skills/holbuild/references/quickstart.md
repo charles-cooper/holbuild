@@ -84,8 +84,7 @@ holbuild cache gc                               # legacy cache-only form still e
 
 ```
 .holbuild/
-  gen/          generated Theory.sig, Theory.sml
-  obj/          .uo, .ui, .dat artifacts
+  obj/          local ML/theory artifacts, including adjacent Theory.sig/.sml/.dat bundles
   dep/          action metadata (.key files with input_key)
   checkpoints/  local PolyML replay/debug checkpoints, budgeted by gc
   heap/         exported heaps

@@ -68,7 +68,7 @@ if grep -q "ignore_grammar\|qualified\|identifier" "$tmpdir/dry.log"; then
 fi
 
 (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build BTheory) > "$tmpdir/build.log"
-require_file "$project/.holbuild/gen/src/ATheory.sml"
+require_file "$project/.holbuild/obj/src/ATheory.sml"
 require_file "$project/.holbuild/obj/src/ATheory.dat"
 require_file "$project/.holbuild/obj/src/BTheory.dat"
 require_grep "numLib" "$project/.holbuild/obj/src/AScript.uo"
@@ -81,7 +81,7 @@ if grep -q "\.holbuild/stage" "$project/.holbuild/obj/src/ATheory.uo"; then
   echo "transient stage path leaked into generated theory load manifest" >&2
   exit 1
 fi
-if grep -q "\.holbuild/stage" "$project/.holbuild/gen/src/ATheory.sml"; then
+if grep -q "\.holbuild/stage" "$project/.holbuild/obj/src/ATheory.sml"; then
   echo "transient stage dat path leaked into generated theory source" >&2
   exit 1
 fi
@@ -108,7 +108,7 @@ if grep -q "\.holbuild/stage" "$project/.holbuild/obj/src/ATheory.uo"; then
   echo "cache restore leaked transient stage path into generated theory load manifest" >&2
   exit 1
 fi
-if grep -q "\.holbuild/stage" "$project/.holbuild/gen/src/ATheory.sml"; then
+if grep -q "\.holbuild/stage" "$project/.holbuild/obj/src/ATheory.sml"; then
   echo "cache restore leaked transient stage dat path into generated theory source" >&2
   exit 1
 fi

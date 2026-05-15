@@ -93,9 +93,10 @@ dump_theory_summary() {
   prepare_load_root "$artifacts" "$root"
   cat > "$script" <<SML
 open HolKernel Parse boolLib bossLib;
+val _ = let val out = HOLFileSys.openOut "$root/ATheory.ui" in HOLFileSys.output(out, "$root/ATheory.sig\n"); HOLFileSys.closeOut out end;
+val _ = let val out = HOLFileSys.openOut "$root/ATheory.uo" in HOLFileSys.output(out, "$root/ATheory.sml\n"); HOLFileSys.closeOut out end;
 val result =
-  (PolyML.use "$root/.hol/objs/ATheory.sig";
-   PolyML.use "$root/.hol/objs/ATheory.sml";
+  (load "$root/ATheory";
    SOME (DB.theorems "A"))
   handle e => (print ("@@DUMP_ERROR@@ " ^ General.exnMessage e ^ "\\n"); NONE);
 val _ =
@@ -138,7 +139,7 @@ compare_success_artifacts() {
   local project=$3
   local ir_flat=$tmpdir/$name.new-ir-artifacts
   mkdir -p "$ir_flat"
-  cp "$project/.holbuild/gen/src"/ATheory.{sml,sig} "$ir_flat/"
+  cp "$project/.holbuild/obj/src"/ATheory.{sml,sig} "$ir_flat/"
   cp "$project/.holbuild/obj/src"/ATheory.dat "$ir_flat/"
 
   cmp "$hol_artifacts/ATheory.sig" "$ir_flat/ATheory.sig" || {

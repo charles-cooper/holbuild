@@ -157,8 +157,8 @@ val _ = export_theory();
 SML
   (cd "$project" && HOLBUILD_ECHO_CHILD_LOGS=1 "$HOLBUILD_BIN" --holdir "$HOLDIR" build --goalfrag --skip-checkpoints --tactic-timeout 60) > "$tmpdir/success.goalfrag.out" 2>&1
   require_grep "parse error: expected closing parenthesis" "$tmpdir/success.goalfrag.out"
-  require_file "$project/.holbuild/gen/src/ATheory.sig"
-  require_file "$project/.holbuild/gen/src/ATheory.sml"
+  require_file "$project/.holbuild/obj/src/ATheory.sig"
+  require_file "$project/.holbuild/obj/src/ATheory.sml"
   require_file "$project/.holbuild/obj/src/ATheory.dat"
   require_file "$project/.holbuild/obj/src/ATheory.ui"
   require_file "$project/.holbuild/obj/src/ATheory.uo"

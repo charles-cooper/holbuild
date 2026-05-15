@@ -95,12 +95,12 @@ SML
 
 (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build BTheory)
 
-require_file "$project/.holbuild/deps/dep/gen/src/ATheory.sig"
-require_file "$project/.holbuild/deps/dep/gen/src/ATheory.sml"
+require_file "$project/.holbuild/deps/dep/obj/src/ATheory.sig"
+require_file "$project/.holbuild/deps/dep/obj/src/ATheory.sml"
 require_file "$project/.holbuild/deps/dep/obj/src/ATheory.dat"
 # checkpoints persist after successful builds for incremental rebuilds
-require_file "$project/.holbuild/gen/src/BTheory.sig"
-require_file "$project/.holbuild/gen/src/BTheory.sml"
+require_file "$project/.holbuild/obj/src/BTheory.sig"
+require_file "$project/.holbuild/obj/src/BTheory.sml"
 require_file "$project/.holbuild/obj/src/BTheory.dat"
 
 second_log=$tmpdir/second.log
