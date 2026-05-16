@@ -48,6 +48,7 @@ members = ["src"]
 | `--skip-checkpoints` | No `.save`/`.ok` checkpoint files; theorem instrumentation still runs |
 | `--skip-goalfrag` | No theorem instrumentation/proof IR; incompatible with timeout/plan/trace flags |
 | `--goalfrag` | Use legacy HOL GoalFrag runtime instead of default proof IR |
+| `--strict-parse` | Reject HOLSourceParser recovery before running HOL; default preserves HOL compatibility and instruments recovered proof boundaries where possible |
 | `--tactic-timeout SECONDS` | Root-package per-step timeout (default 2.5s, `0` disables); also manifest/local-config settable |
 | `--json` | Newline-delimited streaming JSON build events/errors on stdout; no retained log paths by default; not supported for dry-run/plan/trace/repl-on-failure |
 | `--retain-debug-artifacts` | With `--json build`, retain durable failure logs and expose `debug_artifacts.log`; stage dirs still cleaned |
@@ -64,6 +65,7 @@ All under `.holbuild/`: `gen/` (generated theory files), `obj/` (artifacts), `de
 - Duplicate logical names across packages → error (except same-package `.sig`/`.sml` companion)
 - Unknown manifest/local-config fields → error (schema-checked)
 - `--tactic-timeout` applies only to root package; dependencies build with no timeout
+- Default parser policy is HOL-compatible recovery: keep recovered theorem instrumentation and pass unknown/recovered source through; use `--strict-parse` only when parser recovery should be fatal
 - Proof engine/checkpoint/timeout/trace flags are execution/debug policy, not final artifact action-key inputs
 - Reserved dependency `[dependencies.HOLDIR]` uses holbuild's built-in root-HOL manifest; no shim needed for core HOL sources
 - HOL examples/tests are intentionally outside built-in `HOLDIR`; declare example subtrees (e.g. `keccakTheory`) as separate shimmed dependencies

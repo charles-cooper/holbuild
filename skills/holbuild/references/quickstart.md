@@ -63,11 +63,14 @@ holbuild --json build --retain-debug-artifacts FooTheory  # also retain/report f
 - `--skip-checkpoints` — no `.save`/`.ok` checkpoint files; theorem instrumentation still runs
 - `--skip-goalfrag` — no theorem instrumentation/proof IR, hence no tactic timeout/plan/trace support
 - `--goalfrag` — use the legacy HOL GoalFrag runtime instead of default proof IR
+- `--strict-parse` — fail before running HOL if HOLSourceParser reports parser recovery; default keeps HOL-compatible recovery and instruments recovered proof boundaries where possible
 - `--tactic-timeout SECONDS` — per-step timeout for root package (default 2.5s, `0` disables)
 - `--repl-on-failure` — serial build; on theory failure, start `hol repl` from failed-prefix or replay/deps checkpoint (requires checkpoints; no JSON)
 - `--retain-debug-artifacts` — with `--json build`, retain durable failure logs and report `debug_artifacts.log`; logs may contain full goals/output, stage dirs are still cleaned
 
 **Incompatible**: `--skip-goalfrag` + `--tactic-timeout`/`--goalfrag-plan`/`--goalfrag-trace`; `--json` + dry-run/plan/repl-on-failure.
+
+Parser recovery policy: default build mode preserves HOL compatibility. If HOLSourceParser reports a recoverable parse error, holbuild records a warning, uses recovered theorem/resume boundaries for instrumentation, and passes unknown/recovered source through to HOL. Use `--strict-parse` for parser-debug/CI cases where any HOLSourceParser recovery should fail the build before up-to-date/cache restore or HOL execution.
 
 ## Maintenance
 

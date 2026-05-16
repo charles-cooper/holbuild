@@ -4,12 +4,12 @@
 
 When theorem instrumentation is enabled (default), holbuild instruments modern theorem declarations at the AST level:
 
-1. Parses source with `HOLSourceParser` before expansion/recovery
-2. Identifies `Theorem ... Proof ... QED` declarations and tactic/source spans
+1. Parses source with `HOLSourceParser`
+2. Identifies recovered `Theorem ... Proof ... QED` / `Resume ... QED` declarations and tactic/source spans
 3. Rewrites source to insert theorem-boundary markers and load a runtime helper
 4. Runs theorem proofs through the selected runtime with per-step timeout, failure diagnostics, and optional checkpoint saves
 
-The default runtime is **proof IR**. It lowers `HOLSourceAST.exp` directly and executes exact HOL tactic/list-tactic boundaries for recognized constructs. Use `--goalfrag` only to select the legacy HOL GoalFrag/proof-manager runtime for comparison/debugging. The old `--new-ir` flag is a deprecated no-op because proof IR is default.
+The default runtime is **proof IR**. It lowers `HOLSourceAST.exp` directly and executes exact HOL tactic/list-tactic boundaries for recognized constructs. If the proof-IR planner cannot parse/decompose a recovered tactic expression, it falls back to a whole-tactic `StepPlain` so the proof still runs under the installed runtime. Use `--goalfrag` only to select the legacy HOL GoalFrag/proof-manager runtime for comparison/debugging. The old `--new-ir` flag is a deprecated no-op because proof IR is default.
 
 This enables:
 - Per-step tactic timeouts (`--tactic-timeout`)
@@ -59,6 +59,12 @@ Runs theorem proofs through the selected instrumentation runtime without saving 
 Opts out of theorem instrumentation/proof IR. Source is sent through the plain `hol run` path. There is no per-tactic timeout, execution plan, trace, theorem-context/end-of-proof/failed-prefix proof navigation, or instrumented goal diagnostics. Non-theorem dependency/final-context checkpoint machinery may still be used when checkpoints are enabled.
 
 **Incompatible**: `--skip-goalfrag` with `--tactic-timeout`, `--goalfrag-plan`, or `--goalfrag-trace`.
+
+## Parser recovery and `--strict-parse`
+
+Default build mode preserves HOL compatibility: HOLSourceParser recovery is not a build gate. When parser recovery occurs, holbuild warns, keeps recovered theorem/resume boundaries for instrumentation, and lets unknown/recovered source regions pass through to HOL. This avoids the old all-or-nothing fallback where one later parse recovery could disable proof IR/timeouts for the whole theory.
+
+Use `--strict-parse` when parser recovery itself should be fatal. In strict mode, holbuild runs strict HOLSourceParser boundary discovery before up-to-date/cache restore or HOL execution and reports the parse error immediately.
 
 ## Tactic timeout flow
 

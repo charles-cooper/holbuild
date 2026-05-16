@@ -56,7 +56,7 @@ hash(
 
 **Any source byte change** (including comments/proof edits) changes the action key and cascades to all dependents. This is conservative — v1 does not attempt semantic equivalence of generated outputs.
 
-Proof engine/checkpoint/timeout/trace flags are intentionally not final artifact action-key inputs. Switching `--skip-checkpoints`, `--skip-goalfrag`, `--goalfrag`, or root tactic timeout should not rebuild an otherwise up-to-date semantic artifact.
+Proof engine/checkpoint/timeout/trace flags are intentionally not final artifact action-key inputs. Switching `--skip-checkpoints`, `--skip-goalfrag`, `--goalfrag`, `--strict-parse`, or root tactic timeout should not rebuild an otherwise up-to-date semantic artifact. Note: `--strict-parse` is still checked before up-to-date/cache restore and can fail early if HOLSourceParser reports recovery.
 
 ## Up-to-date check
 
