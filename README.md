@@ -21,7 +21,7 @@ The current implementation intentionally focuses on:
 - includes project `load "Module"` SML/SIG dependencies in build plans and internal load manifests
 - records generated theory ML dependencies from HOL theory metadata in internal load manifests
 - rejects source-level `use "file"` in project build actions; declare/load project modules instead
-- supports per-action policy for explicit logical dependencies/loadable modules, extra inputs, cache disabling, and always-rerun actions
+- supports per-action policy for explicit logical dependencies/loadable modules, extra dependencies, cache disabling, and always-rerun actions
 - computes current-format source/resolved-dependency input keys for planned actions
 - schedules build actions in DAG-ready parallel order with `-jN`, local `[build].jobs`, or a CPU-derived default
 - executes simple theory-script builds into project `.holbuild/` without Holmake
@@ -204,7 +204,7 @@ rev = "abc123"
 [actions.MyTheory]
 deps = ["MyProjectLib"]
 loads = ["SomeExternalLib"]
-extra_inputs = ["data/table.txt"]
+extra_deps = ["data/table.txt"]
 cache = false
 
 [run]
@@ -309,7 +309,7 @@ non-source inputs or must not be cached/skipped, make that explicit:
 [actions.MyTheory]
 deps = ["MyProjectLib"]
 loads = ["SomeExternalLib"]
-extra_inputs = ["data/table.txt"]
+extra_deps = ["data/table.txt"]
 cache = false
 always_reexecute = true
 # impure = true is shorthand for no cache and always re-execute
@@ -321,11 +321,22 @@ logical project dependencies when source-level imports are insufficient or
 intentionally absent; every listed name must resolve in the manifest/source
 graph. `loads` names additional loadable module/library stems for source-implicit
 predecessors; matching project modules are resolved in the DAG, otherwise the
-name is loaded from the configured HOL toolchain context. `extra_inputs` are
-hashed exactly and included in the action key. `cache = false`
-disables global-cache restore/publish for that action. `always_reexecute = true`
-prevents local up-to-date skipping and any retained/debug checkpoint replay for that action. These
-are escape hatches, not ambient include/search paths.
+name is loaded from the configured HOL toolchain context. `extra_deps` are
+package-root-relative filesystem dependencies, such as files, directories, or
+simple globs, whose expanded contents are hashed into the action key. Source
+files may also declare source-file-relative extra dependencies with a static
+literal annotation:
+
+```sml
+val () = holbuild_extra_deps ["../data/table.txt"];
+```
+
+Source-declared extra dependencies are staged so matching relative filesystem
+reads work during the action. `cache = false` disables global-cache
+restore/publish for that action. `always_reexecute = true` prevents local
+up-to-date skipping and any retained/debug checkpoint replay for that action.
+These are escape hatches, not ambient include/search paths. Compatibility:
+manifest field `extra_inputs` is accepted as a deprecated alias for `extra_deps`.
 
 Generated HOL source can be declared with pre-discovery generator steps. Generated
 outputs are ordinary visible source files, typically under a project `gen/`

@@ -103,6 +103,7 @@ fun copy_rewriting_path {src, dst, replacements} =
 fun source_file node = #source_path (HolbuildBuildPlan.source_of node)
 fun source_artifacts node = #artifacts (HolbuildBuildPlan.source_of node)
 fun source_policy node = #policy (HolbuildBuildPlan.source_of node)
+fun source_deps node = HolbuildBuildPlan.deps_of node
 fun logical_name node = HolbuildBuildPlan.logical_name node
 fun cache_enabled node = HolbuildProject.action_cache_enabled (source_policy node)
 fun always_reexecute node = HolbuildProject.action_always_reexecute (source_policy node)
@@ -733,6 +734,62 @@ fun checkpoint_exists path = file_exists path andalso file_exists (checkpoint_ok
 
 fun file_hash path = HolbuildHash.file_sha1 path
 
+fun normalize_path path = Path.mkCanonical path handle Path.InvalidArc => path
+
+fun is_dir path = FS.isDir path handle OS.SysErr _ => false
+
+fun list_dir path =
+  let
+    val stream = FS.openDir path
+      handle OS.SysErr _ => raise Error ("could not read directory: " ^ path)
+    fun loop acc =
+      case FS.readDir stream of
+          NONE => rev acc before FS.closeDir stream
+        | SOME name => loop (name :: acc)
+  in
+    loop [] handle e => (FS.closeDir stream; raise e)
+  end
+
+fun path_has_glob path =
+  List.exists (fn c => c = #"*" orelse c = #"?") (String.explode path)
+
+fun join root rel = if rel = "" then root else Path.concat(root, rel)
+
+fun sort_strings xs =
+  let
+    fun insert x [] = [x]
+      | insert x (y :: ys) =
+          if String.compare(x, y) = LESS then x :: y :: ys else y :: insert x ys
+  in
+    List.foldl (fn (x, acc) => insert x acc) [] xs
+  end
+
+fun files_under abs rel =
+  if is_dir abs then
+    List.concat (map (fn name => files_under (Path.concat(abs, name)) (join rel name)) (list_dir abs))
+  else if FS.access(abs, [FS.A_READ]) handle OS.SysErr _ => false then [(rel, abs)]
+  else []
+
+fun expand_extra_dep base decl =
+  if path_has_glob decl then
+    List.filter (fn (rel, _) => HolbuildSourceIndex.glob_match decl rel) (files_under base "")
+  else
+    let val abs = normalize_path (if Path.isAbsolute decl then decl else Path.concat(base, decl))
+    in
+      if is_dir abs then files_under abs decl
+      else if FS.access(abs, [FS.A_READ]) handle OS.SysErr _ => false then [(decl, abs)]
+      else raise Error ("extra dependency not found: " ^ abs)
+    end
+
+fun extra_dep_lines label base decls =
+  let
+    fun line decl =
+      let val expanded = sort_strings (map (fn (rel, abs) => rel ^ "@" ^ file_hash abs) (expand_extra_dep base decl))
+      in (label ^ "_decl=" ^ decl) :: map (fn s => label ^ "=" ^ s) expanded end
+  in
+    List.concat (map line decls)
+  end
+
 fun current_metadata path = SOME (read_text path) handle IO.Io _ => NONE
 
 datatype hol_context = HolState of string
@@ -793,12 +850,12 @@ fun cache_trace line =
 fun hol_run_file_arg stage file =
   if canonical_path (Path.dir file) = canonical_path stage then Path.file file else file
 
-fun run_hol_files_to_log tc stage context files log_name error_message =
+fun run_hol_files_to_log tc stage workdir context files log_name error_message =
   let
     val log = Path.concat(stage, log_name)
-    val file_args = map (hol_run_file_arg stage) files
+    val file_args = map (hol_run_file_arg workdir) files
     val status =
-      HolbuildToolchain.run_in_dir_to_file stage
+      HolbuildToolchain.run_in_dir_to_file workdir
         (HolbuildToolchain.hol_subcommand_argv tc "run" @ ["--noconfig"] @ hol_context_args context @ file_args)
         log
   in
@@ -1961,10 +2018,17 @@ fun build_theory cache_allowed policy tc project base_context plan keys toolchai
       in
         error_with_captured_output detail failure_output
       end
+    fun stage_source_extra_dep decl =
+      List.app (fn (rel, abs) =>
+          let val dst = normalize_path (if Path.isAbsolute rel then rel else Path.concat(stage, rel))
+          in ensure_parent dst; copy_binary abs dst end)
+        (expand_extra_dep (Path.dir (source_file node)) decl)
+    val _ = List.app stage_source_extra_dep (#extra_deps (source_deps node))
     val build_log = Path.concat(stage, "holbuild-build.log")
     val _ = validate_hol_context (#context run_spec)
     val _ =
-      run_hol_files_to_log tc stage (#context run_spec)
+      run_hol_files_to_log tc stage stage
+        (#context run_spec)
         (#files run_spec @ [final_loader])
         "holbuild-build.log"
         "hol run failed while building theory script"
@@ -2074,18 +2138,27 @@ fun action_policy_lines node =
       map (fn dep => "declared_dep=" ^ dep) (HolbuildProject.action_deps policy)
     val declared_load_lines =
       map (fn dep => "declared_load=" ^ dep) (HolbuildProject.action_loads policy)
+    fun extra_input_root input =
+      let
+        val rel = HolbuildProject.extra_input_path input
+        val abs = HolbuildProject.extra_input_absolute_path input
+        val n = size abs - size rel
+      in
+        if n > 0 then String.substring(abs, 0, n) else Path.dir abs
+      end
     val extra_inputs = HolbuildProject.action_extra_inputs policy
     val extra_lines =
-      map (fn input =>
-             "extra_input=" ^ HolbuildProject.extra_input_path input ^ "@" ^
-             file_hash (HolbuildProject.extra_input_absolute_path input))
-          extra_inputs
+      List.concat (map (fn input =>
+        extra_dep_lines "extra_dep" (extra_input_root input) [HolbuildProject.extra_input_path input]) extra_inputs)
+    val source_extra_lines =
+      extra_dep_lines "source_extra_dep" (Path.dir (source_file node)) (#extra_deps (source_deps node))
   in
     ["cache=" ^ bool_text (HolbuildProject.action_cache_enabled policy),
      "always_reexecute=" ^ bool_text (HolbuildProject.action_always_reexecute policy)] @
     declared_dep_lines @
     declared_load_lines @
-    extra_lines
+    extra_lines @
+    source_extra_lines
   end
 
 fun theorem_boundary_line ({safe_name, prefix_hash, context_path, end_of_proof_path, ...} : HolbuildTheoryCheckpoints.checkpoint) =
@@ -2774,7 +2847,7 @@ fun export_heap tc (project : HolbuildProject.t) plan output =
     ensure_dir stage;
     ensure_parent output;
     write_heap_loader plan output loader;
-    run_hol_files_to_log tc stage base_context [loader]
+    run_hol_files_to_log tc stage stage base_context [loader]
       "holbuild-heap.log"
       ("hol run failed while exporting heap: " ^ output);
     remove_tree stage

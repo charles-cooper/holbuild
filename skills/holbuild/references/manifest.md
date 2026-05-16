@@ -39,12 +39,12 @@ output = "build/main.heap"  # heap output path, package-root-relative
 objects = ["MainTheory"]    # logical targets to build before saving heap
 
 [actions.TargetName]
-deps = ["OtherTheory"]              # extra logical project dependencies
-loads = ["ExternalLib"]            # extra loadable modules (project or HOL toolchain)
-extra_inputs = ["data/table.txt"]  # package-root-relative, hashed into action key
-cache = false                      # disable global cache for this action
-always_reexecute = true            # never skip, never replay checkpoints
-impure = true                      # shorthand: cache=false + always_reexecute=true
+deps = ["OtherTheory"]            # extra logical project dependencies
+loads = ["ExternalLib"]           # extra loadable modules (project or HOL toolchain)
+extra_deps = ["data/table.txt"]   # package-root-relative filesystem deps
+cache = false                     # disable global cache for this action
+always_reexecute = true           # never skip, never replay checkpoints
+impure = true                     # shorthand: cache=false + always_reexecute=true
 ```
 
 ## Schema validation
@@ -69,7 +69,7 @@ Dependency `name` in `[dependencies.X]` must match the `project.name` in the res
 
 ## Path rules
 
-- `build.members`, `build.exclude`, `build.roots`, `actions.*.extra_inputs`, `generate.*.inputs`, `generate.*.outputs` — **package-root-relative**
+- `build.members`, `build.exclude`, `build.roots`, `actions.*.extra_deps`, `generate.*.inputs`, `generate.*.outputs` — **package-root-relative**
 - Absolute paths and `..` components are rejected in those package-relative fields
 - Dependency `path` and `manifest` in `[dependencies.*]` are resolved relative to the *consumer's* manifest directory
 - `.holconfig.toml [overrides.X].path` takes precedence over `[dependencies.X].path`; masked dependency paths are not env-expanded
@@ -121,17 +121,25 @@ One logical name → one resolved artifact across the entire build graph. Two pa
 
 ## Action policies
 
-Default policy for any target: `cache = true`, `always_reexecute = false`, `impure = false`, no extra deps/loads/inputs.
+Default policy for any target: `cache = true`, `always_reexecute = false`, `impure = false`, no extra deps/loads.
 
 | Field | Default | Effect |
 |-------|---------|--------|
 | `deps` | `[]` | Additional logical project dependencies |
 | `loads` | `[]` | Additional loadable module stems |
-| `extra_inputs` | `[]` | Files hashed into action key |
+| `extra_deps` | `[]` | Extra filesystem dependencies hashed into action key; files, directories, or simple globs |
 | `cache` | `true` | Enable/disable global cache |
 | `always_reexecute` | `false` | Never skip up-to-date check or checkpoint replay |
 | `impure` | `false` | Shorthand for `cache=false, always_reexecute=true` |
 
 `impure = true` overrides both `cache` and `always_reexecute` — don't set them separately when using `impure`.
+
+Source files can also declare source-file-relative extra dependencies with a static literal annotation:
+
+```sml
+val () = holbuild_extra_deps ["../data/table.txt"];
+```
+
+Source-declared extra dependencies are staged so matching relative filesystem reads work during the action.
 
 Action policy names must resolve to sources in the package. An `[actions.FooTheory]` entry for a target that doesn't exist in the package is an error.

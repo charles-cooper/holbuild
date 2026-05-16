@@ -422,7 +422,66 @@ fun readable path = OS.FileSys.access(path, [OS.FileSys.A_READ]) handle OS.SysEr
 
 fun file_hash path =
   if readable path then HolbuildHash.file_sha1 path
-  else raise Error ("extra input not found: " ^ path)
+  else raise Error ("extra dependency not found: " ^ path)
+
+fun is_dir path = FS.isDir path handle OS.SysErr _ => false
+
+fun list_dir path =
+  let
+    val stream = FS.openDir path
+      handle OS.SysErr _ => raise Error ("could not read directory: " ^ path)
+    fun loop acc =
+      case FS.readDir stream of
+          NONE => rev acc before FS.closeDir stream
+        | SOME name => loop (name :: acc)
+  in
+    loop [] handle e => (FS.closeDir stream; raise e)
+  end
+
+fun path_has_glob path =
+  List.exists (fn c => c = #"*" orelse c = #"?") (String.explode path)
+
+fun join root rel = if rel = "" then root else Path.concat(root, rel)
+
+fun sort_strings xs =
+  let
+    fun insert x [] = [x]
+      | insert x (y :: ys) =
+          if String.compare(x, y) = LESS then x :: y :: ys else y :: insert x ys
+  in
+    List.foldl (fn (x, acc) => insert x acc) [] xs
+  end
+
+fun files_under abs rel =
+  if is_dir abs then
+    List.concat (map (fn name => files_under (Path.concat(abs, name)) (join rel name)) (list_dir abs))
+  else if readable abs then [(rel, abs)]
+  else []
+
+fun expand_extra_dep base decl =
+  if path_has_glob decl then
+    let
+      val root = base
+      val all = files_under root ""
+    in
+      List.filter (fn (rel, _) => HolbuildSourceIndex.glob_match decl rel) all
+    end
+  else
+    let val abs = normalize_path (if Path.isAbsolute decl then decl else Path.concat(base, decl))
+    in
+      if is_dir abs then files_under abs decl
+      else if readable abs then [(decl, abs)]
+      else raise Error ("extra dependency not found: " ^ abs)
+    end
+
+fun extra_dep_lines label base decls =
+  let
+    fun line decl =
+      let val expanded = sort_strings (map (fn (rel, abs) => rel ^ "@" ^ file_hash abs) (expand_extra_dep base decl))
+      in (label ^ "_decl=" ^ decl) :: map (fn s => label ^ "=" ^ s) expanded end
+  in
+    List.concat (map line decls)
+  end
 
 fun read_text path =
   let
@@ -666,12 +725,20 @@ fun action_text_with lookup config_lines_for_node toolchain_key external_key nod
     val declared_loads = HolbuildProject.action_loads policy
     val declared_dep_lines = map (fn dep => "declared_dep=" ^ dep) declared_deps
     val declared_load_lines = map (fn dep => "declared_load=" ^ dep) declared_loads
+    fun extra_input_root input =
+      let
+        val rel = HolbuildProject.extra_input_path input
+        val abs = HolbuildProject.extra_input_absolute_path input
+        val n = size abs - size rel
+      in
+        if n > 0 then String.substring(abs, 0, n) else Path.dir abs
+      end
     val extra_inputs = HolbuildProject.action_extra_inputs policy
-    val extra_input_lines =
-      map (fn input =>
-             "extra_input=" ^ HolbuildProject.extra_input_path input ^ "@" ^
-             file_hash (HolbuildProject.extra_input_absolute_path input))
-          extra_inputs
+    val manifest_extra_dep_lines =
+      List.concat (map (fn input =>
+        extra_dep_lines "extra_dep" (extra_input_root input) [HolbuildProject.extra_input_path input]) extra_inputs)
+    val source_extra_dep_lines =
+      extra_dep_lines "source_extra_dep" (Path.dir (#source_path source)) (#extra_deps (deps_of node))
     val lines =
       ["holbuild-action-v1",
        "toolchain=" ^ toolchain_key,
@@ -685,7 +752,8 @@ fun action_text_with lookup config_lines_for_node toolchain_key external_key nod
       config_lines_for_node node @
       declared_dep_lines @
       declared_load_lines @
-      extra_input_lines @
+      manifest_extra_dep_lines @
+      source_extra_dep_lines @
       map (fn dep => "dep=" ^ dep) (project_deps @ external_deps @ external_libs)
   in
     String.concatWith "\n" lines ^ "\n"
