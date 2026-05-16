@@ -112,9 +112,13 @@ fun parser_reader source_text =
 
 fun ignore_parse_error _ _ _ = ()
 
+fun parse_error_text source_path source_text loc span msg =
+  (HolbuildTheoryDiagnostics.parse_error source_path source_text loc span msg; "")
+  handle Fail text => text
+
 fun raise_parse_error source_path source_text loc span msg =
-  (HolbuildTheoryDiagnostics.parse_error source_path source_text loc span msg
-   handle Fail text => raise HolbuildTheoryCheckpoints.Error text)
+  raise HolbuildTheoryCheckpoints.Error
+    (parse_error_text source_path source_text loc span msg)
 
 fun scan_with_error_handler source_path source_text parse_error =
   let
@@ -123,6 +127,19 @@ fun scan_with_error_handler source_path source_text parse_error =
     val report = String.concatWith "\n" (theorem_report_lines result) ^ "\n"
   in
     HolbuildTheoryCheckpoints.discover_from_report {source = source_text, report = report}
+  end
+
+fun scan_with_recovery source_path source_text =
+  let
+    val errors = ref []
+    fun record_parse_error loc span msg =
+      errors := parse_error_text source_path source_text loc span msg :: !errors
+    val result = HOLSourceParser.parseSML source_path (parser_reader source_text)
+                   record_parse_error HOLSourceParser.initialScope
+    val report = String.concatWith "\n" (theorem_report_lines result) ^ "\n"
+    val boundaries = HolbuildTheoryCheckpoints.discover_from_report {source = source_text, report = report}
+  in
+    {boundaries = boundaries, errors = rev (!errors)}
   end
 
 fun scan source_path source_text =

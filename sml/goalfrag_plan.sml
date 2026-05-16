@@ -798,6 +798,9 @@ fun format_steps index depth frame_stack seen_stack pending_stack steps =
           val (count, rest_text) = format_steps (index + 1) depth frame_stack seen_stack' pending_stack' rest
         in (count, format_step index depth prefix step ^ rest_text) end
 
+fun plain_steps body =
+  [StepPlain {start_pos = 0, end_pos = size body, label = trim_space body}]
+
 fun steps body =
   let
     val tree = parse_tactic body
@@ -821,9 +824,10 @@ fun steps body =
     if not (expr_contains_try tree) andalso
        (chained_then1_expr tree orelse
         (then1_chain_count tree >= 2 andalso expr_contains_impl_tac body tree)) then
-      [StepPlain {start_pos = 0, end_pos = size body, label = trim_space body}]
+      plain_steps body
     else steps_from_tree body tree
   end
+  handle _ => plain_steps body
 
 fun split_plan_line text =
   let

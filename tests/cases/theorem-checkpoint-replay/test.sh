@@ -950,14 +950,56 @@ val _ = export_theory();
 SML
 malformed_log=$tmpdir/malformed.log
 (cd "$malformed_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$malformed_log" 2>&1
-require_grep "could not safely instrument theorem boundaries for ATheory; building without goalfrag/checkpoints" "$malformed_log"
+require_grep "HOL source parser recovered while instrumenting theorem boundaries for ATheory; using recovered theorem boundaries" "$malformed_log"
 require_grep "HOL source parse error:" "$malformed_log"
 require_grep "expected 'QED'" "$malformed_log"
 require_grep "source: .*AScript.sml:" "$malformed_log"
 require_grep "ATheory built" "$malformed_log"
 require_file "$malformed_project/.holbuild/obj/src/ATheory.sig"
 if grep -q 'Fail "malformed"\|instrumented log:' "$malformed_log"; then
-  echo "parser-recovery fallback fell through to instrumented-script failure" >&2
+  echo "parser-recovery fell through to instrumented-script failure" >&2
+  exit 1
+fi
+
+bad_decl_timeout_project=$tmpdir/bad-decl-timeout-project
+bad_decl_timeout_marker=$tmpdir/bad-decl-timeout-raw-ran
+mkdir -p "$bad_decl_timeout_project/src"
+cp "$project/holproject.toml" "$bad_decl_timeout_project/holproject.toml"
+cat > "$bad_decl_timeout_project/src/AScript.sml" <<SML
+open HolKernel Parse boolLib bossLib;
+val _ = new_theory "A";
+fun loop_tac g = loop_tac g;
+Theorem stuck_before_bad_decl:
+  T
+Proof
+  loop_tac
+QED
+val _ =
+  let val out = TextIO.openOut "$bad_decl_timeout_marker"
+  in TextIO.output(out, "raw execution reached\\n"); TextIO.closeOut out end;
+  ) >>
+  cheat
+QED
+val _ = export_theory();
+SML
+bad_decl_timeout_log=$tmpdir/bad-decl-timeout.log
+set +e
+(cd "$bad_decl_timeout_project" && timeout 15s "$HOLBUILD_BIN" --holdir "$HOLDIR" build --tactic-timeout 0.1 ATheory) > "$bad_decl_timeout_log" 2>&1
+bad_decl_timeout_status=$?
+set -e
+if [ "$bad_decl_timeout_status" -eq 0 ]; then
+  echo "expected bad-declaration project to fail" >&2
+  exit 1
+fi
+if [ "$bad_decl_timeout_status" -eq 124 ]; then
+  echo "bad-declaration parser recovery fell back to uninstrumented raw HOL and hung" >&2
+  exit 1
+fi
+require_grep "HOL source parser recovered while instrumenting theorem boundaries for ATheory; using recovered theorem boundaries" "$bad_decl_timeout_log"
+require_grep "HOL source parse error: bad declaration" "$bad_decl_timeout_log"
+require_grep "tactic timed out after 0.1s while building ATheory: loop_tac" "$bad_decl_timeout_log"
+if [ -e "$bad_decl_timeout_marker" ]; then
+  echo "bad-declaration source ran past the instrumented looping proof" >&2
   exit 1
 fi
 

@@ -564,6 +564,13 @@ Proof
   ( ACCEPT_TAC TRUTH
 QED'
 
+check_case parser_recovery_compat 'Theorem parser_recovery:
+  T
+Proof
+  ( ACCEPT_TAC TRUTH
+QED'
+require_grep "HOL source parser recovered while instrumenting theorem boundaries for ATheory; using recovered theorem boundaries" "$tmpdir/parser_recovery_compat.new-ir.log"
+
 check_case resume_suite 'open markerLib;
 
 Theorem partial:

@@ -743,8 +743,13 @@ and list_tactic_label source lt =
 
 fun span_text source (start, stop) = String.substring(source, start, stop - start)
 
+fun plain_steps source =
+  [StepPlain {start_pos = 0, end_pos = size source,
+              label = trim_space source, program = source}]
+
 fun steps source =
-  plan_tactic source (parse_tactic_ast (parse_tactic_expr source))
+  (plan_tactic source (parse_tactic_ast (parse_tactic_expr source))
+   handle _ => plain_steps source)
 
 fun display_line_count (StepChoice {alternatives, ...}) = 1 + Int.max(0, 2 * length alternatives - 1)
   | display_line_count (StepListChoice {alternatives, ...}) = 1 + Int.max(0, 2 * length alternatives - 1)

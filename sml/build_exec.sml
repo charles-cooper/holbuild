@@ -1413,6 +1413,10 @@ fun theorem_failed_prefix_path project node deps_key proof_engine safe_name =
 fun discover_theorem_boundaries source_path source_text =
   HolbuildTheorySpans.scan source_path source_text
 
+fun discover_theorem_boundaries_recovering source_path source_text =
+  HolbuildTheorySpans.scan_with_recovery source_path source_text
+  handle HolbuildTheoryCheckpoints.Error msg => raise Error msg
+
 fun discover_theorem_boundaries_strict source_path source_text =
   HolbuildTheorySpans.scan_strict source_path source_text
   handle HolbuildTheoryCheckpoints.Error msg => raise Error msg
@@ -2242,7 +2246,13 @@ fun theory_checkpoints_for_node policy project plan keys toolchain_key node sour
   else
     let
       val deps_key = dependency_context_key toolchain_key plan keys node
-      val boundaries = discover_theorem_boundaries_strict (source_file node) source_text
+      val {boundaries, errors} = discover_theorem_boundaries_recovering (source_file node) source_text
+      val _ =
+        case errors of
+            [] => ()
+          | _ => warn ("HOL source parser recovered while instrumenting theorem boundaries for " ^
+                       logical_name node ^ "; using recovered theorem boundaries\n" ^
+                       String.concatWith "\n" errors)
     in
       theorem_checkpoint_specs (proof_engine policy) project node deps_key source_text boundaries
     end
