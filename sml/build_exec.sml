@@ -1597,7 +1597,7 @@ fun best_failed_prefix_checkpoint checkpoints =
 
 datatype force_level = ForceNone | ForceTargets | ForceProject | ForceAll
 
-type build_options = {use_cache : bool, force : force_level, force_targets : string list, skip_checkpoints : bool, goalfrag : bool, new_ir : bool, tactic_timeout : real option, goalfrag_plan : string option, goalfrag_trace : bool, repl_on_failure : bool}
+type build_options = {use_cache : bool, force : force_level, force_targets : string list, skip_checkpoints : bool, goalfrag : bool, new_ir : bool, tactic_timeout : real option, goalfrag_plan : string option, goalfrag_trace : bool, repl_on_failure : bool, strict_parse : bool}
 
 datatype checkpoint_policy =
   CheckpointPolicy of {checkpoint : bool, goalfrag : bool, new_ir : bool, tactic_timeout : real option, goalfrag_plan : string option, goalfrag_trace : bool, repl_on_failure : bool}
@@ -2241,12 +2241,22 @@ fun build_config_lines_for_node options project node =
     | HolbuildSourceIndex.Sml => policy_config_lines no_checkpoint_policy
     | HolbuildSourceIndex.Sig => policy_config_lines no_checkpoint_policy
 
-fun theory_checkpoints_for_node policy project plan keys toolchain_key node source_text =
+fun source_boundaries_for_node strict_parse node source_text =
+  if strict_parse then
+    SOME {boundaries = discover_theorem_boundaries_strict (source_file node) source_text,
+          errors = []}
+  else
+    SOME (discover_theorem_boundaries_recovering (source_file node) source_text)
+    handle Error msg =>
+      (warn ("could not safely instrument theorem boundaries for " ^ logical_name node ^
+             "; building without goalfrag/checkpoints for this theory\n" ^ msg);
+       NONE)
+
+fun theory_checkpoints_for_node policy project plan keys toolchain_key node source_text boundaries errors =
   if not (goalfrag_enabled policy) andalso not (checkpoint_enabled policy) then []
   else
     let
       val deps_key = dependency_context_key toolchain_key plan keys node
-      val {boundaries, errors} = discover_theorem_boundaries_recovering (source_file node) source_text
       val _ =
         case errors of
             [] => ()
@@ -2272,6 +2282,9 @@ fun termination_diagnostics_for_node policy node source_text =
 fun build_theory_node (options : build_options) tc project base_context plan keys toolchain_key node input_key =
   let
     val policy = checkpoint_policy_for_node options project node
+    val strict_source_text = if #strict_parse options then SOME (read_text (source_file node)) else NONE
+    val strict_source_boundaries =
+      Option.map (fn text => valOf (source_boundaries_for_node true node text)) strict_source_text
     val metadata_checkpoints = []
     val stage = stage_dir project input_key
     val forced = force_node options project node
@@ -2292,9 +2305,16 @@ fun build_theory_node (options : build_options) tc project base_context plan key
        HolbuildStatus.Restored)
     else
       let
-        val source_text = read_text (source_file node)
+        val source_text = Option.getOpt (strict_source_text, read_text (source_file node))
+        val source_boundaries =
+          case strict_source_boundaries of
+              SOME boundaries => SOME boundaries
+            | NONE => source_boundaries_for_node false node source_text
         val theorem_checkpoints =
-          theory_checkpoints_for_node policy project plan keys toolchain_key node source_text
+          case source_boundaries of
+              NONE => []
+            | SOME {boundaries, errors} =>
+                theory_checkpoints_for_node policy project plan keys toolchain_key node source_text boundaries errors
         val termination_diagnostics = termination_diagnostics_for_node policy node source_text
       in
         ((build_theory cache_allowed policy tc project base_context plan keys toolchain_key node source_text theorem_checkpoints termination_diagnostics;

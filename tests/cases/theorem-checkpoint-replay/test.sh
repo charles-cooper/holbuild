@@ -961,6 +961,18 @@ if grep -q 'Fail "malformed"\|instrumented log:' "$malformed_log"; then
   exit 1
 fi
 
+strict_parse_log=$tmpdir/strict-parse.log
+if (cd "$malformed_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --strict-parse ATheory) > "$strict_parse_log" 2>&1; then
+  echo "expected --strict-parse to reject HOLSourceParser recovery" >&2
+  exit 1
+fi
+require_grep "HOL source parse error:" "$strict_parse_log"
+require_grep "expected 'QED'" "$strict_parse_log"
+if grep -q "ATheory built" "$strict_parse_log"; then
+  echo "--strict-parse should not run/build recovered parser source" >&2
+  exit 1
+fi
+
 bad_decl_timeout_project=$tmpdir/bad-decl-timeout-project
 bad_decl_timeout_marker=$tmpdir/bad-decl-timeout-raw-ran
 mkdir -p "$bad_decl_timeout_project/src"

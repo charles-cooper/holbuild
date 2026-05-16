@@ -147,7 +147,10 @@ syntax from `HOLSourceAST` directly instead of using HOL `goalFrag`, while prese
 HOL parser recovery and exact tactic/list-tactic runtime boundaries for recognized
 constructs. `--goalfrag` selects the legacy GoalFrag engine for comparison/debugging.
 The old `--new-ir` build flag is accepted as a deprecated no-op because proof IR is
-now the default.
+now the default. By default, holbuild preserves HOL parser recovery: recovered
+proof boundaries are instrumented where possible, and unknown/recovered source
+regions pass through to HOL. `--strict-parse` instead treats HOLSourceParser
+parse recovery as a build error before running HOL.
 `--tactic-timeout SECONDS` sets the root-project per-tactic proof timeout; the default
 is 2.5 seconds, and `0` disables the timeout. Dependency packages build with no tactic
 timeout. `execution-plan THEORY:THEOREM` statically prints the proof-IR plan for one
