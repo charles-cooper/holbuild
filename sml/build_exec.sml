@@ -902,16 +902,38 @@ fun invalid_checkpoint_retryable base_context run_context msg =
   hol_state_load_failure msg andalso
   hol_context_path run_context <> hol_context_path base_context
 
-fun remove_checkpoints paths =
-  List.app remove_checkpoint paths
+fun remove_theorem_checkpoint_artifacts
+      ({context_path, end_of_proof_path, failed_prefix_path, ...} : HolbuildTheoryCheckpoints.checkpoint) =
+  (remove_checkpoint context_path;
+   remove_checkpoint end_of_proof_path;
+   remove_checkpoint failed_prefix_path)
 
-fun remove_invalid_checkpoints project node deps_key deps_loaded paths =
-  if List.exists (fn path => path = deps_loaded) paths then
+fun theorem_context_or_end_path path
+      ({context_path, end_of_proof_path, ...} : HolbuildTheoryCheckpoints.checkpoint) =
+  path = context_path orelse path = end_of_proof_path
+
+fun theorem_failed_prefix_path path
+      ({failed_prefix_path, ...} : HolbuildTheoryCheckpoints.checkpoint) =
+  path = failed_prefix_path
+
+fun remove_theorem_checkpoint_descendants checkpoints boundary =
+  List.app remove_theorem_checkpoint_artifacts
+    (List.filter
+       (fn ({boundary = candidate_boundary, ...} : HolbuildTheoryCheckpoints.checkpoint) =>
+           candidate_boundary >= boundary)
+       checkpoints)
+
+fun remove_loaded_checkpoint_descendants project node deps_key deps_loaded checkpoints loaded_path =
+  if loaded_path = deps_loaded then
     remove_deps_checkpoint_family project node deps_key deps_loaded
   else
-    remove_checkpoints paths
-
-fun checkpoint_paths_text paths = String.concatWith ", " paths
+    case List.find (theorem_failed_prefix_path loaded_path) checkpoints of
+        SOME checkpoint => remove_checkpoint (#failed_prefix_path checkpoint)
+      | NONE =>
+          case List.find (theorem_context_or_end_path loaded_path) checkpoints of
+              SOME ({boundary, ...} : HolbuildTheoryCheckpoints.checkpoint) =>
+                remove_theorem_checkpoint_descendants checkpoints boundary
+            | NONE => remove_checkpoint loaded_path
 
 fun preserve_log src dst =
   if file_exists src then
@@ -1975,8 +1997,9 @@ fun build_theory cache_allowed policy tc project base_context plan keys toolchai
                 (with_detail ("tactic timed out while building " ^ logical_name node))
                 failure_output
       end
-    fun discard_failure_checkpoints () =
-      remove_invalid_checkpoints project node deps_key deps_loaded (#failure_checkpoints run_spec)
+    fun discard_loaded_checkpoint_after_load_failure () =
+      remove_loaded_checkpoint_descendants project node deps_key deps_loaded theorem_checkpoints
+        (hol_context_path (#context run_spec))
     fun checkpoint_failure_error msg =
       let
         val failure_output = checkpoint_failure_output project node input_key stage
@@ -2004,7 +2027,6 @@ fun build_theory cache_allowed policy tc project base_context plan keys toolchai
             case String.fields (fn c => c = #"\n") msg of
                 [] => "hol run failed while building theory script\n"
               | first :: _ => first ^ "\n"
-        val _ = if Option.isSome goal_state then () else discard_failure_checkpoints ()
         val detail =
           String.concat
             [case trace_context of NONE => "" | SOME text => text,
@@ -2035,9 +2057,9 @@ fun build_theory cache_allowed policy tc project base_context plan keys toolchai
       handle Error msg =>
         if invalid_checkpoint_retryable base_context (#context run_spec) msg then
           let
-            val invalid = #failure_checkpoints run_spec
-            val _ = remove_invalid_checkpoints project node deps_key deps_loaded invalid
-            val _ = warn ("discarding invalid checkpoint after HOL state load failure: " ^ checkpoint_paths_text invalid)
+            val invalid = hol_context_path (#context run_spec)
+            val _ = discard_loaded_checkpoint_after_load_failure ()
+            val _ = warn ("discarding invalid checkpoint after HOL state load failure: " ^ invalid)
           in
             raise RetryInvalidCheckpoint
           end

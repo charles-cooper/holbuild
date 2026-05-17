@@ -368,12 +368,16 @@ if (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$non_g
 fi
 require_grep "from: theorem-context checkpoint after first" "$non_goal_replay_log"
 require_grep "HOL message: expected non-goal failure after first" "$non_goal_replay_log"
-if [[ -e "$non_goal_replay_deps" || -e "$non_goal_replay_deps.ok" ]]; then
-  echo "non-goal replay failure left deps parent after discard" >&2
+if grep -q "discarding invalid checkpoint after HOL state load failure" "$non_goal_replay_log"; then
+  echo "non-load replay failure discarded checkpoints" >&2
   exit 1
 fi
-if find "$project/.holbuild/checkpoints/checkpointrecovery/src/AScript.sml.theorems" -type f -print -quit 2>/dev/null | grep -q .; then
-  echo "non-goal replay failure deleted deps parent but left theorem descendants" >&2
+if [[ ! -e "$non_goal_replay_deps" || ! -e "$non_goal_replay_deps.ok" ]]; then
+  echo "non-load replay failure deleted deps checkpoint" >&2
+  exit 1
+fi
+if ! find "$project/.holbuild/checkpoints/checkpointrecovery/src/AScript.sml.theorems" -type f -print -quit 2>/dev/null | grep -q .; then
+  echo "non-load replay failure deleted theorem checkpoints" >&2
   exit 1
 fi
 rm -rf "$project/.holbuild/checkpoints"
