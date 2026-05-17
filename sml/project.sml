@@ -360,7 +360,7 @@ fun validate_dependency_table (name, table) =
 
 fun validate_action_table (logical, table) =
   require_known_fields ("actions." ^ logical)
-    ["deps", "loads", "extra_inputs", "impure", "cache", "always_reexecute"] table
+    ["deps", "loads", "extra_inputs", "extra_deps", "impure", "cache", "always_reexecute"] table
 
 fun validate_generate_entry value =
   case value of
@@ -420,16 +420,18 @@ fun dependencies_at table = map parse_dependency (named_table_entries table ["de
 
 fun parse_action_policy root (logical, table) =
   let
-    fun extra path =
+    fun extra field path =
       if Path.isAbsolute path then
-        die ("actions." ^ logical ^ ".extra_inputs must be package-root-relative: " ^ path)
+        die ("actions." ^ logical ^ "." ^ field ^ " must be package-root-relative: " ^ path)
       else ExtraInput {path = path, absolute_path = Path.concat(root, path)}
+    val extra_inputs = map (extra "extra_inputs") (string_array_field table "extra_inputs")
+    val extra_deps = map (extra "extra_deps") (string_array_field table "extra_deps")
   in
     ActionPolicy
       { logical = logical,
         deps = string_array_field table "deps",
         loads = string_array_field table "loads",
-        extra_inputs = map extra (string_array_field table "extra_inputs"),
+        extra_inputs = extra_inputs @ extra_deps,
         impure = Option.getOpt(bool_at table ["impure"], false),
         cache = Option.getOpt(bool_at table ["cache"], true),
         always_reexecute = Option.getOpt(bool_at table ["always_reexecute"], false) }

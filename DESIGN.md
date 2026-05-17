@@ -160,7 +160,7 @@ exclude = ["*/selftest.sml", "*/examples/*", "*/theory_tests/*"]
 
 [actions.SomeGeneratedTheory]
 loads = ["GeneratedSupportLib"]
-extra_inputs = ["path/to/generated-input"]
+extra_deps = ["path/to/generated-input"]
 cache = false
 
 [actions.SomeImpureSelftest]
@@ -214,7 +214,7 @@ mark exceptions explicitly:
 [actions.FooTheory]
 deps = ["GeneratedSupportTheory"]
 loads = ["GeneratedSupportLib"]
-extra_inputs = ["data/table.txt"]
+extra_deps = ["data/table.txt"]
 cache = false
 always_reexecute = true
 impure = true
@@ -228,10 +228,15 @@ dependencies when source-level imports are insufficient or intentionally absent;
 every listed dependency must resolve to a source in the manifest graph. `loads`
 names additional loadable module/library stems for source-implicit predecessors;
 matching project modules are resolved in the DAG, otherwise the name is loaded
-from the configured HOL toolchain context. `extra_inputs` are package-root-relative
-paths whose exact bytes are hashed into the action key. `cache = false` disables
-global-cache restore/publish for the action. `always_reexecute = true` disables local
-up-to-date skipping and any retained/debug checkpoint replay for the action. `impure = true`
+from the configured HOL toolchain context. `extra_deps` are filesystem
+dependencies whose expanded contents are hashed into the action key. Manifest
+entries are package-root-relative; source files may also declare source-file-relative
+extra dependencies with static literal `holbuild_extra_deps [...]` annotations.
+Entries may name files, directories, or simple globs, and source-declared entries
+are staged so matching relative filesystem reads work during the action.
+`cache = false` disables global-cache restore/publish for the action.
+`always_reexecute = true` disables local up-to-date skipping and any retained/debug
+checkpoint replay for the action. `impure = true`
 is a conservative shorthand for no cache and always re-execute. These fields are
 intended for audited exceptions such as generated data, root-HOL SML modules with
 explicit predecessor requirements, source-implicit external libraries, or
@@ -348,7 +353,7 @@ input_key = hash(
   source package id + relative path,
   source content hash,
   resolved dependency input keys,
-  relevant manifest action policy, declared action deps/loads, and extra input hashes,
+  relevant manifest action policy, declared action deps/loads, and extra dependency hashes,
   toolchain/base-context key,
   platform/ML-system facts where relevant
 )

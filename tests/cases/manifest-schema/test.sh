@@ -192,6 +192,16 @@ extra_inputs = ["/tmp/generated.dat"]
 TOML
 expect_context_failure bad_action_abs_input "extra_inputs must be package-root-relative"
 
+make_project bad_action_abs_dep
+cat > "$tmpdir/bad_action_abs_dep/holproject.toml" <<'TOML'
+[project]
+name = "bad_action_abs_dep"
+
+[actions.FooTheory]
+extra_deps = ["/tmp/generated.dat"]
+TOML
+expect_context_failure bad_action_abs_dep "extra_deps must be package-root-relative"
+
 make_project bad_generate_field
 cat > "$tmpdir/bad_generate_field/holproject.toml" <<'TOML'
 [project]
