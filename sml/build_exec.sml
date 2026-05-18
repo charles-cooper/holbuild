@@ -1529,6 +1529,8 @@ fun theorem_header_hash source theorem_start tactic_start =
 fun pre_theorem_hash source theorem_start =
   HolbuildToolchain.hash_text (String.substring(source, 0, theorem_start))
 
+fun failed_prefix_diagnostic_key proof_engine = proof_engine ^ ":finish_goal_state_v2"
+
 fun failed_prefix_ok proof_engine deps_key safe_name pre_hash header_hash =
   checkpoint_ok_text "failed_prefix"
     [("deps_key", deps_key),
@@ -1536,7 +1538,7 @@ fun failed_prefix_ok proof_engine deps_key safe_name pre_hash header_hash =
      ("safe_name", safe_name),
      ("pre_theorem_key", pre_hash),
      ("header_key", header_hash),
-     ("failure_diagnostic_key", proof_engine)]
+     ("failure_diagnostic_key", failed_prefix_diagnostic_key proof_engine)]
 
 fun theorem_checkpoint_specs proof_engine project node deps_key source boundaries =
   map (fn {kind, name, safe_name, theorem_start, theorem_stop, boundary, tactic_start,
