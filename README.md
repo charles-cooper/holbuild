@@ -35,14 +35,14 @@ The current implementation intentionally focuses on:
 - exposes `holbuild gc` for project-local residue cleanup plus global-cache GC with a 7-day default retention policy
 - does not delegate build semantics to Holmake
 - treats `.uo`/`.ui` as internal ML artifacts, never user-requestable targets
-- delegates execution to `$HOLDIR/bin/hol run` / `hol repl` for now
+- delegates project-context execution to `$HOLDIR/bin/hol run` / `hol repl`
 
-The external implementation requires a HOL checkout or installation via `HOLDIR` so it
-can reuse HOL tooling. Current code still starts actions from `$HOLDIR/bin/hol.state`
-and includes that heap in the toolchain key; it does not create a project-local
-copy under `.holbuild/checkpoints/_base`. The target design replaces this
-configured seed with bootstrap/checkpoint state that `hol build` can rebuild or
-restore hermetically under `.holbuild/` after `git pull`. See `DESIGN.md`.
+Holbuild requires a HOL checkout or installation selected by `--holdir`,
+`HOLBUILD_HOLDIR`, or `HOLDIR`. That checkout supplies both the command-line HOL
+toolchain and an implicit HOL source package. HOL source builds use
+`$HOLDIR/bin/hol.state0` through `hol --bare` as the bootstrap boundary; the full
+HOL environment is reconstructed as ordinary source-built dependencies. See
+`DESIGN.md`.
 
 ## Current validation status
 
@@ -72,10 +72,11 @@ make HOLDIR=/path/to/HOL install
 
 This installs only the `holbuild` executable to `$HOME/.local/bin/holbuild` by
 default. Override with `PREFIX`, `BINDIR`, or `DESTDIR` if needed. Runtime HOL
-selection still uses `--holdir PATH`, `HOLBUILD_HOLDIR`, or `HOLDIR`.
+selection uses `--holdir PATH`, `HOLBUILD_HOLDIR`, or `HOLDIR`.
 
 The compiler loads HOL's existing SML TOML parser from `$(HOLDIR)` and embeds it
-in `bin/holbuild`. Tests live under `tests/cases/*/test.sh` so they can move into
+in `bin/holbuild`. Runtime source builds use the selected checkout independently
+of the checkout used to compile the executable. Tests live under `tests/cases/*/test.sh` so they can move into
 HOL's selftest layout with minimal reshaping; `tests/run.sh` is the repo-local
 runner and can run cases in parallel with `HOLBUILD_TEST_JOBS`. Current cases
 cover simple theory builds, package overrides, local build excludes, build roots,
@@ -233,38 +234,16 @@ exclude = ["worktrees/*"]
 ```
 
 The override changes only where the package is found locally. The package still
-needs its own `holproject.toml` or an explicit shim manifest from the consumer,
-except for the reserved `[dependencies.HOLDIR]` package, which uses holbuild's
-built-in root-HOL manifest and the runtime `--holdir`/`HOLBUILD_HOLDIR` path.
-The built-in `HOLDIR` manifest intentionally models the root HOL sources only;
-it excludes examples, tests, manuals, and non-default tool variants. If a project
-needs a HOL example theory such as `keccakTheory` from
-`$HOLDIR/examples/Crypto/Keccak`, declare that subtree as a separate dependency:
+needs its own `holproject.toml` or an explicit shim manifest from the consumer.
+HOL itself is implicit: the selected HOL checkout is chosen by `--holdir`,
+`HOLBUILD_HOLDIR`, or `HOLDIR`, with `src` and `examples` available for dependency
+resolution and `hol.state0`/`--bare` as the bootstrap boundary. Ordinary projects
+should not declare HOL as a manifest dependency or provide shims for HOL example
+subtrees.
 
-```toml
-# holproject.toml
-[dependencies.HOLDIR]
-
-[dependencies.HOL_keccak]
-path = "$HOLDIR/examples/Crypto/Keccak"
-manifest = "shims/keccak.toml"
-```
-
-```toml
-# shims/keccak.toml
-[project]
-name = "HOL_keccak"
-
-[build]
-members = ["."]
-
-[dependencies.HOLDIR]
-```
-
-A downstream package can depend on `HOL_keccak` directly, or inherit it
-transitively through another dependency's manifest. There is no `.holpath`,
-ambient `HOLPATH`, or user-facing include-path schema in project mode;
-dependency locations are resolved through manifests plus local overrides. An
+There is no `.holpath`, ambient `HOLPATH`, or user-facing include-path schema in
+project mode; dependency locations are resolved through manifests plus local
+overrides and the selected implicit HOL checkout. An
 `[overrides.foo].path` takes precedence over `[dependencies.foo].path`; when an
 override exists, the manifest's `path` field is not env-expanded, so local
 config can mask a committed `path = "$FOO"` even when `FOO` is unset. Explicit

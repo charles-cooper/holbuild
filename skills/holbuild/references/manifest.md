@@ -55,15 +55,16 @@ Tables validated: `[holbuild]`, `[project]`, `[build]`, `[run]`, `[dependencies.
 
 ## Dependency resolution
 
-Each dependency must resolve to a manifest:
-1. Reserved `[dependencies.HOLDIR]` with no `manifest` uses holbuild's built-in
-   root-HOL manifest; the package root defaults to
-   `--holdir`/`HOLBUILD_HOLDIR`/`HOLDIR` unless `path`/override is set. This
-   built-in manifest excludes HOL examples/tests; model example subtrees such as
-   `$HOLDIR/examples/Crypto/Keccak` as separate dependencies with shim manifests.
-2. If `manifest` field is set, that file is used — dependency's own `holproject.toml` is **never consulted**. This remains true when `.holconfig.toml` overrides the dependency root path.
-3. Otherwise, tries `holproject.toml` in the dependency's directory
-4. If neither exists, build fails with a "no manifest" error
+Each ordinary dependency must resolve to a manifest:
+1. If `manifest` field is set, that file is used — dependency's own `holproject.toml` is **never consulted**. This remains true when `.holconfig.toml` overrides the dependency root path.
+2. Otherwise, tries `holproject.toml` in the dependency's directory
+3. If neither exists, build fails with a "no manifest" error
+
+HOL itself is implicit: every project has an implicit HOL source package selected
+by `--holdir`, `HOLBUILD_HOLDIR`, or `HOLDIR`. That package exposes `src` and
+`examples` for dependency resolution, uses no default roots, and treats
+`hol.state0`/`--bare` as the bootstrap boundary. Do not declare HOL with
+`[dependencies.HOLDIR]`.
 
 Dependency `name` in `[dependencies.X]` must match the `project.name` in the resolved manifest. Mismatch is an error.
 

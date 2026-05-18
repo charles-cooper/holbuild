@@ -11,11 +11,10 @@ and cacheable builds that never require users to reason about the cache.
 - `.uo` and `.ui` are internal ML load artifacts. Users must never request them.
 - Project mode is manifest based. `Holmakefile` semantics are not interpreted.
 - The source tree is user-owned; build products live under project `.holbuild/`.
-- Target build contexts should be produced by holbuild from declared sources,
-  predecessor checkpoints, or validated shared dependency state. The external
-  prototype still starts child HOL actions from the configured `HOLDIR/bin/hol.state`
-  and keys that seed in the toolchain; eliminating that bootstrap dependency is a
-  root-HOL transition goal, not current behavior.
+- Target build contexts are produced by holbuild from declared sources,
+  predecessor checkpoints, or validated shared dependency state. HOL source builds
+  start from the selected checkout's bare bootstrap heap (`bin/hol.state0` via
+  `hol --bare`); full HOL environments are constructed as ordinary dependencies.
 - The cache is an optional accelerator. Local `.holbuild/` is the authoritative
   materialized build view.
 - When unsure, rebuild. A bad cache hit is worse than a missed cache hit.
@@ -32,14 +31,14 @@ must name a supported schema:
 schema = 1
 ```
 
-Omitting `[holbuild]` currently means schema 1 for transition convenience.
+Omitting `[holbuild]` means schema 1.
 
 Package roots are declared by one of:
 
 - the current project's `holproject.toml`
 - a dependency's own `holproject.toml`
 - an explicit shim manifest supplied by the consumer
-- the built-in/root HOL manifest
+- the implicit HOL package selected by `--holdir`, `HOLBUILD_HOLDIR`, or `HOLDIR`
 
 Committed manifests describe what dependency is required. They should not rely on
 ambient search paths such as `HOLPATH`. Per-user local paths are supplied by an
@@ -71,27 +70,35 @@ Transition rule:
 
 ```text
 if dependency X has no holproject.toml, the consumer must provide a shim manifest
-until X adopts one; the reserved dependency HOLDIR is the exception and resolves
-through holbuild's built-in root-HOL manifest plus the configured --holdir path
+until X adopts one; HOL itself is implicit and is selected by --holdir /
+HOLBUILD_HOLDIR / HOLDIR
 ```
 
-This keeps resolution explicit without requiring `holbuild` to understand every
-legacy `Holmakefile`, while avoiding per-consumer HOLDIR shim manifests.
+This keeps ordinary dependency resolution explicit while recognizing that every
+HOL project is already parameterized by a HOL checkout/toolchain. Users should
+not need to declare a special `[dependencies.HOLDIR]` entry for ordinary HOL
+sources.
 
 ## Root HOL
 
-Root HOL should be built through holbuild's own model, using an in-tree or
-default HOL manifest. HOL is not permanently treated as an opaque legacy build.
-The prototype still requires `HOLDIR` so it can reuse HOL implementation pieces
-while the model is incubated. That is a host/tool dependency, not the final
-semantic state model. During the transition, holbuild starts target actions from
-`HOLDIR/bin/hol.state` directly and includes that heap in the toolchain key; it
-does not copy it into a project-local `_base` checkpoint. The target model
-replaces this configured seed with declared bootstrap contexts. Root HOL and user
-dependencies should be ordinary manifest-resolved package nodes whose contexts
-are produced by holbuild. The initial build context is a declared bootstrap
-context; later actions start from predecessor checkpoints or validated shared
-dependency state.
+Root HOL is built through holbuild's own model, using the selected HOL checkout
+as an implicit source package. HOL is not treated as an opaque legacy build.
+`HOLDIR` selects both the HOL command-line toolchain and the implicit HOL source
+package.
+
+The target bootstrap boundary is `HOLDIR/bin/hol.state0`, used through HOL's
+`--bare` mode. The bare heap provides the kernel/parser/loader infrastructure,
+the primitive `min`/`bool` theory base, and the SML modules already reported by
+`Meta.loaded ()` in a bare session. Everything else under the selected HOL
+checkout should be modeled as source or cacheable holbuild output.
+
+Non-bare theory scripts are ordinary source actions too; they receive the normal
+full-HOL environment by implicit dependencies on the HOL sources that construct
+it rather than by starting from `hol.state`. Empirically, in current HOL checkouts
+`load "bossLib"; load "holTheory"; open bossLib` from `hol --bare` reproduces
+the same loaded-module set and theory ancestry as normal full HOL startup. Thus
+`hol.state` is a compatibility/distribution artifact, not the semantic dependency
+boundary for source builds.
 
 Target workflow: after `git pull` in a HOL checkout, `hol build` should be able
 to rebuild any invalidated bootstrap/base context hermetically into the checkout's
@@ -100,15 +107,13 @@ It should not require the user to run a separate global HOL rebuild first, and i
 should not silently depend on a stale configured heap from before the pull.
 
 The root-HOL transition should be explicit rather than inferred from existing
-Holmakefiles. The current prototype reserves package identity `HOLDIR` for the
-built-in root-HOL manifest, enumerates major source roots as normal manifest
-members, and declares bootstrap/tool phases as manifest concepts rather than as
-ambient directory conventions. External HOL theory dependencies should
-become normal resolved package nodes with the same action-key and cache rules as
-user packages; they should not be satisfied by loading a configured full HOL heap.
-Any HOL subtree that cannot yet be expressed by the manifest model should use an
-explicit shim/adaptor package boundary, not Holmakefile interpretation in project
-mode.
+Holmakefiles. The selected HOL checkout is an implicit package with source
+members `src` and `examples` and no default roots. External HOL theory
+dependencies should become normal resolved package nodes with the same action-key
+and cache rules as user packages; they should not be satisfied by loading a
+configured full HOL heap. Any non-HOL dependency subtree that cannot yet be
+expressed by the manifest model should use an explicit shim/adaptor package
+boundary, not Holmakefile interpretation in project mode.
 
 The default manifest must also preserve the duplicate-logical-name invariant:
 root HOL cannot rely on load-path order to distinguish two `FooTheory` or `Foo`
@@ -132,31 +137,35 @@ The same token pass found non-script examples and libraries with literal/dynamic
 effects. A root-HOL manifest should classify such tooling/examples/tests
 explicitly instead of treating them as pure cacheable theory-script actions.
 
-A first root-HOL manifest should therefore start with the stable pure theory and
-library package roots that already obey project-mode constraints, and push
-non-build tooling/examples/tests behind explicit package/action boundaries.
-`examples/root-hol/holproject.toml` is the current sketch: it enumerates HOL
-`src/*` members, excludes selftests/examples/tool variants that collide on
-logical names, and dry-run planned 1461 HOL package nodes in the audited checkout.
-A follow-up regression test dry-runs that sketch against `$HOLDIR`. Attempting to
-source-build core theories against `$HOLDIR/bin/hol.state` is intentionally wrong:
-that state already contains those theories. Executable root-HOL bootstrap needs
-manifest-level bootstrap/checkpoint phases that holbuild can rebuild or restore
-on demand, not any preconfigured global HOL heap.
-A smaller illustrative fragment:
+The implicit HOL package should initially be as simple as possible. It should
+make all of `src` and `examples` visible and add excludes only in response to
+concrete discovery/planning problems:
 
 ```toml
 [project]
 name = "HOL"
-version = "bootstrap"
+version = "implicit"
 
 [build]
-members = [
-  "src/bool", "src/num", "src/list", "src/coretypes",
-  "src/pred_set", "src/finite_maps", "src/integer",
-]
-roots = ["src/hol/HolScript.sml"]
-exclude = ["*/selftest.sml", "*/examples/*", "*/theory_tests/*"]
+members = ["src", "examples"]
+# no roots: the package is available for dependency resolution, not built by default
+```
+
+Attempting to source-build core theories against `$HOLDIR/bin/hol.state` is
+intentionally wrong: that state already contains a large full-HOL environment.
+Executable root-HOL bootstrap should instead start from `hol.state0`/`--bare`,
+mask the bare-provided theories/modules, and construct later environments such as
+`bossLib`/`holTheory` through normal holbuild actions.
+A smaller illustrative non-HOL package fragment remains:
+
+```toml
+[project]
+name = "example"
+version = "0.1.0"
+
+[build]
+members = ["src"]
+roots = ["src/MainScript.sml"]
 
 [actions.SomeGeneratedTheory]
 loads = ["GeneratedSupportLib"]
