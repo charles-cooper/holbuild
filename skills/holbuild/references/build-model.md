@@ -50,7 +50,7 @@ hash(
   dependency input keys (recursively),
   declared action policy (deps, loads, extra_deps, cache, always_reexecute),
   extra dependency hashes,
-  toolchain key (hol binary + hol.state hashes)
+  toolchain key (hol binary + hol.state0/bare bootstrap hashes)
 )
 ```
 
