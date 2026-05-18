@@ -380,13 +380,27 @@ fun end_span checkpoint end_pos =
   let val relative = Int.max(0, Int.min(size (#tactic_text checkpoint) - 1, end_pos - 1))
   in {offset = #tactic_start checkpoint + relative, width = 1} end
 
+fun skip_whitespace source_text limit offset =
+  if offset >= limit orelse offset >= size source_text then offset
+  else if Char.isSpace (String.sub(source_text, offset)) then skip_whitespace source_text limit (offset + 1)
+  else offset
+
+fun finish_span source_text (checkpoint : HolbuildTheoryCheckpoints.checkpoint) =
+  let
+    val finish_offset = skip_whitespace source_text (#theorem_stop checkpoint) (#tactic_end checkpoint)
+  in
+    {offset = finish_offset, width = 1}
+  end
+
 fun failed_theorem_source_summary source_path source_text checkpoints label theorem_name failed_span failed_end =
   case List.find (fn (checkpoint : HolbuildTheoryCheckpoints.checkpoint) => #name checkpoint = theorem_name) checkpoints of
       NONE => NONE
     | SOME checkpoint =>
         SOME (checkpoint_source_summary source_path source_text checkpoint label
                 (case failed_span of
-                     SOME span => explicit_span checkpoint span
+                     SOME (start_pos, end_pos) =>
+                       if start_pos = end_pos andalso has_suffix " finish" label then finish_span source_text checkpoint
+                       else explicit_span checkpoint (start_pos, end_pos)
                    | NONE =>
                        case failed_end of
                            SOME end_pos => end_span checkpoint end_pos

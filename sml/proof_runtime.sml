@@ -233,6 +233,20 @@ fun print_goal_state label goals =
 fun print_current_goal_state label =
   print_goal_state label (history_top_goals() handle _ => [])
 
+fun print_finish_goal_state name =
+  let
+    val old_failed_step_end = !failed_step_end_ref
+    val old_failed_step_span = !failed_step_span_ref
+    val tactic_end = size (!active_tactic_text_ref)
+    val _ = failed_step_end_ref := SOME tactic_end
+    val _ = failed_step_span_ref := SOME (tactic_end, tactic_end)
+    val result = (print_current_goal_state (name ^ " finish"); true) handle e => (failed_step_end_ref := old_failed_step_end; failed_step_span_ref := old_failed_step_span; raise e)
+    val _ = failed_step_end_ref := old_failed_step_end
+    val _ = failed_step_span_ref := old_failed_step_span
+  in
+    result
+  end
+
 fun report_step_failure_with_goals label goals e =
   (save_failed_prefix_checkpoint ();
    print_goal_state label goals
@@ -689,7 +703,7 @@ fun proof_ir_prove name end_path end_ok checkpoint_depth g original_tac tactic_t
             val _ = init_history g (length plan + 1)
             val _ = run_steps plan
             val th = history_top_thm g
-                     handle e => (print_current_goal_state (name ^ " finish"); raise e)
+                     handle e => (ignore (print_finish_goal_state name); raise e)
             val _ = save_checkpoint "end_of_proof" false end_path end_ok checkpoint_depth
             val _ = drop_all()
           in th end
@@ -745,7 +759,7 @@ fun finish_failed_prefix name old_prefix_text old_step_count tactic_text failed_
           val _ = successful_prefix_end_ref := common_bytes
           val _ = run_steps_from skip_count (display_index_at_count skip_count plan) (drop_steps skip_count plan)
           val th = history_top_thm (project_history goalStack.initial_goal)
-                   handle e => (print_current_goal_state (name ^ " finish"); raise e)
+                   handle e => (ignore (print_finish_goal_state name); raise e)
           val _ = drop_all()
           val _ = theorem_info_ref := NONE
         in th end))

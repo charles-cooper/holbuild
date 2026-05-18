@@ -170,6 +170,8 @@ if (cd "$unsolved_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) 
   exit 1
 fi
 require_grep "from: failed-prefix checkpoint in unsolved_finish_replay" "$unsolved_edit_log"
+require_grep "fragment: unsolved_finish_replay finish" "$unsolved_edit_log"
+require_grep "> 7 | QED" "$unsolved_edit_log"
 require_grep "no theorem proved" "$unsolved_edit_log"
 require_grep "failed tactic top input goal:" "$unsolved_edit_log"
 require_grep "failed tactic input goals: 1" "$unsolved_edit_log"
