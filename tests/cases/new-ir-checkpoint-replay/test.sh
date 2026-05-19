@@ -82,6 +82,54 @@ require_grep "from: failed-prefix checkpoint in slow_prefix_failure" "$fixed_log
 require_grep "ATheory built" "$fixed_log"
 require_file "$project/.holbuild/obj/src/ATheory.dat"
 
+resume_project=$tmpdir/resume-project
+resume_counter=$tmpdir/resume-count.txt
+mkdir -p "$resume_project/src"
+touch "$resume_counter"
+cp "$project/holproject.toml" "$resume_project/holproject.toml"
+cat > "$resume_project/src/AScript.sml" <<SML
+open HolKernel Parse boolLib bossLib markerLib;
+val _ = new_theory "A";
+val slow_prefix_counter = "$resume_counter";
+fun bump_counter () =
+  let val out = TextIO.openAppend slow_prefix_counter
+  in TextIO.output(out, "x"); TextIO.closeOut out end;
+fun slow_tac g = (bump_counter(); OS.Process.sleep (Time.fromReal 0.25); ALL_TAC g);
+Theorem partial:
+  T /\\ T
+Proof
+  CONJ_TAC >- ACCEPT_TAC TRUTH >- suspend "right"
+QED
+Resume partial[right]:
+  slow_tac >> slow_tac >> FAIL_TAC "resume suffix failure"
+QED
+Finalise partial
+val _ = export_theory();
+SML
+
+resume_first_log=$tmpdir/resume-first.log
+if (cd "$resume_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$resume_first_log" 2>&1; then
+  echo "expected first Resume proof to fail" >&2
+  exit 1
+fi
+resume_first_count=$(wc -c < "$resume_counter" | tr -d ' ')
+[[ "$resume_first_count" = "2" ]] || { echo "expected first Resume run to execute slow prefix twice, got $resume_first_count" >&2; exit 1; }
+require_grep "resume suffix failure" "$resume_first_log"
+require_file "$(find "$resume_project/.holbuild/checkpoints" -name '*partial_right__failed_prefix.save' -print -quit)"
+
+python3 - <<PY
+from pathlib import Path
+path = Path("$resume_project/src/AScript.sml")
+path.write_text(path.read_text().replace('FAIL_TAC "resume suffix failure"', 'ACCEPT_TAC TRUTH'))
+PY
+resume_fixed_log=$tmpdir/resume-fixed.log
+(cd "$resume_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$resume_fixed_log" 2>&1
+resume_fixed_count=$(wc -c < "$resume_counter" | tr -d ' ')
+[[ "$resume_fixed_count" = "2" ]] || { echo "Resume failed-prefix replay reran unchanged slow prefix after suffix fix; count $resume_fixed_count" >&2; exit 1; }
+require_grep "from: failed-prefix checkpoint in partial_right_" "$resume_fixed_log"
+require_grep "ATheory built" "$resume_fixed_log"
+require_file "$resume_project/.holbuild/obj/src/ATheory.dat"
+
 shorten_project=$tmpdir/shorten-project
 shorten_counter=$tmpdir/shorten-count.txt
 mkdir -p "$shorten_project/src"

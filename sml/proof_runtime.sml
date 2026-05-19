@@ -82,7 +82,9 @@ fun save_failed_prefix_checkpoint () =
   case !theorem_info_ref of
       NONE => ()
     | SOME (kind, _, _, _, _, _, _, failed_prefix_path, failed_prefix_ok, _, depth) =>
-        if kind <> "theorem" orelse not (!checkpoint_enabled_ref) orelse !failed_prefix_resume_active_ref then ()
+        if not (kind = "theorem" orelse kind = "resume") orelse
+           not (!checkpoint_enabled_ref) orelse
+           !failed_prefix_resume_active_ref then ()
         else
           let
             val prefix_end = !successful_prefix_end_ref

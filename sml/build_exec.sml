@@ -1818,12 +1818,11 @@ fun failed_prefix_resume_source policy timeout_marker plan_only_marker source ch
         HolbuildTheoryCheckpoints.runtime_reinstall_prelude runtime_config
       else
         HolbuildTheoryCheckpoints.runtime_prelude runtime_config [checkpoint]
+    fun source_slice start stop = String.substring(source, start, stop - start)
     val theorem_binding = #safe_name checkpoint
-    val save_line =
+    val finish_failed_prefix_call =
       String.concat
-        ["val ", theorem_binding, " = Theory.save_thm(",
-         HolbuildToolchain.sml_string (#name checkpoint), ", ",
-         (if proof_ir_enabled policy then "HolbuildProofRuntime.finish_failed_prefix " else "HolbuildGoalfragRuntime.finish_failed_prefix "),
+        [(if proof_ir_enabled policy then "HolbuildProofRuntime.finish_failed_prefix " else "HolbuildGoalfragRuntime.finish_failed_prefix "),
          HolbuildToolchain.sml_string (#name checkpoint), " ",
          HolbuildToolchain.sml_string prefix_text, " ",
          Int.toString step_count, " ",
@@ -1831,8 +1830,20 @@ fun failed_prefix_resume_source policy timeout_marker plan_only_marker source ch
          (if proof_ir_enabled policy then
             " " ^ HolbuildToolchain.sml_string (#failed_prefix_path checkpoint) ^
             " " ^ HolbuildToolchain.sml_string (#failed_prefix_ok checkpoint)
-          else ""),
+          else "")]
+    val theorem_save_line =
+      String.concat
+        ["val ", theorem_binding, " = Theory.save_thm(",
+         HolbuildToolchain.sml_string (#name checkpoint), ", ",
+         finish_failed_prefix_call,
          ");\n"]
+    val resume_replay_block =
+      String.concat
+        [source_slice (#theorem_start checkpoint) (#tactic_start checkpoint),
+         "(ACCEPT_TAC (", finish_failed_prefix_call, "))",
+         source_slice (#tactic_end checkpoint) (#boundary checkpoint)]
+    val replay_block =
+      if #kind checkpoint = "resume" then resume_replay_block else theorem_save_line
     val suffix =
       HolbuildTheoryCheckpoints.instrument
         {source = source,
@@ -1847,7 +1858,7 @@ fun failed_prefix_resume_source policy timeout_marker plan_only_marker source ch
          plan_only_marker = plan_only_marker,
          new_ir = proof_ir_enabled policy}
   in
-    prelude ^ save_line ^ suffix
+    prelude ^ replay_block ^ suffix
   end
 
 fun failure_repl_checkpoint theorem_checkpoints failure_checkpoints deps_loaded =
