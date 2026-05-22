@@ -521,9 +521,6 @@ fun parse_table_at table {manifest, root, artifact_root, local_config} =
 
 fun parse_at args = parse_table_at (TOML.fromFile (#manifest args)) args
 
-fun parse_builtin_holdir_at args =
-  parse_table_at (TOML.fromString HolbuildBuiltinManifests.holdir_manifest_text) args
-
 fun parse manifest =
   let
     val root = manifest_root manifest
