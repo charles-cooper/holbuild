@@ -261,7 +261,7 @@ stage_residue_project=$tmpdir/stage-residue-project
 mkdir -p "$stage_residue_project/src"
 cp "$project/holproject.toml" "$stage_residue_project/holproject.toml"
 cp "$project/src/AScript.sml" "$stage_residue_project/src/AScript.sml"
-stage_residue_key=$(cd "$stage_residue_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --dry-run ATheory | awk '/input_key:/ {print $2; exit}')
+stage_residue_key=$(cd "$stage_residue_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --dry-run ATheory | awk '/ATheory \(theory/{seen=1} seen && /input_key:/ {print $2; exit}')
 stage_residue_dir="$stage_residue_project/.holbuild/stage/$stage_residue_key"
 mkdir -p "$stage_residue_dir"
 printf 'poisoned stale stage file\n' > "$stage_residue_dir/ATheory.dat"
