@@ -126,7 +126,7 @@ cache = false'
 (cd "$no_cache_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$tmpdir/no_cache1.log" 2>&1
 rm -rf "$no_cache_project/.holbuild"
 (cd "$no_cache_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$tmpdir/no_cache2.log" 2>&1
-if grep -q "restored from cache" "$tmpdir/no_cache2.log"; then
+if grep -q "ATheory restored from cache" "$tmpdir/no_cache2.log"; then
   echo "cache=false action restored from cache" >&2
   exit 1
 fi

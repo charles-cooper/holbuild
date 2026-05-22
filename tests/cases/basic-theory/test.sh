@@ -161,7 +161,15 @@ cp "$project/src/AScript.sml" "$tmpdir/AScript.good.sml"
 cat >> "$project/src/AScript.sml" <<'SML'
 val _ = raise Fail "forced source failure after cache miss";
 SML
-bad_key=$(cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --dry-run ATheory | awk '/input_key:/ {print $2; exit}')
+old_holbuild_cache=$HOLBUILD_CACHE
+export HOLBUILD_CACHE="$tmpdir/bad-cache"
+probe_log=$tmpdir/stale-cache-key-probe.log
+if (cd "$project" && HOLBUILD_CACHE_TRACE=1 "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$probe_log" 2>&1; then
+  echo "source failure key probe unexpectedly succeeded" >&2
+  exit 1
+fi
+bad_key=$(awk '/cache miss: ATheory (source\/dependency|parent-output) key=.*\(no manifest\)/ {sub(/^.* key=/, ""); sub(/ .*/, ""); print; exit}' "$probe_log")
+[[ -n "$bad_key" ]] || { echo "could not determine ATheory cache key" >&2; cat "$probe_log" >&2; exit 1; }
 bad_manifest="$HOLBUILD_CACHE/actions/$bad_key/manifest"
 mkdir -p "$(dirname "$bad_manifest")"
 cat > "$bad_manifest" <<EOF
@@ -184,6 +192,7 @@ fi
 require_grep "cache entry unusable for ATheory" "$bad_manifest_log"
 require_grep "deleted cache manifest" "$bad_manifest_log"
 [[ ! -e "$bad_manifest" ]] || { echo "transient stage mldep manifest survived failed source rebuild" >&2; exit 1; }
+export HOLBUILD_CACHE=$old_holbuild_cache
 cp "$tmpdir/AScript.good.sml" "$project/src/AScript.sml"
 
 rm -rf "$project/.holbuild"
