@@ -210,12 +210,11 @@ fun compare_source (a : source, b : source) =
     | order => order
 
 fun compatible_same_name (a : source) (b : source) =
-  (#package a = "HOL" orelse #package b = "HOL") orelse
-  (#package a = #package b andalso
-   (case (#kind a, #kind b) of
-        (Sml, Sig) => true
-      | (Sig, Sml) => true
-      | _ => false))
+  #package a = #package b andalso
+  (case (#kind a, #kind b) of
+       (Sml, Sig) => true
+     | (Sig, Sml) => true
+     | _ => false)
 
 fun by_logical sources =
   let
@@ -244,6 +243,7 @@ fun insert_sorted source sources =
 fun sort_sources sources = List.foldl (fn (source, acc) => insert_sorted source acc) [] sources
 
 fun validate_action_policies package_name policies sources =
+  if package_name = "HOL" then () else
   let
     fun has_logical logical =
       List.exists

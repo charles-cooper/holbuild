@@ -102,7 +102,7 @@ Theory Foo
 Ancestors Bar
 ```
 
-These are interpreted by HOL's `Holdep.main`; holbuild uses Holdep's resolved dependency files as the dependency graph rather than independently scanning `load`/`open` tokens. `Ancestors` declares direct theory predecessors; `Theory` declares the theory name (redundant with `new_theory` but used by Holdep).
+These are interpreted by HOL's `Holdep_tokens.reader_deps`; holbuild resolves the mentioned logical names through the package index rather than using Holmake `INCLUDES` or prebuilt object files. `Ancestors` declares direct theory predecessors; `Theory` declares the theory name.
 
 ## `[[generate]]` source generation
 

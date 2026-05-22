@@ -696,7 +696,49 @@ fun dependency_package artifact_parent project (dep as Dependency {name, ...}) =
 
 val implicit_hol_excludes =
   ["*selftest*.sml",
-   "examples/developers/*"]
+   "examples/developers/*",
+   "examples/dev/*",
+   "src/experimental-kernel/*",
+   "src/tracing/yes/*",
+   "src/portableML/mosml/*",
+   "src/portableML/mlton/*",
+   "src/emit/MLton/*",
+   "src/compute/examples/*",
+   "src/num/reduce/conv-old/*",
+   "src/quotient/examples/*",
+   "src/tfl/examples/*",
+   "src/*/theory_tests/*",
+   "src/*/test/*",
+   "src/holyhammer/examples/*",
+   "src/tactictoe/examples/*",
+   "examples/arm/*",
+   "examples/l3-machine-code/*",
+   "examples/PSL/*",
+   "examples/acl2/*",
+   "examples/machine-code/lisp/*",
+   "examples/theorem-prover/lisp-runtime/*",
+   "examples/elliptic/*",
+   "examples/miller/*",
+   "examples/algebra/field/*",
+   "examples/formal-languages/regular/*",
+   "examples/pgcl/*",
+   "examples/axiomatic-developments/set-theory/vbg/*",
+   "examples/dpll*",
+   "examples/CCS/*",
+   "examples/formal-languages/lambek/*",
+   "examples/logic/ltl/*",
+   "examples/separationLogic/*",
+   "examples/hardware/port/*",
+   "examples/hardware/port-full/*",
+   "examples/algorithms/unification/triangular/first-order/*",
+   "examples/lambda/basics/*"]
+
+fun implicit_hol_action logical deps =
+  ActionPolicy {logical = logical, deps = deps, loads = [], extra_inputs = [],
+                impure = false, cache = true, always_reexecute = false}
+
+val implicit_hol_action_policies =
+  [implicit_hol_action "NumRelNorms" ["GenRelNorm", "Overlay"]]
 
 fun implicit_hol_package artifact_parent =
   let
@@ -709,7 +751,7 @@ fun implicit_hol_package artifact_parent =
     Package {name = "HOL", root = holdir, manifest = manifest,
              members = ["src", "examples"], excludes = implicit_hol_excludes, roots = [],
              artifact_root = Path.concat(Path.concat(artifact_parent, ".holbuild/deps"), "HOL"),
-             action_policies = [], generators = []}
+             action_policies = implicit_hol_action_policies, generators = []}
   end
 
 fun packages (project : t) =

@@ -233,11 +233,12 @@ always_reexecute = true
 impure = true
 ```
 
-Source dependencies are inferred by running HOL's existing `Holdep.main` over the
-resolved manifest package roots and mapping Holdep's resolved dependency files
-back into the source index. Holbuild must not add ad-hoc hard edges from token
-mentions, custom `open` scanning, HOLSource header parsing, or guessed `.sig`
-companions. `deps` and `loads` name additional explicit logical/loadable
+Source dependencies are inferred with HOL's existing `Holdep_tokens.reader_deps`
+lexer and resolved through holbuild's package-wide logical-name index. Holbuild
+must not use Holmake `INCLUDES`, `$HOLDIR/sigobj`, prebuilt object files, custom
+`open` scanning, HOLSource header parsing, or cross-package guessed `.sig`
+companions as graph semantics. Same-package `.sig`/`.sml` pairs form one module
+interface/implementation pair. `deps` and `loads` name additional explicit logical/loadable
 predecessors when source-level imports are insufficient or intentionally absent;
 every listed dependency must resolve to either the bare bootstrap environment or
 a source in the manifest graph. They are not satisfied from a prebuilt full HOL

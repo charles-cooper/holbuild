@@ -13,11 +13,11 @@ The current implementation intentionally focuses on:
 - reuses HOL's existing SML TOML parser from `$HOLDIR/tools/Holmake/toml`
 - accepts logical build targets such as `MyTheory`, not object filenames such as `MyTheory.uo`
 - owns source discovery and maps outputs to project-level `.holbuild/`
-- infers theory/module dependencies by running HOL's Holdep and mapping resolved dependency files into the project graph
+- infers theory/module dependencies with HOL's Holdep lexer and resolves names through the project graph
 - parses transitive dependency manifests and local `.holconfig.toml` path overrides
 - materializes dependency plans under project `.holbuild/deps/<package>/`
 - rejects duplicate logical theory/module names across the resolved graph; a same-package `.sig`/`.sml` pair is one module interface/implementation pair
-- includes Holdep-resolved project SML/SIG dependencies in build plans and internal load manifests
+- includes Holdep-token project SML/SIG dependencies in build plans and internal load manifests
 - records generated theory ML dependencies from HOL theory metadata in internal load manifests
 - rejects source-level `use "file"` in project build actions; declare/load project modules instead
 - supports per-action policy for explicit logical dependencies/loadable modules, extra dependencies, cache disabling, and always-rerun actions
@@ -142,6 +142,8 @@ subcommand.
 disabling proof instrumentation. By default checkpoints may be created during
 a build but are removed after successful artifact/metadata writes.
 `--skip-goalfrag` opts out of modern theorem instrumentation.
+`--no-auto-contexts` disables automatic shared execution-context checkpoints;
+it is intended for debugging, not normal builds.
 The default theorem instrumentation engine is holbuild's proof IR: it parses tactic
 syntax from `HOLSourceAST` directly instead of using HOL `goalFrag`, while preserving
 HOL parser recovery and exact tactic/list-tactic runtime boundaries for recognized
@@ -295,13 +297,14 @@ always_reexecute = true
 # impure = true is shorthand for no cache and always re-execute
 ```
 
-`holbuild` uses HOL's `Holdep.main` as the source-dependency authority and maps
-Holdep's resolved dependency files back into the manifest/source graph. It does
-not add graph edges by independently scanning `load`/`open` tokens or guessing
-signature companions. `deps` and `loads` name additional explicit logical/loadable
-predecessors when source-level imports are insufficient or intentionally absent;
-every listed name must resolve to the bare bootstrap environment or a source in
-the manifest graph. `extra_deps` are
+`holbuild` uses HOL's `Holdep_tokens.reader_deps` lexer to find source-level
+logical dependencies, then resolves those names through the holbuild package
+index. It does not use Holmake `INCLUDES`, `$HOLDIR/sigobj`, or prebuilt object
+files for source graph semantics. Same-package `.sig`/`.sml` pairs are treated as
+one module interface/implementation pair. `deps` and `loads` name additional
+explicit logical/loadable predecessors when source-level imports are insufficient
+or intentionally absent; every listed name must resolve to the bare bootstrap
+environment or a source in the manifest graph. `extra_deps` are
 package-root-relative filesystem dependencies, such as files, directories, or
 simple globs, whose expanded contents are hashed into the action key. Source
 files may also declare source-file-relative extra dependencies with a static

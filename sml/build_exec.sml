@@ -888,10 +888,15 @@ fun standard_env_exists path key =
   HolbuildCheckpointStore.ok_matches (fn _ => ()) path [("kind", "standard_env"), ("key", key)]
 
 fun find_unique_logical plan name =
-  case List.filter (fn node => HolbuildBuildPlan.logical_name node = name) plan of
-      [node] => SOME node
-    | [] => NONE
-    | _ => raise Error ("multiple standard-env candidates for " ^ name)
+  let
+    fun named node = HolbuildBuildPlan.logical_name node = name
+    fun loadable node = #kind (HolbuildBuildPlan.source_of node) <> HolbuildSourceIndex.Sig
+  in
+    case List.filter loadable (List.filter named plan) of
+        [node] => SOME node
+      | [] => NONE
+      | _ => raise Error ("multiple standard-env candidates for " ^ name)
+  end
 
 fun standard_env_inputs keys plan =
   case (find_unique_logical plan "bossLib", find_unique_logical plan "holTheory") of
@@ -1421,17 +1426,6 @@ fun drop_object_suffix path =
 
 fun same_path a b = Path.mkCanonical a = Path.mkCanonical b handle Path.InvalidArc => a = b
 
-fun generated_holdep_stem plan tc dep =
-  let
-    val stem = drop_object_suffix dep
-    val sigobj = Path.concat(#holdir tc, "sigobj")
-    fun same_load_stem node = same_path (load_stem node) stem
-  in
-    case List.find same_load_stem plan of
-        SOME node => HolbuildBuildPlan.logical_name node
-      | NONE => if same_path (Path.dir stem) sigobj then Path.file stem else stem
-  end
-
 fun holfs_unmapped_theory_artifact path =
   let
     val {dir, file} = Path.splitDirFile path
@@ -1442,16 +1436,11 @@ fun holfs_unmapped_theory_artifact path =
     else path
   end
 
-fun generated_holdep_include_dirs tc plan =
-  unique_strings (Path.concat(#holdir tc, "sigobj") :: map (Path.dir o load_stem) plan)
-
 fun generated_holdep_mldeps plan tc path =
   let
-    val deps = HolbuildDependencies.resolved_holdep_deps
-                 (generated_holdep_include_dirs tc plan)
-                 (holfs_unmapped_theory_artifact path)
+    fun planned name = List.exists (fn node => HolbuildBuildPlan.logical_name node = name) plan
   in
-    unique_strings (map (generated_holdep_stem plan tc) deps)
+    unique_strings (List.filter planned (HolbuildDependencies.holdep_mentions (holfs_unmapped_theory_artifact path)))
   end
 
 fun read_mldeps_report path =
@@ -1766,7 +1755,7 @@ fun best_failed_prefix_checkpoint checkpoints =
 
 datatype force_level = ForceNone | ForceTargets | ForceProject | ForceAll
 
-type build_options = {use_cache : bool, force : force_level, force_targets : string list, skip_checkpoints : bool, goalfrag : bool, new_ir : bool, tactic_timeout : real option, goalfrag_plan : string option, goalfrag_trace : bool, repl_on_failure : bool, strict_parse : bool}
+type build_options = {use_cache : bool, force : force_level, force_targets : string list, skip_checkpoints : bool, auto_contexts : bool, goalfrag : bool, new_ir : bool, tactic_timeout : real option, goalfrag_plan : string option, goalfrag_trace : bool, repl_on_failure : bool, strict_parse : bool}
 
 datatype checkpoint_policy =
   CheckpointPolicy of {checkpoint : bool, goalfrag : bool, new_ir : bool, tactic_timeout : real option, goalfrag_plan : string option, goalfrag_trace : bool, repl_on_failure : bool}
@@ -2472,13 +2461,17 @@ fun effective_tactic_timeout goalfrag root_package tactic_timeout =
   if goalfrag andalso root_package then tactic_timeout else NONE
 
 fun checkpoint_policy_for_node ({skip_checkpoints, goalfrag, new_ir, tactic_timeout, goalfrag_plan, goalfrag_trace, repl_on_failure, ...} : build_options) project node =
-  CheckpointPolicy {checkpoint = not skip_checkpoints,
-                    goalfrag = goalfrag,
-                    new_ir = new_ir,
-                    tactic_timeout = effective_tactic_timeout goalfrag (root_package_node project node) tactic_timeout,
-                    goalfrag_plan = if goalfrag then goalfrag_plan else NONE,
-                    goalfrag_trace = goalfrag andalso goalfrag_trace,
-                    repl_on_failure = repl_on_failure}
+  let val root_node = root_package_node project node
+      val instrument = goalfrag andalso root_node
+  in
+    CheckpointPolicy {checkpoint = not skip_checkpoints,
+                      goalfrag = instrument,
+                      new_ir = new_ir,
+                      tactic_timeout = effective_tactic_timeout goalfrag root_node tactic_timeout,
+                      goalfrag_plan = if instrument then goalfrag_plan else NONE,
+                      goalfrag_trace = instrument andalso goalfrag_trace,
+                      repl_on_failure = repl_on_failure}
+  end
 
 fun proof_engine (CheckpointPolicy {goalfrag = false, ...}) = "plain_v1"
   | proof_engine (CheckpointPolicy {new_ir = true, ...}) = "proof_ir_v3"
@@ -2983,6 +2976,9 @@ fun build_nodes status options tc project context plan keys toolchain_key jobs =
   else if jobs <= 1 then build_serial status options tc project context plan keys toolchain_key
   else build_parallel status options tc project context plan keys toolchain_key jobs
 
+fun build_node_subset status options tc project context universe keys toolchain_key nodes =
+  List.app (fn node => ignore (build_one status options tc project context universe keys toolchain_key node)) nodes
+
 fun node_key node = HolbuildBuildPlan.key node
 
 fun node_member node nodes = List.exists (fn candidate => node_key candidate = node_key node) nodes
@@ -3012,6 +3008,190 @@ fun bare_phase_nodes plan =
 fun without_nodes excluded nodes =
   List.filter (fn node => not (node_member node excluded)) nodes
 
+fun loadable_node node =
+  #kind (HolbuildBuildPlan.source_of node) <> HolbuildSourceIndex.Sig
+
+fun context_node_id node =
+  HolbuildBuildPlan.package node ^ ":" ^ HolbuildBuildPlan.relative_path node ^ ":" ^ HolbuildBuildPlan.logical_name node
+
+fun context_name node =
+  HolbuildBuildPlan.package node ^ ":" ^ HolbuildBuildPlan.logical_name node
+
+fun int_max (a, b) = if a > b then a else b
+
+fun node_in nodes node = node_member node nodes
+
+fun closure_function plan =
+  let
+    val memo = ref ([] : (string * HolbuildBuildPlan.node list) list)
+    fun lookup k = Option.map #2 (List.find (fn (k', _) => k = k') (!memo))
+    fun remember k v = (memo := (k, v) :: !memo; v)
+    fun closure node =
+      let val k = node_key node
+      in
+        case lookup k of
+            SOME value => value
+          | NONE =>
+              let
+                val deps = HolbuildBuildPlan.direct_project_deps plan node
+                val value = unique_nodes (List.concat (map closure deps) @ deps)
+              in remember k value end
+      end
+  in
+    closure
+  end
+
+type auto_context_candidate = {root : HolbuildBuildPlan.node, contents : HolbuildBuildPlan.node list, users : int, size : int, score : int}
+
+fun auto_context_candidates plan =
+  if length plan < 100 then []
+  else
+    let
+      val closure = closure_function plan
+      fun contents root = closure root @ [root]
+      fun users root = length (List.filter (fn node => node_in (closure node) root) plan)
+      fun score root =
+        let val u = users root
+            val c = contents root
+            val s = length (List.filter loadable_node c)
+        in {root = root, contents = c, users = u, size = s, score = u * s} end
+      val scored = map score (List.filter loadable_node plan)
+      fun good ({users, size, ...} : auto_context_candidate) = users >= 20 andalso size >= 20
+      fun insert (c : auto_context_candidate) [] = [c]
+        | insert c (x :: xs) =
+            if #score c > #score x then c :: x :: xs else x :: insert c xs
+    in
+      List.foldl (fn (c, acc) => if good c then insert c acc else acc) [] scored
+    end
+
+fun selected_auto_contexts plan =
+  let
+    val candidates = auto_context_candidates plan
+    fun deps_contain root (cand : auto_context_candidate) = node_in (#contents cand) root
+    fun choose current selected remaining =
+      if length selected >= 1 then rev selected
+      else
+        let
+          val eligible =
+            case current of
+                NONE => remaining
+              | SOME root => List.filter (deps_contain root) remaining
+        in
+          case eligible of
+              [] => rev selected
+            | best :: _ =>
+                choose (SOME (#root best)) (best :: selected)
+                  (List.filter (fn c => not (node_member (#root c) [#root best])) remaining)
+        end
+  in
+    choose NONE [] candidates
+  end
+
+type auto_context = {root : HolbuildBuildPlan.node, contents : HolbuildBuildPlan.node list, key : string, path : string, context : hol_context}
+
+fun auto_context_key toolchain_key parent_key keys root contents =
+  HolbuildHash.string_sha1
+    (String.concatWith "\n"
+       (["holbuild-auto-context-v1",
+         "toolchain=" ^ toolchain_key,
+         "parent=" ^ parent_key,
+         "root=" ^ context_node_id root] @
+        map (fn node => "node=" ^ context_node_id node ^ "@" ^ HolbuildBuildPlan.input_key_for keys node) contents) ^ "\n")
+
+fun auto_context_path project key =
+  Path.concat(Path.concat(Path.concat(project_artifact_root project, ".holbuild/checkpoints"), "_contexts"),
+              key ^ ".save")
+
+fun auto_context_ok_text key = checkpoint_ok_text "auto_context" [("key", key)]
+
+fun auto_context_exists path key =
+  checkpoint_exists path andalso
+  HolbuildCheckpointStore.ok_matches (fn _ => ()) path [("kind", "auto_context"), ("key", key)]
+
+fun write_auto_context_loader load_nodes output ok_text path =
+  write_text path
+    (String.concatWith "\n"
+       (map (load_project_line o load_stem) load_nodes @
+        [checkpoint_save_runtime_line (),
+         save_heap_line {label = "auto_context", share_common_data = true,
+                         output = output, ok_text = ok_text}]) ^ "\n")
+
+fun ensure_auto_context tc project parent_context key load_nodes output =
+  if auto_context_exists output key then HolState output
+  else
+    let
+      val stage = Path.concat(Path.concat(project_artifact_root project, ".holbuild/stage"), "auto-context-" ^ key)
+      val loader = Path.concat(stage, "holbuild-save-auto-context.sml")
+    in
+      ensure_dir stage;
+      ensure_parent output;
+      write_auto_context_loader (List.filter loadable_node load_nodes) output (auto_context_ok_text key) loader;
+      run_hol_files_to_log tc stage stage parent_context [loader]
+        "holbuild-auto-context.log"
+        ("hol run failed while creating automatic execution context " ^ key);
+      remove_tree stage;
+      HolState output
+    end
+
+fun build_with_auto_contexts status options tc project base_context plan keys toolchain_key jobs =
+  if null plan then ()
+  else if (not (#auto_contexts options)) orelse #skip_checkpoints options orelse not (#use_cache options) orelse #force options <> ForceNone orelse length plan < 100 then
+    build_nodes status options tc project base_context plan keys toolchain_key jobs
+  else
+    let
+      val selected = selected_auto_contexts plan
+      fun make_context ((candidate : auto_context_candidate), (parent_key, parent_context, parent_contents, contexts)) =
+        let
+          val root = #root candidate
+          val contents = #contents candidate
+          val delta = without_nodes parent_contents contents
+          val key = auto_context_key toolchain_key parent_key keys root contents
+          val path = auto_context_path project key
+          val _ = if HolbuildStatus.verbose_mode () then
+                    HolbuildStatus.message_stderr
+                      ("holbuild: automatic execution context " ^ context_name root ^
+                       " users=" ^ Int.toString (#users candidate) ^
+                       " contents=" ^ Int.toString (#size candidate) ^ "\n")
+                  else ()
+          val _ = build_node_subset status options tc project parent_context plan keys toolchain_key delta
+          val context = ensure_auto_context tc project parent_context key delta path
+          val ctx = {root = root, contents = contents, key = key, path = path, context = context}
+        in
+          (key, context, contents, contexts @ [ctx])
+        end
+      val (_, _, _, contexts) = List.foldl make_context (toolchain_key, base_context, [], []) selected
+      val built_by_contexts = unique_nodes (List.concat (map #contents contexts))
+      val remaining = without_nodes built_by_contexts plan
+      fun deps_in_plan node = HolbuildBuildPlan.transitive_project_deps plan node
+      fun best node =
+        let
+          val deps = deps_in_plan node
+          fun applies ({root, ...} : auto_context) = node_in deps root
+          val matching = List.filter applies contexts
+        in case rev matching of [] => NONE | ctx :: _ => SOME ctx end
+      val no_context = List.filter (fn node => case best node of NONE => true | SOME _ => false) remaining
+      val _ = build_node_subset status options tc project base_context plan keys toolchain_key no_context
+      fun build_context_group ({context, key, ...} : auto_context) =
+        build_node_subset status options tc project context plan keys toolchain_key
+          (List.filter (fn node => case best node of SOME best_ctx => #key best_ctx = key | NONE => false) remaining)
+    in
+      List.app build_context_group contexts
+    end
+
+fun describe_auto_contexts (options : build_options) plan =
+  if (not (#auto_contexts options)) orelse #skip_checkpoints options orelse not (HolbuildStatus.verbose_mode ()) then ()
+  else
+    let
+      val contexts = selected_auto_contexts plan
+      fun line (candidate : auto_context_candidate) =
+        HolbuildStatus.message_stderr
+          ("holbuild: automatic execution context candidate " ^ context_name (#root candidate) ^
+           " users=" ^ Int.toString (#users candidate) ^
+           " contents=" ^ Int.toString (#size candidate) ^ "\n")
+    in
+      List.app line contexts
+    end
+
 fun needs_nonbare_standard_env node =
   let val source = HolbuildBuildPlan.source_of node
   in
@@ -3033,15 +3213,15 @@ fun build (options : build_options) tc project plan toolchain_key jobs =
           val needs_std = List.exists needs_nonbare_standard_env std_plan
         in
           if null bare_plan then
-            build_nodes status options tc project bare plan keys toolchain_key jobs
+            build_with_auto_contexts status options tc project bare plan keys toolchain_key jobs
           else
-            (build_nodes status options tc project bare bare_plan keys toolchain_key jobs;
+            (build_with_auto_contexts status options tc project bare bare_plan keys toolchain_key jobs;
              if #skip_checkpoints options orelse not needs_std then
-               build_nodes status options tc project bare std_plan keys toolchain_key jobs
+               build_with_auto_contexts status options tc project bare std_plan keys toolchain_key jobs
              else
                case ensure_standard_env_context_from_sources tc project toolchain_key keys plan of
-                   SOME context => build_nodes status options tc project context std_plan keys toolchain_key jobs
-                 | NONE => build_nodes status options tc project bare std_plan keys toolchain_key jobs)
+                   SOME context => build_with_auto_contexts status options tc project context std_plan keys toolchain_key jobs
+                 | NONE => build_with_auto_contexts status options tc project bare std_plan keys toolchain_key jobs)
         end
     in
       (run (); HolbuildStatus.finish status; enforce_checkpoint_budget project)
