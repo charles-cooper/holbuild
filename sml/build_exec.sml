@@ -222,10 +222,17 @@ fun write_preload plan node deps_loaded deps_ok path =
 fun write_plain_preload plan node path =
   write_text path (String.concatWith "\n" (preload_lines plan node) ^ "\n")
 
-fun mldep_report_lines NONE = []
-  | mldep_report_lines (SOME report_path) =
-      ["val holbuild_mldeps_out = TextIO.openOut " ^ HolbuildToolchain.sml_string report_path ^ ";",
-       "val _ = (List.app (fn s => TextIO.output(holbuild_mldeps_out, s ^ \"\\n\")) (Theory.current_ML_deps()); TextIO.closeOut holbuild_mldeps_out);"]
+fun report_string_list_lines _ NONE _ = []
+  | report_string_list_lines var (SOME report_path) values =
+      ["val " ^ var ^ " = TextIO.openOut " ^ HolbuildToolchain.sml_string report_path ^ ";",
+       "val _ = (List.app (fn s => TextIO.output(" ^ var ^ ", s ^ \"\\n\")) (" ^ values ^ "); TextIO.closeOut " ^ var ^ ");"]
+
+fun mldep_report_lines report_path =
+  report_string_list_lines "holbuild_mldeps_out" report_path "Theory.current_ML_deps()"
+
+fun parent_report_lines theory_name report_path =
+  report_string_list_lines "holbuild_parents_out" report_path
+    ("map (fn thy => thy ^ \"Theory\") (Theory.parents " ^ HolbuildToolchain.sml_string theory_name ^ ")")
 
 fun export_theory_if_needed_line sig_path =
   "val _ = if OS.FileSys.access(" ^ HolbuildToolchain.sml_string sig_path ^
@@ -247,7 +254,7 @@ fun hfs_unmapped_path path =
     else path
   end
 
-fun final_context_loader_lines {sig_path, sml_path, mldeps_report} =
+fun final_context_loader_lines {theory_name, sig_path, sml_path, parents_report, mldeps_report} =
   let
     val load_sig_path = hfs_unmapped_path sig_path
     val load_sml_path = hfs_unmapped_path sml_path
@@ -258,13 +265,16 @@ fun final_context_loader_lines {sig_path, sml_path, mldeps_report} =
     export_theory_if_needed_line sig_path ::
     write_manifest_line ui_path [load_sig_path] ::
     write_manifest_line uo_path [load_sml_path] ::
+    parent_report_lines theory_name parents_report @
     mldep_report_lines mldeps_report @
     ["load " ^ HolbuildToolchain.sml_string stem ^ ";"]
   end
 
-fun write_final_context_loader {sig_path, sml_path, output, path, mldeps_report} =
+fun write_final_context_loader {theory_name, sig_path, sml_path, output, path, parents_report, mldeps_report} =
   let
-    val lines = final_context_loader_lines {sig_path = sig_path, sml_path = sml_path,
+    val lines = final_context_loader_lines {theory_name = theory_name,
+                                            sig_path = sig_path, sml_path = sml_path,
+                                            parents_report = parents_report,
                                             mldeps_report = mldeps_report} @
                 [checkpoint_save_runtime_line (),
                  save_heap_line {label = "final_context", share_common_data = true,
@@ -273,9 +283,11 @@ fun write_final_context_loader {sig_path, sml_path, output, path, mldeps_report}
     write_text path (String.concatWith "\n" lines ^ "\n")
   end
 
-fun write_plain_final_context_loader {sig_path, sml_path, path, mldeps_report} =
+fun write_plain_final_context_loader {theory_name, sig_path, sml_path, path, parents_report, mldeps_report} =
   write_text path (String.concatWith "\n"
-                     (final_context_loader_lines {sig_path = sig_path, sml_path = sml_path,
+                     (final_context_loader_lines {theory_name = theory_name,
+                                                  sig_path = sig_path, sml_path = sml_path,
+                                                  parents_report = parents_report,
                                                   mldeps_report = mldeps_report}) ^ "\n")
 
 fun generated_outputs node =
@@ -1114,12 +1126,14 @@ fun cache_blob root path =
     hash
   end
 
-fun cache_manifest_text {input_key, sig_hash, sml_hash, dat_hash, mldeps} =
+fun cache_manifest_text {input_key, sig_hash, sml_hash, dat_hash, parents, mldeps} =
   String.concatWith "\n"
     (["holbuild-cache-action-v2",
       "input_key=" ^ input_key,
       "kind=theory",
-      "mldeps"] @
+      "parents"] @
+     map (fn parent => "parent " ^ parent) parents @
+     ["mldeps"] @
      map (fn dep => "mldep " ^ dep) mldeps @
      ["blob sig " ^ sig_hash,
       "blob sml " ^ sml_hash,
@@ -1212,34 +1226,44 @@ fun add_mldep dep deps =
   else if List.exists (fn existing => existing = dep) deps then deps
   else dep :: deps
 
-fun parse_cache_manifest_line input_key line (saw_header, saw_input, saw_kind, saw_mldeps, blobs, mldeps) =
+fun add_parent parent parents =
+  if not (valid_mldep_name parent) then
+    raise Error ("cache manifest invalid parent: " ^ parent)
+  else if List.exists (fn existing => existing = parent) parents then parents
+  else parent :: parents
+
+fun parse_cache_manifest_line input_key line (saw_header, saw_input, saw_kind, saw_parents, saw_mldeps, blobs, parents, mldeps) =
   if line = "holbuild-cache-action-v2" then
     if saw_header then raise Error "cache manifest duplicate header"
-    else (true, saw_input, saw_kind, saw_mldeps, blobs, mldeps)
+    else (true, saw_input, saw_kind, saw_parents, saw_mldeps, blobs, parents, mldeps)
   else if line = "input_key=" ^ input_key then
     if saw_input then raise Error "cache manifest duplicate input key"
-    else (saw_header, true, saw_kind, saw_mldeps, blobs, mldeps)
+    else (saw_header, true, saw_kind, saw_parents, saw_mldeps, blobs, parents, mldeps)
   else if String.isPrefix "input_key=" line then
     raise Error "cache manifest input key mismatch"
   else if line = "kind=theory" then
     if saw_kind then raise Error "cache manifest duplicate kind"
-    else (saw_header, saw_input, true, saw_mldeps, blobs, mldeps)
+    else (saw_header, saw_input, true, saw_parents, saw_mldeps, blobs, parents, mldeps)
   else if String.isPrefix "kind=" line then
     raise Error "cache manifest unsupported kind"
+  else if line = "parents" then
+    if saw_parents then raise Error "cache manifest duplicate parents marker"
+    else (saw_header, saw_input, saw_kind, true, saw_mldeps, blobs, parents, mldeps)
   else if line = "mldeps" then
     if saw_mldeps then raise Error "cache manifest duplicate mldeps marker"
-    else (saw_header, saw_input, saw_kind, true, blobs, mldeps)
+    else (saw_header, saw_input, saw_kind, saw_parents, true, blobs, parents, mldeps)
   else
     case String.tokens Char.isSpace line of
-        ["mldep", dep] => (saw_header, saw_input, saw_kind, saw_mldeps, blobs, add_mldep dep mldeps)
-      | ["blob", role, hash] => (saw_header, saw_input, saw_kind, saw_mldeps, add_manifest_blob role hash blobs, mldeps)
+        ["parent", parent] => (saw_header, saw_input, saw_kind, saw_parents, saw_mldeps, blobs, add_parent parent parents, mldeps)
+      | ["mldep", dep] => (saw_header, saw_input, saw_kind, saw_parents, saw_mldeps, blobs, parents, add_mldep dep mldeps)
+      | ["blob", role, hash] => (saw_header, saw_input, saw_kind, saw_parents, saw_mldeps, add_manifest_blob role hash blobs, parents, mldeps)
       | _ => raise Error ("cache manifest unknown line: " ^ line)
 
 fun cache_manifest_blobs_from_lines input_key lines =
   let
-    val (saw_header, saw_input, saw_kind, saw_mldeps, blobs, mldeps) =
+    val (saw_header, saw_input, saw_kind, _, saw_mldeps, blobs, parents, mldeps) =
       List.foldl (fn (line, state) => parse_cache_manifest_line input_key line state)
-                 (false, false, false, false, [], []) lines
+                 (false, false, false, false, false, [], [], []) lines
     val _ = if saw_header then () else raise Error "cache manifest missing header"
     val _ = if saw_input then () else raise Error "cache manifest missing input key"
     val _ = if saw_kind then () else raise Error "cache manifest missing kind"
@@ -1251,6 +1275,7 @@ fun cache_manifest_blobs_from_lines input_key lines =
       {sig_hash = blob_from_manifest "sig" blobs,
        sml_hash = sml_blob_from_manifest blobs,
        dat_hash = blob_from_manifest "dat" blobs,
+       parents = rev parents,
        mldeps = stable_mldeps}
     end
   end
@@ -1270,11 +1295,12 @@ fun cache_entry_usable root input_key text =
   end
   handle _ => false
 
-fun cache_manifest_output_summary {sig_hash, sml_hash, dat_hash, mldeps} =
+fun cache_manifest_output_summary {sig_hash, sml_hash, dat_hash, parents, mldeps} =
   String.concat
     ["sig=", sig_hash,
      " sml=", sml_hash,
      " dat=", dat_hash,
+     " parents=", Int.toString (length parents),
      " mldeps=", Int.toString (length mldeps)]
 
 fun cache_conflict_warning cache_key manifest_path subject old_manifest new_manifest =
@@ -1365,7 +1391,7 @@ fun theory_cache_keys project plan node input_key =
 fun cache_warning_subject node =
   String.concat [logical_name node, " (", source_file node, ")"]
 
-fun publish_cache_manifest root cache_key subject staged_sig published_sml staged_dat cache_mldeps =
+fun publish_cache_manifest root cache_key subject staged_sig published_sml staged_dat parents cache_mldeps =
   let
     val manifest_path = HolbuildCache.action_manifest root cache_key
     val sig_hash = cache_blob root staged_sig
@@ -1374,6 +1400,7 @@ fun publish_cache_manifest root cache_key subject staged_sig published_sml stage
     val manifest = cache_manifest_text {input_key = cache_key, sig_hash = sig_hash,
                                         sml_hash = sml_hash,
                                         dat_hash = dat_hash,
+                                        parents = parents,
                                         mldeps = cache_mldeps}
     val existing = current_metadata manifest_path
   in
@@ -1387,7 +1414,7 @@ fun publish_cache_manifest root cache_key subject staged_sig published_sml stage
       | NONE => write_text manifest_path manifest
   end
 
-fun publish_theory_cache project plan node input_key staged_sig published_sml staged_dat mldeps =
+fun publish_theory_cache project plan node input_key staged_sig published_sml staged_dat parents mldeps =
   let
     val root = cache_root_for_node node
     val _ = HolbuildCache.ensure_layout root
@@ -1397,7 +1424,7 @@ fun publish_theory_cache project plan node input_key staged_sig published_sml st
     val cache_key = if path_dependent then path_dependent_cache_key project node context_key else context_key
     fun drop_stale_manifest key = remove_file (HolbuildCache.action_manifest root key)
     val subject = cache_warning_subject node
-    fun publish () = publish_cache_manifest root cache_key subject staged_sig published_sml staged_dat cache_mldeps
+    fun publish () = publish_cache_manifest root cache_key subject staged_sig published_sml staged_dat parents cache_mldeps
     fun skip_locked_publish () = ()
   in
     ((if cache_key <> input_key then
@@ -1423,23 +1450,35 @@ fun mldep_load_stems plan mldeps = unique_strings (map (mldep_load_stem plan) ml
 fun stable_generated_mldeps mldeps =
   List.filter (not o transient_stage_mldep) mldeps
 
-fun read_mldeps_report path =
+fun read_string_list_report label path =
   let
-    val deps = String.tokens (fn c => c = #"\n") (read_text path)
+    val values = String.tokens (fn c => c = #"\n") (read_text path)
     val _ =
       List.app
-        (fn dep => if valid_mldep_name dep then ()
-                   else raise Error ("invalid generated theory ML dependency: " ^ dep))
-        deps
+        (fn value => if valid_mldep_name value then ()
+                     else raise Error ("invalid generated theory " ^ label ^ ": " ^ value))
+        values
   in
-    unique_strings deps
+    unique_strings values
   end
 
-fun write_local_theory_manifests plan node mldeps =
+fun read_mldeps_report path = read_string_list_report "ML dependency" path
+fun read_parents_report path = read_string_list_report "parent" path
+
+fun parent_load_stem plan parent =
+  if HolbuildBootstrap.is_bare_logical parent then NONE
+  else
+    case project_node_named plan parent of
+        SOME node => SOME (load_stem node)
+      | NONE => raise Error ("exported theory parent is not in the resolved build graph: " ^ parent)
+
+fun parent_load_stems plan parents = unique_strings (List.mapPartial (parent_load_stem plan) parents)
+
+fun write_local_theory_manifests plan node parents mldeps =
   let
     val {sig_path, sml_path, script_uo, theory_ui, theory_uo, ...} = theory_outputs node
     val deps = HolbuildBuildPlan.direct_project_deps plan node
-    val theory_loads = project_theory_load_stems deps @
+    val theory_loads = parent_load_stems plan parents @
                        mldep_load_stems plan (stable_generated_mldeps mldeps)
     val script_loads = project_load_stems deps
   in
@@ -1487,7 +1526,7 @@ fun materialize_theory_cache_key project plan input_key cache_key node =
       case transient_stage_mldep_in_manifest manifest_text of
           SOME dep => transient_cache_manifest_error root cache_key manifest manifest_text dep
         | NONE => ()
-    val {sig_hash, sml_hash, dat_hash, mldeps} =
+    val {sig_hash, sml_hash, dat_hash, parents, mldeps} =
       cache_manifest_blobs_from_lines cache_key (cache_manifest_lines manifest_text)
     val {sig_path, sml_path, data_path, ...} = theory_outputs node
     fun install () =
@@ -1498,7 +1537,7 @@ fun materialize_theory_cache_key project plan input_key cache_key node =
        copy_blob root sml_hash sml_path;
        write_text sml_path (replace_all cache_sml_token data_path (read_text sml_path));
        write_text (hfs_remapped_path sml_path) (read_text sml_path);
-       write_local_theory_manifests plan node mldeps;
+       write_local_theory_manifests plan node parents mldeps;
        HolbuildCache.touch manifest;
        cache_trace ("cache hit: " ^ logical_name node ^ " " ^ role ^ "=" ^ cache_key);
        true)
@@ -2038,6 +2077,7 @@ fun build_theory cache_allowed policy tc project base_context plan keys toolchai
     val staged_script = Path.concat(stage, Path.file (source_file node))
     val preload = Path.concat(stage, "holbuild-preload.sml")
     val final_loader = Path.concat(stage, "holbuild-save-final-context.sml")
+    val parents_report = Path.concat(stage, "holbuild-theory-parents.txt")
     val mldeps_report = Path.concat(stage, "holbuild-theory-mldeps.txt")
     val timeout_marker = Path.concat(stage, "holbuild-tactic-timeout.txt")
     val plan_only_marker = Path.concat(stage, "holbuild-goalfrag-plan.txt")
@@ -2062,13 +2102,18 @@ fun build_theory cache_allowed policy tc project base_context plan keys toolchai
     val _ =
       if checkpoint_enabled policy then
         write_final_context_loader
-          {sig_path = staged_sig, sml_path = staged_sml,
+          {theory_name = drop_suffix "Theory" (logical_name node),
+           sig_path = staged_sig, sml_path = staged_sml,
            output = final_context, path = final_loader,
+           parents_report = SOME parents_report,
            mldeps_report = SOME mldeps_report}
       else
         write_plain_final_context_loader
-          {sig_path = staged_sig, sml_path = staged_sml,
-           path = final_loader, mldeps_report = SOME mldeps_report}
+          {theory_name = drop_suffix "Theory" (logical_name node),
+           sig_path = staged_sig, sml_path = staged_sml,
+           path = final_loader,
+           parents_report = SOME parents_report,
+           mldeps_report = SOME mldeps_report}
     val _ = remove_file timeout_marker
     val _ = remove_file plan_only_marker
     val run_spec = write_theory_script policy project base_context plan keys input_key toolchain_key node
@@ -2210,13 +2255,14 @@ fun build_theory cache_allowed policy tc project base_context plan keys toolchai
     val _ = copy_rewriting_path {src = staged_sml, dst = sml_path,
                                  replacements = dat_replacements}
     val _ = copy_binary sml_path (hfs_remapped_path sml_path)
+    val parents = read_parents_report parents_report
     val mldeps = read_mldeps_report mldeps_report
     val _ =
       if cache_allowed then
-        publish_theory_cache project plan node input_key staged_sig sml_path staged_dat mldeps
+        publish_theory_cache project plan node input_key staged_sig sml_path staged_dat parents mldeps
       else ()
   in
-    write_local_theory_manifests plan node mldeps;
+    write_local_theory_manifests plan node parents mldeps;
     remove_tree stage
   end
 

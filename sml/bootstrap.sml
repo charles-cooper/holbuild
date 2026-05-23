@@ -639,12 +639,17 @@ val basis_modules =
 val polyml_modules =
   ["Bootstrap", "Foreign", "Thread", "Universal", "PolyML"]
 
+(* Compiler/runtime support structures used by HOLSource expansion and available
+   in the bare HOL process, but not reported as HOL loadable modules by
+   Meta.loaded (). *)
+val bootstrap_support_modules = ["CompilerSpecific"]
+
 fun member x xs = List.exists (fn y => x = y) xs
 fun is_bare_module name = member name bare_modules
 fun is_standard_module name = member name standard_modules
 fun is_bare_theory name = member name bare_theories
 fun is_standard_theory name = is_bare_theory name orelse (size name > 6 andalso String.isSuffix "Theory" name andalso member name standard_modules)
 fun is_bare_logical name = is_bare_module name orelse is_bare_theory name
-fun is_bootstrap_dependency name = is_bare_logical name orelse member name basis_modules orelse member name polyml_modules
+fun is_bootstrap_dependency name = is_bare_logical name orelse member name basis_modules orelse member name polyml_modules orelse member name bootstrap_support_modules
 fun is_standard_logical name = is_standard_module name orelse is_standard_theory name
 end
