@@ -102,7 +102,7 @@ Theory Foo
 Ancestors Bar
 ```
 
-These are interpreted by HOL's `Holdep_tokens.reader_deps`; holbuild resolves the mentioned logical names through the package index rather than using Holmake `INCLUDES` or prebuilt object files. `Ancestors` declares direct theory predecessors; `Theory` declares the theory name.
+These are interpreted by HOL's `HOLSource.fileToReader` plus `Holdep_tokens.reader_deps`; holbuild resolves the mentioned logical names through the package index rather than using Holmake `INCLUDES` or prebuilt object files. `Ancestors` declares direct theory predecessors; `Theory` declares the theory name.
 
 ## `[[generate]]` source generation
 

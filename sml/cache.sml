@@ -21,16 +21,8 @@ fun ensure_dir path =
   else if path_exists path then ()
   else (ensure_dir (Path.dir path); FS.mkDir path handle OS.SysErr _ => ())
 
-fun cache_root () =
-  case OS.Process.getEnv "HOLBUILD_CACHE" of
-      SOME path => path
-    | NONE =>
-      case OS.Process.getEnv "XDG_CACHE_HOME" of
-          SOME base => Path.concat(base, "holbuild")
-        | NONE =>
-          case OS.Process.getEnv "HOME" of
-              SOME home => Path.concat(Path.concat(home, ".cache"), "holbuild")
-            | NONE => raise Error "set HOME, XDG_CACHE_HOME, or HOLBUILD_CACHE"
+fun cache_root () = HolbuildCacheRoots.cache_root () handle HolbuildCacheRoots.Error msg => raise Error msg
+fun hol_cache_root () = HolbuildCacheRoots.hol_cache_root () handle HolbuildCacheRoots.Error msg => raise Error msg
 
 fun actions_dir root = Path.concat(root, "actions")
 fun blobs_dir root = Path.concat(root, "blobs")

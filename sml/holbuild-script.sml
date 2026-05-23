@@ -67,6 +67,7 @@ use_hol("src/portableML/poly/w64-SHA1.ML");
 
 use "sml/hash.sml";
 use "sml/bootstrap.sml";
+use "sml/cache_roots.sml";
 use "sml/project.sml";
 use "sml/toolchain.sml";
 use "sml/status.sml";

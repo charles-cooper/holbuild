@@ -691,10 +691,21 @@ fun dependency_package artifact_parent project (dep as Dependency {name, ...}) =
      dep_project)
   end
 
+val implicit_hol_members =
+  ["src",
+   "examples/algorithms",
+   "examples/category",
+   "examples/computability",
+   "examples/Crypto",
+   "examples/data-structures",
+   "examples/formal-languages",
+   "examples/l3-machine-code",
+   "examples/pl-semantics/lprefix_lub",
+   "examples/machine-code/hoare-triple"]
+
 val implicit_hol_excludes =
   ["*selftest*.sml",
-   "examples/developers/*",
-   "examples/dev/*",
+   "*/test.sml",
    "src/experimental-kernel/*",
    "src/tracing/yes/*",
    "src/portableML/mosml/*",
@@ -708,48 +719,9 @@ val implicit_hol_excludes =
    "src/*/test/*",
    "src/holyhammer/examples/*",
    "src/tactictoe/examples/*",
-   "examples/arm/*",
-   "examples/l3-machine-code/*",
-   "examples/PSL/*",
-   "examples/acl2/*",
-   "examples/machine-code/lisp/*",
-   "examples/theorem-prover/lisp-runtime/*",
-   "examples/elliptic/*",
-   "examples/miller/*",
-   "examples/algebra/field/*",
-   "examples/formal-languages/regular/*",
-   "examples/pgcl/*",
-   "examples/axiomatic-developments/set-theory/vbg/*",
-   "examples/dpll*",
-   "examples/CCS/*",
-   "examples/formal-languages/lambek/*",
-   "examples/logic/ltl/*",
-   "examples/separationLogic/*",
-   "examples/hardware/port/*",
-   "examples/hardware/port-full/*",
-   "examples/algorithms/unification/triangular/first-order/*",
-   "examples/lambda/basics/*"]
+   "examples/l3-machine-code/monadic-arm/*"]
 
-fun implicit_hol_action logical deps =
-  ActionPolicy {logical = logical, deps = deps, loads = [], extra_inputs = [],
-                impure = false, cache = true, always_reexecute = false}
-
-val implicit_hol_action_policies =
-  [implicit_hol_action "NumRelNorms" ["GenRelNorm", "Overlay"]]
-
-fun implicit_cache_root () =
-  case OS.Process.getEnv "HOLBUILD_HOL_CACHE" of
-      SOME path => path
-    | NONE =>
-      case OS.Process.getEnv "HOLBUILD_CACHE" of
-          SOME path => path
-        | NONE =>
-      case OS.Process.getEnv "XDG_CACHE_HOME" of
-          SOME base => Path.concat(base, "holbuild")
-        | NONE =>
-          case OS.Process.getEnv "HOME" of
-              SOME home => Path.concat(Path.concat(home, ".cache"), "holbuild")
-            | NONE => die "set HOME, XDG_CACHE_HOME, HOLBUILD_CACHE, or HOLBUILD_HOL_CACHE"
+val implicit_hol_action_policies = []
 
 fun canonical_path path = Path.mkCanonical path handle Path.InvalidArc => path
 
@@ -758,14 +730,15 @@ fun implicit_hol_source_key holdir =
     (String.concatWith "\n"
        (["holbuild-implicit-hol-source-v1",
          "holdir=" ^ canonical_path holdir,
-         "members=src,examples"] @
+         "members=" ^ String.concatWith "," implicit_hol_members] @
         map (fn exclude => "exclude=" ^ exclude) implicit_hol_excludes @
         map (fn ActionPolicy {logical, deps, ...} =>
                "policy=" ^ logical ^ ":" ^ String.concatWith "," deps)
             implicit_hol_action_policies) ^ "\n")
 
 fun implicit_hol_artifact_root holdir =
-  Path.concat(Path.concat(implicit_cache_root (), "implicit-hol"), implicit_hol_source_key holdir)
+  Path.concat(Path.concat(HolbuildCacheRoots.hol_cache_root (), "implicit-hol"), implicit_hol_source_key holdir)
+  handle HolbuildCacheRoots.Error msg => die msg
 
 fun implicit_hol_package _ =
   let
@@ -776,7 +749,7 @@ fun implicit_hol_package _ =
     val manifest = Path.concat(holdir, "holproject.toml")
   in
     Package {name = "HOL", root = holdir, manifest = manifest,
-             members = ["src", "examples"], excludes = implicit_hol_excludes, roots = [],
+             members = implicit_hol_members, excludes = implicit_hol_excludes, roots = [],
              artifact_root = implicit_hol_artifact_root holdir,
              action_policies = implicit_hol_action_policies, generators = []}
   end

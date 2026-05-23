@@ -143,8 +143,9 @@ explicitly instead of treating them as pure cacheable theory-script actions.
 
 The implicit HOL package is treated as an ordinary holbuild package with a
 package-wide logical namespace. It uses the selected checkout's standard Poly/ML,
-stdknl, no-tracing source view and excludes duplicate/developer/example variant
-families that should eventually become separate packages when needed:
+stdknl, no-tracing source view, the main `src` tree, and a curated set of mature
+examples that do not create duplicate logical names. Other examples should become
+separate packages when needed:
 
 ```toml
 [project]
@@ -152,9 +153,9 @@ name = "HOL"
 version = "implicit"
 
 [build]
-members = ["src", "examples"]
+members = ["src", "examples/algorithms", "examples/category", "..."]
 # no roots: the package is available for dependency resolution, not built by default
-# default excludes select stdknl/no-tracing/poly and remove duplicate example families
+# default excludes select stdknl/no-tracing/poly and remove tests/duplicate variants
 ```
 
 Attempting to source-build core theories against `$HOLDIR/bin/hol.state` is
@@ -235,19 +236,21 @@ always_reexecute = true
 impure = true
 ```
 
-Source dependencies are inferred with HOL's existing `Holdep_tokens.reader_deps`
-lexer and resolved through holbuild's package-wide logical-name index. Holbuild
-must not use Holmake `INCLUDES`, `$HOLDIR/sigobj`, prebuilt object files, custom
-`open` scanning, HOLSource header parsing, or cross-package guessed `.sig`
-companions as graph semantics. Same-package `.sig`/`.sml` pairs form one module
-interface/implementation pair. `deps` and `loads` name additional explicit logical/loadable
-predecessors when source-level imports are insufficient or intentionally absent;
-every listed dependency must resolve to either the bare bootstrap environment or
-a source in the manifest graph. They are not satisfied from a prebuilt full HOL
-state. `extra_deps` are filesystem
-dependencies whose expanded contents are hashed into the action key. Manifest
-entries are package-root-relative; source files may also declare source-file-relative
-extra dependencies with static literal `holbuild_extra_deps [...]` annotations.
+Source dependencies are inferred with HOL's existing `HOLSource.fileToReader`
+plus `Holdep_tokens.reader_deps` and resolved through holbuild's package-wide
+logical-name index. Holbuild must not use Holmake `INCLUDES`, `$HOLDIR/sigobj`,
+prebuilt object files, custom `open` scanning, custom `load` scanning, HOLSource
+header parsing, or cross-package guessed `.sig` companions as graph semantics.
+Same-package `.sig`/`.sml` pairs form one module interface/implementation pair.
+`deps` and `loads` name additional explicit logical/loadable predecessors when
+source-level imports are insufficient or intentionally absent; every listed
+dependency must resolve to either the bare bootstrap environment or a source in
+the manifest graph. They are not satisfied from a prebuilt full HOL state.
+Source-level `use "file"` is rejected because it bypasses the resolved package
+graph. The only source text annotation interpreted by holbuild is static literal
+`holbuild_extra_deps [...]`. Manifest `extra_deps` are package-root-relative
+filesystem dependencies whose expanded contents are hashed into the action key;
+source-declared entries are source-file-relative.
 Entries may name files, directories, or simple globs, and source-declared entries
 are staged so matching relative filesystem reads work during the action.
 `cache = false` disables global-cache restore/publish for the action.
@@ -334,9 +337,10 @@ Path-sensitive files are generated or rebased for this local layout. Older HOL
 `Theory.sml` files may contain paths and are rebased when installed; newer HOL
 `Theory.sml` files locate their adjacent `.dat` file and are copied unchanged.
 Project SML/SIG modules are built from logical predecessor names reported by
-`Holdep_tokens.reader_deps` and resolved in the package index. Holbuild does not
-use Holmake include paths, prebuilt object directories, `open` tokens, qualified
-references, or cross-package guessed signature companions as graph semantics.
+`HOLSource.fileToReader` plus `Holdep_tokens.reader_deps` and resolved in the
+package index. Holbuild does not use Holmake include paths, prebuilt object
+directories, `open` tokens, custom `load` scanning, qualified references, or
+cross-package guessed signature companions as graph semantics.
 Same-package `.sig`/`.sml` pairs are one module interface/implementation pair.
 Generated theory modules also get internal load manifests from HOL's recorded
 theory metadata (`Theory.current_ML_deps` / `Theory.add_ML_dependency`), so

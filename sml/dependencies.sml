@@ -8,21 +8,12 @@ exception Error of string
 datatype token = Word of string | StringLit of string | Symbol of char
 
 type t =
-  { loads : string list,
-    uses : string list,
+  { uses : string list,
     extra_deps : string list,
     holdep_mentions : string list }
 
 val cache_version = "holbuild-dependencies-cache-v3"
 val extractor_version = "holdep-reader-deps-v1"
-
-fun has_suffix suffix s =
-  let
-    val n = size s
-    val m = size suffix
-  in
-    n >= m andalso String.substring(s, n - m, m) = suffix
-  end
 
 fun is_word_start c = Char.isAlpha c orelse c = #"_"
 fun is_word_char c = Char.isAlphaNum c orelse c = #"_" orelse c = #"'"
@@ -124,13 +115,11 @@ fun tokenize text =
     loop 0 []
   end
 
-fun extract_string_args keyword tokens =
+fun extract_use_args tokens =
   let
     fun loop rest acc =
       case rest of
-          Word word :: StringLit value :: xs =>
-            if word = keyword then loop xs (add_unique value acc)
-            else loop (StringLit value :: xs) acc
+          Word "use" :: StringLit value :: xs => loop xs (add_unique value acc)
         | _ :: xs => loop xs acc
         | [] => acc
   in
@@ -163,11 +152,10 @@ fun extract_string_list_args keyword tokens =
 fun extract_uncached path =
   let
     val tokens = tokenize (read_all path)
-    val loads = extract_string_args "load" tokens
-    val uses = extract_string_args "use" tokens
+    val uses = extract_use_args tokens
     val extra_deps = extract_string_list_args "holbuild_extra_deps" tokens
   in
-    {loads = sort_unique loads, uses = sort_unique uses,
+    {uses = sort_unique uses,
      extra_deps = sort_unique extra_deps,
      holdep_mentions = holdep_mentions path}
   end
@@ -188,8 +176,7 @@ fun read_cache cache_path source_hash =
           if version = cache_version andalso
              extractor = "extractor=" ^ extractor_version andalso
              hash_line = "source_sha1=" ^ source_hash then
-            SOME {loads = values "load=" rest,
-                  uses = values "use=" rest,
+            SOME {uses = values "use=" rest,
                   extra_deps = values "extra_dep=" rest,
                   holdep_mentions = values "mention=" rest}
           else NONE
@@ -204,12 +191,11 @@ fun ensure_dir path =
 
 fun ensure_parent path = ensure_dir (Path.dir path)
 
-fun cache_text source_hash ({loads, uses, extra_deps, holdep_mentions} : t) =
+fun cache_text source_hash ({uses, extra_deps, holdep_mentions} : t) =
   String.concatWith "\n"
     ([cache_version,
       "extractor=" ^ extractor_version,
       "source_sha1=" ^ source_hash] @
-     map (fn value => "load=" ^ value) loads @
      map (fn value => "use=" ^ value) uses @
      map (fn value => "extra_dep=" ^ value) extra_deps @
      map (fn value => "mention=" ^ value) holdep_mentions) ^ "\n"
@@ -244,30 +230,16 @@ fun extract_cached {cache_path, source_path} =
                             source_path = source_path,
                             source_hash = HolbuildHash.file_sha1 source_path}
 
-fun cache_root () =
-  case OS.Process.getEnv "HOLBUILD_HOL_CACHE" of
-      SOME path => SOME path
-    | NONE =>
-      case OS.Process.getEnv "HOLBUILD_CACHE" of
-          SOME path => SOME path
-        | NONE =>
-            (case OS.Process.getEnv "XDG_CACHE_HOME" of
-                 SOME base => SOME (Path.concat(base, "holbuild"))
-               | NONE =>
-                   case OS.Process.getEnv "HOME" of
-                       SOME home => SOME (Path.concat(Path.concat(home, ".cache"), "holbuild"))
-                     | NONE => NONE)
-
 fun external_cache_path root source_hash =
   Path.concat(root, Path.concat("deps", Path.concat("external", source_hash ^ ".deps")))
 
 fun extract_global_cached_with_hash {source_path, source_hash} =
-  case cache_root () of
-      NONE => extract_uncached source_path
-    | SOME root =>
-        extract_cached_with_hash {cache_path = external_cache_path root source_hash,
-                                  source_path = source_path,
-                                  source_hash = source_hash}
+  let val root = HolbuildCacheRoots.hol_cache_root ()
+  in
+    extract_cached_with_hash {cache_path = external_cache_path root source_hash,
+                              source_path = source_path,
+                              source_hash = source_hash}
+  end
 
 fun extract_global_cached source_path =
   extract_global_cached_with_hash {source_path = source_path,
@@ -275,14 +247,13 @@ fun extract_global_cached source_path =
 
 fun extract path = extract_uncached path
 
-fun describe ({loads, uses, extra_deps, holdep_mentions} : t) =
+fun describe ({uses, extra_deps, holdep_mentions} : t) =
   let
     fun line label values =
       case values of
           [] => ()
         | _ => print ("  " ^ label ^ ": " ^ String.concatWith ", " values ^ "\n")
   in
-    line "loads" loads;
     line "uses" uses;
     line "extra deps" extra_deps;
     line "Holdep mentions" holdep_mentions

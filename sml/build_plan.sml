@@ -11,8 +11,6 @@ type node =
     deps : HolbuildDependencies.t option ref,
     source_hash : string option ref }
 
-type t = node list
-
 type keyed_node = {node : node, input_key : string}
 
 fun source_of ({source, ...} : node) = source
@@ -35,7 +33,7 @@ fun deps_of (node as {source, deps, ...} : node) =
     | NONE =>
       let
         val source_hash = source_hash_of node
-        val value =
+        val value0 =
           if #package source = "HOL" then
             HolbuildDependencies.extract_global_cached_with_hash
               {source_path = #source_path source, source_hash = source_hash}
@@ -44,7 +42,7 @@ fun deps_of (node as {source, deps, ...} : node) =
               {cache_path = dependency_cache_path source,
                source_path = #source_path source,
                source_hash = source_hash}
-      in deps := SOME value; value end
+      in deps := SOME value0; value0 end
 fun logical_name node = #logical_name (source_of node)
 fun package node = #package (source_of node)
 fun relative_path node = #relative_path (source_of node)
@@ -63,6 +61,10 @@ fun has_logical_name name node = logical_name node = name
 fun nodes_named nodes name = List.filter (has_logical_name name) nodes
 
 type name_index = (string * node list) Vector.vector
+
+type t = {nodes : node list, name_index : name_index}
+
+fun nodes ({nodes, ...} : t) = nodes
 
 fun split_pairs xs =
   let
@@ -129,6 +131,8 @@ fun indexed_nodes_named index name =
   in
     search 0 (Vector.length index - 1)
   end
+
+fun lookup ({name_index, ...} : t) = indexed_nodes_named name_index
 
 type key_index = (string * int) Vector.vector
 
@@ -245,23 +249,8 @@ fun direct_project_deps_with lookup nodes node =
     unique_nodes (List.filter not_self (interface_dep @ named_deps))
   end
 
-fun direct_project_deps nodes node =
-  direct_project_deps_with (nodes_named nodes) nodes node
-
-fun direct_external_theories_with lookup node = []
-
-fun direct_external_theories nodes node =
-  direct_external_theories_with (nodes_named nodes) node
-
-fun direct_external_libs_with lookup node = []
-
-fun direct_external_libs nodes node =
-  direct_external_libs_with (nodes_named nodes) node
-
-fun direct_unresolved_loads_with lookup node = []
-
-fun direct_unresolved_loads nodes node =
-  direct_unresolved_loads_with (nodes_named nodes) node
+fun direct_project_deps plan node =
+  direct_project_deps_with (lookup plan) (nodes plan) node
 
 fun direct_unresolved_declared_deps_with lookup node =
   let
@@ -271,17 +260,11 @@ fun direct_unresolved_declared_deps_with lookup node =
       (declared_dependency_names node @ declared_load_names node)
   end
 
-fun direct_unresolved_declared_deps nodes node =
-  direct_unresolved_declared_deps_with (nodes_named nodes) node
+fun direct_unresolved_declared_deps plan node =
+  direct_unresolved_declared_deps_with (lookup plan) node
 
-fun reject_unresolved_loads_with lookup plan =
+fun reject_unresolved_declared_deps_with lookup plan =
   let
-    fun check_loads node =
-      case direct_unresolved_loads_with lookup node of
-          [] => ()
-        | load :: _ =>
-            raise Error ("unresolved load " ^ load ^ " in " ^
-                         package node ^ ":" ^ relative_path node)
     fun check_declared_deps node =
       case direct_unresolved_declared_deps_with lookup node of
           [] => ()
@@ -289,11 +272,11 @@ fun reject_unresolved_loads_with lookup plan =
             raise Error ("unresolved action dependency " ^ dep ^ " in " ^
                          package node ^ ":" ^ relative_path node)
   in
-    List.app (fn node => (check_loads node; check_declared_deps node)) plan
+    List.app check_declared_deps plan
   end
 
-fun reject_unresolved_loads nodes plan =
-  reject_unresolved_loads_with (nodes_named nodes) plan
+fun reject_unresolved_declared_deps plan phase_nodes =
+  reject_unresolved_declared_deps_with (lookup plan) phase_nodes
 
 fun reject_source_uses plan =
   let
@@ -337,25 +320,15 @@ fun topo_sort_with lookup nodes roots =
     val order = List.foldl (fn (root, acc) => visit [] root acc) [] roots
     val plan = rev order
   in
-    reject_unresolved_loads_with lookup plan;
+    reject_unresolved_declared_deps_with lookup plan;
     reject_source_uses plan;
     plan
   end
 
-fun topo_sort nodes roots =
-  topo_sort_with (nodes_named nodes) nodes roots
+fun topo_sort plan roots =
+  topo_sort_with (lookup plan) (nodes plan) roots
 
-fun transitive_project_deps nodes node = topo_sort nodes (direct_project_deps nodes node)
-
-fun closure_external_theories nodes node =
-  unique_strings
-    (List.concat (map (direct_external_theories nodes)
-       (transitive_project_deps nodes node @ [node])))
-
-fun closure_external_libs nodes node =
-  unique_strings
-    (List.concat (map (direct_external_libs nodes)
-       (transitive_project_deps nodes node @ [node])))
+fun transitive_project_deps plan node = topo_sort plan (direct_project_deps plan node)
 
 fun make_node source =
   {source = source,
@@ -376,7 +349,7 @@ fun plan holdir sources targets =
                      | matches => matches)
                  targets)
   in
-    topo_sort_with lookup nodes roots
+    {nodes = topo_sort_with lookup nodes roots, name_index = index}
   end
 
 fun kind_name source = HolbuildSourceIndex.kind_string (#kind source)
@@ -446,9 +419,6 @@ fun extra_dep_lines label base decls =
     List.concat (map line decls)
   end
 
-fun external_key_lookup toolchain_key =
-  fn _ => fn _ => fn _ => toolchain_key
-
 fun bool_text true = "true"
   | bool_text false = "false"
 
@@ -459,19 +429,13 @@ fun lookup_key keys dep =
       SOME (_, input_key) => input_key
     | NONE => raise Error ("missing action key for dependency: " ^ logical_name dep)
 
-fun action_text_with lookup config_lines_for_node toolchain_key external_key nodes keys node =
+fun action_text_with lookup config_lines_for_node toolchain_key nodes keys node =
   let
     val source = source_of node
     val source_hash = source_hash_of node
     val project_deps =
       map (fn dep => package dep ^ ":" ^ logical_name dep ^ "@" ^ lookup_key keys dep)
         (direct_project_deps_with lookup nodes node)
-    val external_deps =
-      map (fn name => "HOL:" ^ name ^ "@" ^ external_key node "theory" name)
-        (direct_external_theories_with lookup node)
-    val external_libs =
-      map (fn name => "HOLLIB:" ^ name ^ "@" ^ external_key node "lib" name)
-        (direct_external_libs_with lookup node)
     val policy = #policy source
     val declared_deps = HolbuildProject.action_deps policy
     val declared_loads = HolbuildProject.action_loads policy
@@ -506,56 +470,33 @@ fun action_text_with lookup config_lines_for_node toolchain_key external_key nod
       declared_load_lines @
       manifest_extra_dep_lines @
       source_extra_dep_lines @
-      map (fn dep => "dep=" ^ dep) (project_deps @ external_deps @ external_libs)
+      map (fn dep => "dep=" ^ dep) project_deps
   in
     String.concatWith "\n" lines ^ "\n"
   end
 
-fun action_text config_lines_for_node toolchain_key nodes keys node =
-  let val external_key = external_key_lookup toolchain_key
-  in action_text_with (nodes_named nodes) config_lines_for_node toolchain_key external_key nodes keys node end
+fun action_text config_lines_for_node toolchain_key plan keys node =
+  action_text_with (lookup plan) config_lines_for_node toolchain_key (nodes plan) keys node
 
-fun add_input_key_with lookup config_lines_for_node toolchain_key external_key nodes (node, keys) =
-  (key node, hash_text (action_text_with lookup config_lines_for_node toolchain_key external_key nodes keys node)) :: keys
+fun add_input_key_with lookup config_lines_for_node toolchain_key nodes (node, keys) =
+  (key node, hash_text (action_text_with lookup config_lines_for_node toolchain_key nodes keys node)) :: keys
 
-fun add_input_key config_lines_for_node toolchain_key nodes (node, keys) =
-  let val external_key = external_key_lookup toolchain_key
-  in add_input_key_with (nodes_named nodes) config_lines_for_node toolchain_key external_key nodes (node, keys) end
+fun add_input_key config_lines_for_node toolchain_key plan (node, keys) =
+  add_input_key_with (lookup plan) config_lines_for_node toolchain_key (nodes plan) (node, keys)
 
 fun compute_input_keys_with lookup config_lines_for_node toolchain_key nodes =
-  let
-    val external_key = external_key_lookup toolchain_key
-  in
-    List.foldl
-      (fn (node, keys) =>
-          add_input_key_with lookup config_lines_for_node toolchain_key external_key nodes (node, keys))
-      [] nodes
-  end
+  List.foldl
+    (fn (node, keys) => add_input_key_with lookup config_lines_for_node toolchain_key nodes (node, keys))
+    [] nodes
 
 fun input_keys_with lookup config_lines_for_node toolchain_key nodes =
   HolbuildToolchain.time_phase "build.keys"
     (fn () => compute_input_keys_with lookup config_lines_for_node toolchain_key nodes)
 
-fun input_keys config_lines_for_node toolchain_key nodes =
-  input_keys_with (nodes_named nodes) config_lines_for_node toolchain_key nodes
+fun input_keys config_lines_for_node toolchain_key plan =
+  input_keys_with (lookup plan) config_lines_for_node toolchain_key (nodes plan)
 
 fun input_key_for keys node = lookup_key keys node
-
-fun print_external_deps_with lookup node =
-  case direct_external_theories_with lookup node of
-      [] => ()
-    | deps => print ("  external theories: " ^ String.concatWith ", " deps ^ "\n")
-
-fun print_external_deps nodes node =
-  print_external_deps_with (nodes_named nodes) node
-
-fun print_external_libs_with lookup node =
-  case direct_external_libs_with lookup node of
-      [] => ()
-    | deps => print ("  external libs: " ^ String.concatWith ", " deps ^ "\n")
-
-fun print_external_libs nodes node =
-  print_external_libs_with (nodes_named nodes) node
 
 fun print_project_deps_with lookup nodes node =
   case direct_project_deps_with lookup nodes node of
@@ -563,22 +504,21 @@ fun print_project_deps_with lookup nodes node =
     | deps => print ("  project deps: " ^
                      String.concatWith ", " (map logical_name deps) ^ "\n")
 
-fun print_project_deps nodes node =
-  print_project_deps_with (nodes_named nodes) nodes node
+fun print_project_deps plan node =
+  print_project_deps_with (lookup plan) (nodes plan) node
 
 fun describe_node_with lookup nodes keys node =
   (HolbuildSourceIndex.describe_source (source_of node);
    print ("  input_key: " ^ input_key_for keys node ^ "\n");
-   print_project_deps_with lookup nodes node;
-   print_external_deps_with lookup node;
-   print_external_libs_with lookup node)
+   print_project_deps_with lookup nodes node)
 
-fun describe_node nodes keys node =
-  describe_node_with (nodes_named nodes) nodes keys node
+fun describe_node plan keys node =
+  describe_node_with (lookup plan) (nodes plan) keys node
 
-fun describe config_lines_for_node toolchain_key nodes =
+fun describe config_lines_for_node toolchain_key plan =
   let
-    val lookup = indexed_nodes_named (build_name_index nodes)
+    val lookup = lookup plan
+    val nodes = nodes plan
     val keys = input_keys_with lookup config_lines_for_node toolchain_key nodes
   in
     List.app (describe_node_with lookup nodes keys) nodes

@@ -298,18 +298,21 @@ always_reexecute = true
 # impure = true is shorthand for no cache and always re-execute
 ```
 
-`holbuild` uses HOL's `Holdep_tokens.reader_deps` lexer to find source-level
-logical dependencies, then resolves those names through the holbuild package
-index. It does not use Holmake `INCLUDES`, `$HOLDIR/sigobj`, or prebuilt object
-files for source graph semantics. Same-package `.sig`/`.sml` pairs are treated as
-one module interface/implementation pair. `deps` and `loads` name additional
-explicit logical/loadable predecessors when source-level imports are insufficient
-or intentionally absent; every listed name must resolve to the bare bootstrap
-environment or a source in the manifest graph. `extra_deps` are
-package-root-relative filesystem dependencies, such as files, directories, or
-simple globs, whose expanded contents are hashed into the action key. Source
-files may also declare source-file-relative extra dependencies with a static
-literal annotation:
+`holbuild` uses HOL's `HOLSource.fileToReader` plus
+`Holdep_tokens.reader_deps` to find source-level logical dependencies, then
+resolves those names through the holbuild package index. It does not use Holmake
+`INCLUDES`, `$HOLDIR/sigobj`, prebuilt object files, or holbuild-owned parsing of
+SML/HOL syntax for source graph semantics. Same-package `.sig`/`.sml` pairs are
+treated as one module interface/implementation pair. `deps` and `loads` name
+additional explicit logical/loadable predecessors when source-level imports are
+insufficient or intentionally absent; every listed name must resolve to the bare
+bootstrap environment or a source in the manifest graph. Source-level
+`use "file"` is rejected because it bypasses the resolved package graph. The only
+source text annotation interpreted by holbuild is static literal
+`holbuild_extra_deps [...]`. Manifest `extra_deps` are package-root-relative
+filesystem dependencies, such as files, directories, or simple globs, whose
+expanded contents are hashed into the action key. Source files may also declare
+source-file-relative extra dependencies:
 
 ```sml
 val () = holbuild_extra_deps ["../data/table.txt"];

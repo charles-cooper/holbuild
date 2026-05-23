@@ -22,6 +22,27 @@ Fields per dependency:
 Ordinary dependencies need a local `path` or `.holconfig.toml` override and must
 resolve to a manifest. HOL itself is the implicit exception described below.
 
+## Source dependency extraction
+
+Holbuild uses HOL's own source reader and dependency lexer:
+
+```sml
+HOLSource.fileToReader
+Holdep_tokens.reader_deps
+```
+
+The returned logical mentions are resolved through holbuild's package index.
+Holbuild does not use Holmake `INCLUDES`, `$HOLDIR/sigobj`, prebuilt objects, or
+holbuild-owned parsing of SML/HOL imports as source graph semantics. In
+particular, holbuild does not scan `load`, `open`, script headers, or qualified
+references itself.
+
+Two holbuild-owned source policy annotations are handled separately:
+
+- static literal `holbuild_extra_deps [...]` declares source-file-relative
+  filesystem inputs to hash and stage;
+- source-level `use "file"` is rejected because it bypasses the package graph.
+
 ## Implicit HOL checkout
 
 HOL itself is not an ordinary manifest dependency that users must declare. Every
@@ -39,16 +60,17 @@ package. The implicit package exposes:
 name = "HOL"
 
 [build]
-members = ["src", "examples"]
+members = ["src", "examples/algorithms", "examples/category", "..."]
 # no roots
-# default excludes: selftests, developer throwaway directories,
-# unselected stdknl/tracing/PolyML variants, and duplicate example families
+# default excludes: selftests/tests, unselected stdknl/tracing/PolyML variants,
+# and known duplicate variants such as l3-machine-code/monadic-arm
 ```
 
-The implicit package defaults to the stdknl/no-tracing/PolyML source view and
-excludes selftests, developer throwaway directories, and duplicate example
-families by default. Those excluded examples can later be modeled as separate
-packages with their own namespaces when downstream projects need them.
+The implicit package defaults to the stdknl/no-tracing/PolyML source view, all of
+`src`, and a curated set of mature examples. Including an example member only
+makes it available for dependency resolution; it is not built unless requested or
+reached by dependencies. Other examples can later be modeled as separate packages
+with their own namespaces when downstream projects need them.
 
 The bootstrap boundary is `hol.state0`, used through `hol --bare`. The bare heap
 provides the primitive theory base (`minTheory`, `boolTheory`) and the SML modules

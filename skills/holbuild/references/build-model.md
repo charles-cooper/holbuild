@@ -8,11 +8,11 @@ Before source discovery, holbuild runs stale `[[generate]]` steps in dependency 
 
 holbuild infers source dependencies from the resolved project graph:
 
-1. **Holdep token dependencies** — holbuild runs `Holdep_tokens.reader_deps` and resolves mentioned logical names through the package index. Holbuild does not use Holmake `INCLUDES`, `$HOLDIR/sigobj`, prebuilt object files, `open` scanning, or cross-package `.sig` guesses.
+1. **Holdep token dependencies** — holbuild runs `HOLSource.fileToReader` plus `Holdep_tokens.reader_deps` and resolves mentioned logical names through the package index. Holbuild does not use Holmake `INCLUDES`, `$HOLDIR/sigobj`, prebuilt object files, custom `load`/`open` scanning, or cross-package `.sig` guesses.
 2. **Action `deps`** — explicit logical dependencies declared in `[actions.*]`
 3. **Action `loads`** — explicit loadable module stems declared in `[actions.*]`
 
-Unresolved `load` directives or `deps` entries → build error.
+Unresolved action `loads` or `deps` entries → build error.
 
 ## Source `use "file"` is rejected
 

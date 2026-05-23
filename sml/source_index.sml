@@ -20,6 +20,7 @@ type source =
     logical_name : string,
     source_path : string,
     relative_path : string,
+    artifact_root : string,
     artifacts : artifacts,
     policy : HolbuildProject.action_policy,
     bare : bool }
@@ -92,12 +93,13 @@ fun contains_substring needle haystack =
 
 fun source_bare_marker path = contains_substring "[bare]" (read_prefix path 2048)
 
-fun make_source package policies kind logical_name source_path relative_path artifacts =
+fun make_source package artifact_root policies kind logical_name source_path relative_path artifacts =
   {package = package,
    kind = kind,
    logical_name = logical_name,
    source_path = source_path,
    relative_path = relative_path,
+   artifact_root = artifact_root,
    artifacts = artifacts,
    policy = HolbuildProject.action_policy_for policies logical_name,
    bare = source_bare_marker source_path}
@@ -117,21 +119,21 @@ fun classify package source_root artifact_root policies abs_path =
         val theory = drop_suffix "Script.sml" file ^ "Theory"
       in
         if package = "HOL" andalso HolbuildBootstrap.is_bare_theory theory then NONE
-        else SOME (make_source package policies TheoryScript theory abs_path rel
+        else SOME (make_source package artifact_root policies TheoryScript theory abs_path rel
                             (theory_artifacts artifact_root rel theory))
       end
     else if has_suffix ".sml" file then
       let val logical = drop_suffix ".sml" file
       in
         if package = "HOL" andalso HolbuildBootstrap.is_bare_module logical then NONE
-        else SOME (make_source package policies Sml logical abs_path rel
+        else SOME (make_source package artifact_root policies Sml logical abs_path rel
                            (sml_artifacts artifact_root rel))
       end
     else if has_suffix ".sig" file then
       let val logical = drop_suffix ".sig" file
       in
         if package = "HOL" andalso HolbuildBootstrap.is_bare_module logical then NONE
-        else SOME (make_source package policies Sig logical abs_path rel
+        else SOME (make_source package artifact_root policies Sig logical abs_path rel
                            (sig_artifacts artifact_root rel))
       end
     else NONE
@@ -174,15 +176,11 @@ fun list_dir path =
 
 fun list_dir_if_readable path = list_dir path handle Error _ => []
 
-fun has_source_path path sources =
-  let val path = normalize_path path
-  in List.exists (fn source : source => normalize_path (#source_path source) = path) sources end
-
 fun scan_file package source_root artifact_root policies excludes path acc =
   if excluded excludes (relative_path source_root path) then acc
   else case classify package source_root artifact_root policies path of
       NONE => acc
-    | SOME source => if has_source_path path acc then acc else source :: acc
+    | SOME source => source :: acc
 
 fun scan_dir package source_root artifact_root policies excludes path acc =
   let
@@ -207,38 +205,75 @@ fun compare_source (a : source, b : source) =
       EQUAL => String.compare(#relative_path a, #relative_path b)
     | order => order
 
-fun compatible_same_name (a : source) (b : source) =
-  #package a = #package b andalso
-  (case (#kind a, #kind b) of
-       (Sml, Sig) => true
-     | (Sig, Sml) => true
-     | _ => false)
+fun compare_logical (a : source, b : source) =
+  case String.compare(#logical_name a, #logical_name b) of
+      EQUAL => compare_source(a, b)
+    | order => order
 
-fun by_logical sources =
+fun compatible_same_name sources =
+  case sources of
+      [a, b] =>
+        #package a = #package b andalso
+        ((#kind a = Sml andalso #kind b = Sig) orelse
+         (#kind a = Sig andalso #kind b = Sml))
+    | _ => false
+
+fun duplicate_logical_error logical sources =
+  raise Error ("duplicate logical name " ^ logical ^ ": " ^
+               String.concatWith " and "
+                 (map (fn source => #package source ^ ":" ^ #relative_path source) sources))
+
+fun validate_logical_uniqueness sources =
   let
-    fun conflicts source other =
-      #logical_name source = #logical_name other andalso
-      not (compatible_same_name source other)
-    fun insert (source, seen) =
-      case List.find (conflicts source) seen of
-          NONE => source :: seen
-        | SOME other =>
-            raise Error ("duplicate logical name " ^ #logical_name source ^ ": " ^
-                         #package other ^ ":" ^ #relative_path other ^ " and " ^
-                         #package source ^ ":" ^ #relative_path source)
+    fun finish_group logical group =
+      case group of
+          [] => ()
+        | [_] => ()
+        | _ => if compatible_same_name group then () else duplicate_logical_error logical (rev group)
+    fun loop current group rest =
+      case rest of
+          [] => finish_group current group
+        | source :: sources' =>
+            if #logical_name source = current then loop current (source :: group) sources'
+            else (finish_group current group; loop (#logical_name source) [source] sources')
   in
-    ignore (List.foldl insert [] sources);
-    sources
+    case sources of
+        [] => ()
+      | source :: rest => loop (#logical_name source) [source] rest
   end
 
-fun insert_sorted source sources =
-  case sources of
-      [] => [source]
-    | x :: xs =>
-        if compare_source(source, x) = LESS then source :: sources
-        else x :: insert_sorted source xs
+fun split_sources sources =
+  let
+    fun loop left right rest =
+      case rest of
+          [] => (left, right)
+        | [x] => (x :: left, right)
+        | x :: y :: xs => loop (x :: left) (y :: right) xs
+  in
+    loop [] [] sources
+  end
 
-fun sort_sources sources = List.foldl (fn (source, acc) => insert_sorted source acc) [] sources
+fun merge_sources compare left right =
+  case (left, right) of
+      ([], _) => right
+    | (_, []) => left
+    | (x :: xs, y :: ys) =>
+        if compare(x, y) = GREATER then y :: merge_sources compare left ys
+        else x :: merge_sources compare xs right
+
+fun sort_by compare sources =
+  case sources of
+      [] => []
+    | [_] => sources
+    | _ =>
+        let val (left, right) = split_sources sources
+        in merge_sources compare (sort_by compare left) (sort_by compare right) end
+
+fun sort_sources sources = sort_by compare_source sources
+
+fun by_logical sources =
+  let val logical_sorted = sort_by compare_logical sources
+  in validate_logical_uniqueness logical_sorted; sources end
 
 fun validate_action_policies package_name policies sources =
   if package_name = "HOL" then () else
