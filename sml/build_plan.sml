@@ -201,7 +201,7 @@ fun standard_env_dependency_names node =
 fun direct_dependency_names node =
   unique_strings
     (List.filter (fn name => not (provided_for node name))
-       (standard_env_dependency_names node @ declared_dependency_names node @ declared_load_names node @ #holdep_mentions (deps_of node)))
+       (standard_env_dependency_names node @ declared_dependency_names node @ declared_load_names node @ #holmake_deps (source_of node) @ #holdep_mentions (deps_of node)))
 
 fun unique_nodes nodes =
   let

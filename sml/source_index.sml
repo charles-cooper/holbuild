@@ -27,7 +27,8 @@ type source =
     artifact_root : string,
     artifacts : artifacts,
     policy : HolbuildProject.action_policy,
-    bare : bool }
+    bare : bool,
+    holmake_deps : string list }
 
 type t = source list
 
@@ -106,7 +107,8 @@ fun make_source package artifact_root policies kind logical_name source_path rel
    artifact_root = artifact_root,
    artifacts = artifacts,
    policy = HolbuildProject.action_policy_for policies logical_name,
-   bare = source_bare_marker source_path}
+   bare = source_bare_marker source_path,
+   holmake_deps = []}
 
 fun generated_theory_artifact file =
   has_suffix "Theory.sml" file orelse
@@ -280,6 +282,18 @@ fun sort_by compare sources =
 
 fun sort_sources sources = sort_by compare_source sources
 
+fun with_holmake_deps deps (source : source) =
+  {package = #package source,
+   kind = #kind source,
+   logical_name = #logical_name source,
+   source_path = #source_path source,
+   relative_path = #relative_path source,
+   artifact_root = #artifact_root source,
+   artifacts = #artifacts source,
+   policy = #policy source,
+   bare = #bare source,
+   holmake_deps = deps}
+
 fun validate_unique_source_paths sources =
   let
     fun source_id source = normalize_path (#source_path source)
@@ -339,6 +353,68 @@ fun scan_member name source_root artifact_root policies excludes (member, acc) =
   else if is_implicit_hol_package name then acc
   else raise Error ("member does not exist: " ^ member)
 
+fun strip_object_suffix file =
+  if has_suffix ".uo" file then SOME (drop_suffix ".uo" file)
+  else if has_suffix ".ui" file then SOME (drop_suffix ".ui" file)
+  else NONE
+
+fun source_target_name (source : source) =
+  case #kind source of
+      Sig => #logical_name source ^ ".ui"
+    | _ => #logical_name source ^ ".uo"
+
+fun source_dir (source : source) = Path.dir (#source_path source)
+
+fun same_dir a b = normalize_path a = normalize_path b
+
+fun source_logical_in_package package_name sources logical =
+  List.exists (fn source => #package source = package_name andalso #logical_name source = logical) sources
+
+fun dep_logical dep = strip_object_suffix (filename dep)
+
+fun holmake_rule_info holmakefile =
+  let
+    val dir = Path.dir holmakefile
+    val old = FS.getDir ()
+    fun restore () = FS.chDir old handle OS.SysErr _ => ()
+    fun die msg = raise Error msg
+    val _ = FS.chDir dir
+    val result =
+      (SOME (ReadHMF.diagread {warn = fn _ => (), info = fn _ => (), die = die}
+                            holmakefile (Holmake_types.base_environment ()))
+       handle _ => NONE)
+  in
+    restore (); result
+  end
+  handle e => (raise e)
+
+fun holmake_deps_for_source sources source =
+  let
+    val hmf = Path.concat(source_dir source, "Holmakefile")
+  in
+    if not (is_implicit_hol_package (#package source)) orelse not (is_readable hmf) then []
+    else
+      case holmake_rule_info hmf of
+          NONE => []
+        | SOME (env, ruledb, _) =>
+            (case Holmake_types.get_rule_info ruledb env (source_target_name source) of
+                 NONE => []
+               | SOME {dependencies, ...} =>
+                   sort_by String.compare
+                     (List.mapPartial
+                        (fn dep =>
+                            case dep_logical dep of
+                                NONE => NONE
+                              | SOME logical =>
+                                  if logical = #logical_name source then NONE
+                                  else if source_logical_in_package (#package source) sources logical then SOME logical
+                                  else NONE)
+                        dependencies))
+  end
+
+fun add_holmake_deps sources =
+  map (fn source => with_holmake_deps (holmake_deps_for_source sources source) source) sources
+
 fun discover_package package acc =
   let
     val name = HolbuildProject.package_name package
@@ -364,13 +440,18 @@ fun discover_package package acc =
   end
 
 fun discover (project : HolbuildProject.t) =
-  by_logical
-    (by_source_path
-      (sort_sources
-       (List.foldl
-          (fn (package, acc) => discover_package package acc)
-          []
-          (HolbuildProject.packages project))))
+  let
+    val sources =
+      sort_sources
+        (List.foldl
+           (fn (package, acc) => discover_package package acc)
+           []
+           (HolbuildProject.packages project))
+    val _ = by_source_path sources
+    val _ = by_logical sources
+  in
+    add_holmake_deps sources
+  end
 
 fun kind_string kind =
   case kind of
@@ -383,14 +464,15 @@ fun print_list label values =
       [] => ()
     | _ => print ("  " ^ label ^ ": " ^ String.concatWith ", " values ^ "\n")
 
-fun describe_source ({package, kind, logical_name, relative_path, bare,
+fun describe_source ({package, kind, logical_name, relative_path, bare, holmake_deps,
                       artifacts = {generated, objects, theory_data}, ...} : source) =
   (print (logical_name ^ " (" ^ kind_string kind ^ ", package " ^ package ^ ")\n");
    print ("  source: " ^ package ^ ":" ^ relative_path ^ "\n");
    if bare then print "  bare: true\n" else ();
    print_list "generated" generated;
    print_list "objects" objects;
-   print_list "theory_data" theory_data)
+   print_list "theory_data" theory_data;
+   print_list "holmake deps" holmake_deps)
 
 fun describe sources = List.app describe_source sources
 
