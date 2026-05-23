@@ -84,6 +84,8 @@ fun holbuild_extra_deps (_ : string list) = ()
 val _ = holbuild_extra_deps ["../data/message.txt"]
 val input = TextIO.openIn "../data/message.txt"
 val message = TextIO.inputAll input before TextIO.closeIn input
+val _ = ignore (OS.Process.getEnv "HOLBUILD_BASIS_DEP_SMOKE")
+val _ = ignore (Time.toMilliseconds (Time.fromReal 0.0))
 val _ = if size message > 0 then () else raise Fail "empty message"
 open HolKernel Parse boolLib bossLib;
 val _ = new_theory "A";

@@ -183,7 +183,7 @@ fun declared_dependency_names node =
 fun declared_load_names node =
   HolbuildProject.action_loads (#policy (source_of node))
 
-fun bootstrap_provided name = HolbuildBootstrap.is_bare_logical name
+fun bootstrap_provided name = HolbuildBootstrap.is_bootstrap_dependency name
 
 fun provided_for node name = bootstrap_provided name
 

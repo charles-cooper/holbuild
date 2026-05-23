@@ -622,11 +622,29 @@ val standard_modules =
     "wlogLib"
   ]
 val bare_theories = ["minTheory", "boolTheory"]
+
+(* Names from the SML Basis Library and Poly/ML runtime that may appear in
+   Holdep token mentions but are provided by the bare Poly/ML/HOL bootstrap
+   environment rather than by holbuild source nodes. *)
+val basis_modules =
+  ["Array", "Array2", "BinIO", "Bool", "Byte", "Char", "CharArray",
+   "CharVector", "CommandLine", "Date", "FixedInt", "General", "IEEEReal",
+   "Int", "IntInf", "IO", "LargeInt", "LargeReal", "LargeWord", "List",
+   "ListPair", "Math", "Option", "OS", "PackRealBig", "PackRealLittle",
+   "PackWordBig", "PackWordLittle", "Position", "Real", "String",
+   "StringCvt", "Substring", "TextIO", "Time", "Timer", "Vector", "Word",
+   "Word8", "Word8Array", "Word8ArraySlice", "Word8Vector",
+   "Word8VectorSlice"]
+
+val polyml_modules =
+  ["Bootstrap", "Foreign", "Thread", "Universal", "PolyML"]
+
 fun member x xs = List.exists (fn y => x = y) xs
 fun is_bare_module name = member name bare_modules
 fun is_standard_module name = member name standard_modules
 fun is_bare_theory name = member name bare_theories
 fun is_standard_theory name = is_bare_theory name orelse (size name > 6 andalso String.isSuffix "Theory" name andalso member name standard_modules)
 fun is_bare_logical name = is_bare_module name orelse is_bare_theory name
+fun is_bootstrap_dependency name = is_bare_logical name orelse member name basis_modules orelse member name polyml_modules
 fun is_standard_logical name = is_standard_module name orelse is_standard_theory name
 end
