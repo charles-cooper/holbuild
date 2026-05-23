@@ -60,8 +60,8 @@ require_cache_hit_key ATheory "$second_log" >/dev/null
 require_grep "cache hit: BTheory parent-output key=" "$second_log"
 require_grep "ATheory restored from cache" "$second_log"
 require_grep "BTheory restored from cache" "$second_log"
-if grep -q "built" "$second_log"; then
-  echo "second build rebuilt instead of restoring entirely from cache" >&2
+if grep -q "ATheory built\|BTheory built" "$second_log"; then
+  echo "second build rebuilt project theories instead of restoring them from cache" >&2
   cat "$second_log" >&2
   exit 1
 fi

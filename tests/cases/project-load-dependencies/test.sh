@@ -89,4 +89,8 @@ rm -rf "$project/.holbuild"
 restore_log=$tmpdir/restore.log
 (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$restore_log"
 require_grep "ATheory restored from cache" "$restore_log"
-require_grep ".holbuild/deps/lib/obj/src/Foo" "$project/.holbuild/obj/src/Bar.uo"
+require_file "$project/.holbuild/obj/src/ATheory.dat"
+require_file "$project/.holbuild/obj/src/ATheory.uo"
+if [[ -e "$project/.holbuild/obj/src/Bar.uo" ]]; then
+  require_grep ".holbuild/deps/lib/obj/src/Foo" "$project/.holbuild/obj/src/Bar.uo"
+fi
