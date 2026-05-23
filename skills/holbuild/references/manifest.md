@@ -62,10 +62,13 @@ Each ordinary dependency must resolve to a manifest:
 
 HOL itself is implicit: every project has an implicit HOL source package selected
 by `--holdir`, `HOLBUILD_HOLDIR`, or `HOLDIR`. That package is drawn from `src`
-and `examples`, uses no default roots, selects the stdknl/no-tracing/PolyML
-source view, excludes selftests/developer throwaway directories/duplicate example
-families, and treats `hol.state0`/`--bare` as the bootstrap boundary. Do not
-declare HOL with `[dependencies.HOLDIR]` or `[dependencies.HOL]`.
+plus a curated set of mature examples, uses no default roots, selects the
+stdknl/no-tracing/PolyML source view, excludes selftests/developer throwaway
+directories/duplicate example families, and treats `hol.state0`/`--bare` as the
+bootstrap boundary. For this implicit package only, holbuild imports explicit
+local Holmakefile `.uo`/`.ui` rule prerequisites as source dependencies resolved
+through the HOL package index. Do not declare HOL with `[dependencies.HOLDIR]` or
+`[dependencies.HOL]`.
 
 Dependency `name` in `[dependencies.X]` must match the `project.name` in the resolved manifest. Mismatch is an error.
 
@@ -91,7 +94,7 @@ Recognized source files:
 - `*.sml` → SML module, logical name = filename minus `.sml`
 - `*.sig` → signature, logical name = filename minus `.sig`
 
-A `.sig`/`.sml` pair with the same base name in the same package is one SML module interface/implementation pair, not a cross-package conflict.
+A `.sig`/`.sml` pair with the same base name in the same package is one SML module interface/implementation pair, not a cross-package conflict. The same physical source path must not be included by multiple packages or package members.
 
 ## HOLSource headers
 

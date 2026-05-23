@@ -8,9 +8,10 @@ Before source discovery, holbuild runs stale `[[generate]]` steps in dependency 
 
 holbuild infers source dependencies from the resolved project graph:
 
-1. **Holdep token dependencies** — holbuild runs `HOLSource.fileToReader` plus `Holdep_tokens.reader_deps` and resolves mentioned logical names through the package index. Holbuild does not use Holmake `INCLUDES`, `$HOLDIR/sigobj`, prebuilt object files, custom `load`/`open` scanning, or cross-package `.sig` guesses.
-2. **Action `deps`** — explicit logical dependencies declared in `[actions.*]`
-3. **Action `loads`** — explicit loadable module stems declared in `[actions.*]`
+1. **Holdep token dependencies** — holbuild runs `HOLSource.fileToReader` plus `Holdep_tokens.reader_deps` and resolves mentioned logical names through the package index. Ordinary packages do not use Holmake `INCLUDES`, `$HOLDIR/sigobj`, prebuilt object files, custom `load`/`open` scanning, or cross-package `.sig` guesses.
+2. **Implicit-HOL Holmakefile prerequisites** — for the implicit `HOL` package only, explicit local Holmakefile `.uo`/`.ui` rule prerequisites are imported as source metadata and resolved through the HOL package index. Unresolved object prerequisites are ignored rather than loaded from `sigobj` or prebuilt object directories.
+3. **Action `deps`** — explicit logical dependencies declared in `[actions.*]`
+4. **Action `loads`** — explicit loadable module stems declared in `[actions.*]`
 
 Unresolved action `loads` or `deps` entries → build error.
 
@@ -81,7 +82,7 @@ locks/                          # publish + GC locks
 
 Cache publish: after a source build, theory artifacts (sig, sml, dat) are stored as blobs. New HOL `Theory.sml` files are relocatable and copied unchanged; old HOL `Theory.sml` files are rebased to the local adjacent `.dat` path before publishing.
 
-Cache restore: on action-key or parent-output key match, blobs are materialized into local `.holbuild/`, `HOLFileSys` remap copies are created, and `.uo/.ui` load manifests are written.
+Cache restore: on source/dependency key, parent-output key, or path-dependent parent-output key match, blobs are materialized into local `.holbuild/`, `HOLFileSys` remap copies are created, and `.uo/.ui` load manifests are written.
 
 **A bad cache hit is worse than a missed cache hit.** Validation:
 - Action key must match

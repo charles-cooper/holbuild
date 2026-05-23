@@ -24,7 +24,7 @@ resolve to a manifest. HOL itself is the implicit exception described below.
 
 ## Source dependency extraction
 
-Holbuild uses HOL's own source reader and dependency lexer:
+For ordinary packages, holbuild uses HOL's own source reader and dependency lexer:
 
 ```sml
 HOLSource.fileToReader
@@ -33,9 +33,16 @@ Holdep_tokens.reader_deps
 
 The returned logical mentions are resolved through holbuild's package index.
 Holbuild does not use Holmake `INCLUDES`, `$HOLDIR/sigobj`, prebuilt objects, or
-holbuild-owned parsing of SML/HOL imports as source graph semantics. In
+holbuild-owned parsing of SML/HOL imports as ordinary source graph semantics. In
 particular, holbuild does not scan `load`, `open`, script headers, or qualified
 references itself.
+
+The implicit `HOL` package has one additional source-metadata input: explicit
+local Holmakefile `.uo`/`.ui` rule prerequisites are read with HOL's Holmakefile
+parser and resolved back to source nodes in the HOL package index. This covers
+HOL SML dependencies, such as functor/signature prerequisites, that Holdep's
+lexer intentionally does not infer. Unresolved object prerequisites are ignored;
+they are not satisfied from `$HOLDIR/sigobj` or prebuilt objects.
 
 Two holbuild-owned source policy annotations are handled separately:
 

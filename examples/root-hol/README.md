@@ -23,7 +23,10 @@ user-facing model. The final model makes normal `$HOLDIR/src` and a curated set
 of mature `$HOLDIR/examples` subtrees visible for dependency resolution while
 selecting the stdknl/no-tracing/PolyML source view and excluding selftests/tests
 and duplicate variants that are not intended as part of the
-default package namespace.
+default package namespace. For this implicit package only, holbuild imports
+explicit local Holmakefile `.uo`/`.ui` rule prerequisites as source dependencies,
+resolved through the HOL package index rather than through Holmake include search
+or prebuilt object directories.
 
 Semantic bootstrap starts from `bin/hol.state0` via `hol --bare`. Bare-provided
 modules/theories are treated as already available. Non-bare scripts receive the

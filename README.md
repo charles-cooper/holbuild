@@ -13,10 +13,10 @@ The current implementation intentionally focuses on:
 - reuses HOL's existing SML TOML parser from `$HOLDIR/tools/Holmake/toml`
 - accepts logical build targets such as `MyTheory`, not object filenames such as `MyTheory.uo`
 - owns source discovery and maps outputs to project-level `.holbuild/`
-- infers theory/module dependencies with HOL's Holdep lexer and resolves names through the project graph
+- infers ordinary theory/module dependencies with HOL's source reader and Holdep lexer, resolving names through the project graph
 - parses transitive dependency manifests and local `.holconfig.toml` path overrides
 - materializes dependency plans under project `.holbuild/deps/<package>/`
-- rejects duplicate logical theory/module names across the resolved graph; a same-package `.sig`/`.sml` pair is one module interface/implementation pair
+- rejects duplicate logical theory/module names across the resolved graph and duplicate physical source paths across package members; a same-package `.sig`/`.sml` pair is one module interface/implementation pair
 - includes Holdep-token project SML/SIG dependencies in build plans and internal load manifests
 - records generated theory ML dependencies from HOL theory metadata in internal load manifests
 - rejects source-level `use "file"` in project build actions; declare/load project modules instead
@@ -27,7 +27,7 @@ The current implementation intentionally focuses on:
 - records local action metadata and skips unchanged actions
 - publishes/restores simple theory semantic artifacts through the global cache
 - includes the configured toolchain/base context in current action keys
-- creates transient local theory checkpoints while building: dependencies-loaded and final-context checkpoints when checkpointing is enabled, plus theorem end-of-proof/context and failed-prefix proof-navigation checkpoints when theorem instrumentation is enabled; successful builds remove them after writing logical artifacts and metadata
+- creates local theory checkpoints while building: dependencies-loaded and final-context checkpoints when checkpointing is enabled, plus theorem end-of-proof/context and failed-prefix proof-navigation checkpoints when theorem instrumentation is enabled; successful builds retain reusable checkpoints for incremental proof replay and GC bounds old checkpoint families
 - runs modern theorem proofs through holbuild's proof IR runtime by default, with tactic parsing/step planning, proof-history execution, checkpoint saves, timeout handling, and diagnostics kept out of generated per-theory source; the legacy HOL `goalFrag` runtime remains available with `--goalfrag`
 - keeps proof instrumentation separate from checkpoint creation; `--skip-checkpoints` avoids theory `.save` files entirely, `--skip-goalfrag` opts out of theorem instrumentation but can still use non-theorem dependency/final-context checkpoints, and `--tactic-timeout SECONDS` controls the root-project per-tactic proof timeout (default 2.5s; `0` disables it)
 - exports explicit project heap targets from `[[heap]]` entries using local SaveState
@@ -237,13 +237,13 @@ exclude = ["worktrees/*"]
 The override changes only where the package is found locally. The package still
 needs its own `holproject.toml` or an explicit shim manifest from the consumer.
 HOL itself is implicit: the selected HOL checkout is chosen by `--holdir`,
-`HOLBUILD_HOLDIR`, or `HOLDIR`, with a source package drawn from `src` and
-`examples` and `hol.state0`/`--bare` as the bootstrap boundary. The default HOL
-package selects the stdknl/no-tracing/PolyML source view and excludes selftests,
-developer throwaway directories, and duplicate example families that should be
-separate packages if needed later. Ordinary projects should not declare HOL as a
-manifest dependency (`[dependencies.HOLDIR]` or `[dependencies.HOL]`) or provide
-shims for HOL example subtrees.
+`HOLBUILD_HOLDIR`, or `HOLDIR`, with a source package drawn from `src` plus a
+curated set of mature examples and `hol.state0`/`--bare` as the bootstrap
+boundary. The default HOL package selects the stdknl/no-tracing/PolyML source
+view and excludes selftests, developer throwaway directories, and duplicate
+example families that should be separate packages if needed later. Ordinary
+projects should not declare HOL as a manifest dependency (`[dependencies.HOLDIR]`
+or `[dependencies.HOL]`) or provide shims for HOL example subtrees.
 
 There is no `.holpath`, ambient `HOLPATH`, or user-facing include-path schema in
 project mode; dependency locations are resolved through manifests plus local
@@ -298,12 +298,15 @@ always_reexecute = true
 # impure = true is shorthand for no cache and always re-execute
 ```
 
-`holbuild` uses HOL's `HOLSource.fileToReader` plus
+For ordinary packages, `holbuild` uses HOL's `HOLSource.fileToReader` plus
 `Holdep_tokens.reader_deps` to find source-level logical dependencies, then
 resolves those names through the holbuild package index. It does not use Holmake
 `INCLUDES`, `$HOLDIR/sigobj`, prebuilt object files, or holbuild-owned parsing of
-SML/HOL syntax for source graph semantics. Same-package `.sig`/`.sml` pairs are
-treated as one module interface/implementation pair. `deps` and `loads` name
+SML/HOL syntax for ordinary source graph semantics. For the implicit `HOL`
+package only, holbuild also reads explicit local Holmakefile `.uo`/`.ui` rule
+prerequisites and resolves them through the same HOL package index; unresolved
+object prerequisites are ignored rather than satisfied from `sigobj` or prebuilt
+objects. Same-package `.sig`/`.sml` pairs are treated as one module interface/implementation pair. `deps` and `loads` name
 additional explicit logical/loadable predecessors when source-level imports are
 insufficient or intentionally absent; every listed name must resolve to the bare
 bootstrap environment or a source in the manifest graph. Source-level
@@ -349,12 +352,13 @@ outputs may be overwritten; use VCS for review/recovery of user-visible
 Incremental correctness is action-key based. `holbuild` does not use
 `hol buildheap` as its default build primitive; it builds contexts directly by
 loading resolved ancestors and, unless `--skip-checkpoints` is set, saving
-transient PolyML checkpoints at syntactic boundaries: dependencies loaded,
+PolyML checkpoints at syntactic boundaries: dependencies loaded,
 AST-derived theorem end-of-proof/context boundaries and failed-prefix
 proof-navigation state for modern `Theorem ... Proof ... QED` declarations when
 goalfrag instrumentation is enabled, and a final post-export context. Successful
-builds remove those checkpoint files after writing artifacts and metadata;
-failed/interrupted builds may leave them as debug breadcrumbs. `--skip-goalfrag`
+builds retain reusable checkpoints for incremental proof replay; failed/interrupted
+builds may leave additional debug breadcrumbs. `holbuild gc` bounds old checkpoint
+families. `--skip-goalfrag`
 removes the theorem proof-navigation checkpoints and tactic timeout path, not the
 non-theorem dependency/final-context checkpoint machinery. If a modern theorem
 fails after some goalfrag steps, the retained failed-prefix checkpoint can be
@@ -366,8 +370,9 @@ not theorem checkpoint boundaries in v1. Explicit `holbuild heap NAME` targets
 build their declared logical objects, load the generated theory modules, and save
 the requested heap with PolyML SaveState.
 
-The optional global cache stores simple theory semantic artifacts by action key:
-`Theory.sig`, `Theory.sml`, and `Theory.dat`. For newer HOL toolchains the cached
+The optional global cache stores simple theory semantic artifacts by source/dependency,
+parent-output, or path-dependent parent-output cache key: `Theory.sig`,
+`Theory.sml`, and `Theory.dat`. For newer HOL toolchains the cached
 `Theory.sml` is the upstream relocatable file; for older toolchains holbuild
 rebases its `.dat` reference when publishing. On a cache hit, holbuild materializes
 artifacts into local `.holbuild/`, writes local load manifests, and validates hashes before dependents use them. It does not restore

@@ -9,7 +9,7 @@ and cacheable builds that never require users to reason about the cache.
 
 - Build targets are logical names, not files: `FooTheory`, not `FooTheory.uo`.
 - `.uo` and `.ui` are internal ML load artifacts. Users must never request them.
-- Project mode is manifest based. `Holmakefile` semantics are not interpreted.
+- Project mode is manifest based. Ordinary packages do not interpret `Holmakefile` semantics; the implicit `HOL` package may import explicit local Holmakefile rule prerequisites as source metadata, resolved through the package index.
 - The source tree is user-owned; build products live under project `.holbuild/`.
 - Target build contexts are produced by holbuild from declared sources,
   predecessor checkpoints, or validated shared dependency state. HOL source builds
@@ -110,14 +110,20 @@ own `.holbuild/` state, or restore a validated equivalent from the global cache.
 It should not require the user to run a separate global HOL rebuild first, and it
 should not silently depend on a stale configured heap from before the pull.
 
-The root-HOL transition should be explicit rather than inferred from existing
-Holmakefiles. The selected HOL checkout is an implicit package with source
-members `src` and `examples` and no default roots. HOL theory/library
-dependencies become normal resolved package nodes with the same action-key and
-cache rules as user packages; they should not be satisfied by loading a
-configured full HOL heap. Any non-HOL dependency subtree that cannot yet be
+The root-HOL transition should be explicit rather than a wholesale translation
+of existing Holmakefiles. The selected HOL checkout is an implicit package with
+source members from `src` plus a curated set of mature examples and no default
+roots. HOL theory/library dependencies become normal resolved package nodes with
+the same action-key and cache rules as user packages; they should not be
+satisfied by loading a configured full HOL heap. For the implicit `HOL` package
+only, holbuild may read local Holmakefile rules to import explicit `.uo`/`.ui`
+prerequisites as additional source dependencies, resolving them back through the
+HOL package index. This covers SML functor/signature/module dependencies that
+HOL's reader dependency lexer intentionally does not see; it does not import
+Holmake `INCLUDES`, `$HOLDIR/sigobj`, or prebuilt object-file semantics into
+ordinary project mode. Any non-HOL dependency subtree that cannot yet be
 expressed by the manifest model should use an explicit shim/adaptor package
-boundary, not Holmakefile interpretation in project mode.
+boundary.
 
 The default manifest must also preserve the duplicate-logical-name invariant:
 root HOL cannot rely on load-path order to distinguish two `FooTheory` or `Foo`
@@ -236,12 +242,15 @@ always_reexecute = true
 impure = true
 ```
 
-Source dependencies are inferred with HOL's existing `HOLSource.fileToReader`
-plus `Holdep_tokens.reader_deps` and resolved through holbuild's package-wide
-logical-name index. Holbuild must not use Holmake `INCLUDES`, `$HOLDIR/sigobj`,
-prebuilt object files, custom `open` scanning, custom `load` scanning, HOLSource
-header parsing, or cross-package guessed `.sig` companions as graph semantics.
-Same-package `.sig`/`.sml` pairs form one module interface/implementation pair.
+For ordinary packages, source dependencies are inferred with HOL's existing
+`HOLSource.fileToReader` plus `Holdep_tokens.reader_deps` and resolved through
+holbuild's package-wide logical-name index. Holbuild must not use Holmake
+`INCLUDES`, `$HOLDIR/sigobj`, prebuilt object files, custom `open` scanning,
+custom `load` scanning, HOLSource header parsing, or cross-package guessed
+`.sig` companions as graph semantics. The implicit `HOL` package has one extra
+source-metadata input: explicit local Holmakefile `.uo`/`.ui` rule prerequisites
+are read with HOL's Holmakefile parser and resolved back to source nodes in the
+HOL package index. Same-package `.sig`/`.sml` pairs form one module interface/implementation pair.
 `deps` and `loads` name additional explicit logical/loadable predecessors when
 source-level imports are insufficient or intentionally absent; every listed
 dependency must resolve to either the bare bootstrap environment or a source in
@@ -340,7 +349,9 @@ Project SML/SIG modules are built from logical predecessor names reported by
 `HOLSource.fileToReader` plus `Holdep_tokens.reader_deps` and resolved in the
 package index. Holbuild does not use Holmake include paths, prebuilt object
 directories, `open` tokens, custom `load` scanning, qualified references, or
-cross-package guessed signature companions as graph semantics.
+cross-package guessed signature companions as graph semantics. The implicit
+`HOL` package additionally imports explicit local Holmakefile rule prerequisites
+as source metadata, again resolving only through the package index.
 Same-package `.sig`/`.sml` pairs are one module interface/implementation pair.
 Generated theory modules also get internal load manifests from HOL's recorded
 theory metadata (`Theory.current_ML_deps` / `Theory.add_ML_dependency`), so
@@ -421,10 +432,14 @@ The global cache is optional and immutable:
   locks/
 ```
 
-Cache lookup happens only after resolution and action-key computation.
+Cache lookup happens only after resolution and action-key computation. Theory
+artifacts may be cached under the raw source/dependency input key, a
+parent-output key that additionally commits to direct theory-parent `.dat`
+hashes, or a path-dependent parent-output key when unavoidable transient path
+references are detected.
 
 ```text
-if exact action key validates:
+if exact source/dependency or parent-output cache key validates:
   materialize into local .holbuild/
 else:
   build from source into local .holbuild/
@@ -710,7 +725,7 @@ project mode:
 - no `.holpath`
 - no `HOLPATH` ambient dependency search
 - no user-facing INCLUDES
-- no Holmakefile interpretation
+- no Holmakefile interpretation for ordinary packages
 - dependencies require manifests or explicit shims
 - user-specific dependency locations go in uncommitted `.holconfig.toml`
 ```
