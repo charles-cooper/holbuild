@@ -1423,30 +1423,6 @@ fun mldep_load_stems plan mldeps = unique_strings (map (mldep_load_stem plan) ml
 fun stable_generated_mldeps mldeps =
   List.filter (not o transient_stage_mldep) mldeps
 
-fun drop_object_suffix path =
-  if has_suffix ".uo" path then String.substring(path, 0, size path - 3)
-  else if has_suffix ".ui" path then String.substring(path, 0, size path - 3)
-  else path
-
-fun same_path a b = Path.mkCanonical a = Path.mkCanonical b handle Path.InvalidArc => a = b
-
-fun holfs_unmapped_theory_artifact path =
-  let
-    val {dir, file} = Path.splitDirFile path
-    val {dir = parent, file = leaf} = Path.splitDirFile dir
-  in
-    if leaf = "objs" andalso Path.file parent = ".hol" then
-      Path.concat(Path.dir parent, file)
-    else path
-  end
-
-fun generated_holdep_mldeps plan tc path =
-  let
-    fun planned name = List.exists (fn node => HolbuildBuildPlan.logical_name node = name) (HolbuildBuildPlan.selected_nodes plan)
-  in
-    unique_strings (List.filter planned (HolbuildDependencies.holdep_mentions (holfs_unmapped_theory_artifact path)))
-  end
-
 fun read_mldeps_report path =
   let
     val deps = String.tokens (fn c => c = #"\n") (read_text path)
@@ -2234,8 +2210,7 @@ fun build_theory cache_allowed policy tc project base_context plan keys toolchai
     val _ = copy_rewriting_path {src = staged_sml, dst = sml_path,
                                  replacements = dat_replacements}
     val _ = copy_binary sml_path (hfs_remapped_path sml_path)
-    val mldeps = unique_strings (read_mldeps_report mldeps_report @
-                                  generated_holdep_mldeps plan tc staged_sml)
+    val mldeps = read_mldeps_report mldeps_report
     val _ =
       if cache_allowed then
         publish_theory_cache project plan node input_key staged_sig sml_path staged_dat mldeps

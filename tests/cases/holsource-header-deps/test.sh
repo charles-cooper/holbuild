@@ -78,6 +78,7 @@ if grep -q "numLib\|cv_transLib" "$project/.holbuild/obj/src/ATheory.uo"; then
   echo "source-only Libs leaked into generated theory load manifest" >&2
   exit 1
 fi
+require_grep "monadsyntax" "$project/.holbuild/obj/src/ATheory.uo"
 if grep -q "numLib\|cv_transLib" "$project/.holbuild/obj/src/BTheory.uo"; then
   echo "dependency source-only Libs leaked into dependent theory load manifest" >&2
   exit 1
@@ -103,3 +104,4 @@ if grep -q "numLib\|cv_transLib" "$project/.holbuild/obj/src/ATheory.uo"; then
   echo "cache restore leaked source-only Libs into generated theory load manifest" >&2
   exit 1
 fi
+require_grep "monadsyntax" "$project/.holbuild/obj/src/ATheory.uo"
