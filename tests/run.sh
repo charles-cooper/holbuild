@@ -5,6 +5,9 @@ ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 HOLBUILD_BIN=${HOLBUILD_BIN:-"$ROOT/bin/holbuild"}
 HOLDIR=${HOLDIR:-${HOLBUILD_HOLDIR:-}}
 HOLBUILD_TEST_JOBS=${HOLBUILD_TEST_JOBS:-1}
+HOLBUILD_TEST_SHARD_INDEX=${HOLBUILD_TEST_SHARD_INDEX:-0}
+HOLBUILD_TEST_SHARD_COUNT=${HOLBUILD_TEST_SHARD_COUNT:-1}
+HOLBUILD_TEST_PREWARM=${HOLBUILD_TEST_PREWARM:-1}
 
 if [[ -z "$HOLDIR" ]]; then
   echo "Set HOLDIR=/path/to/HOL or HOLBUILD_HOLDIR" >&2
@@ -16,6 +19,20 @@ case "$HOLBUILD_TEST_JOBS" in
 esac
 if [[ "$HOLBUILD_TEST_JOBS" -lt 1 ]]; then
   echo "HOLBUILD_TEST_JOBS must be a positive integer" >&2
+  exit 2
+fi
+case "$HOLBUILD_TEST_SHARD_COUNT" in
+  ''|*[!0-9]*) echo "HOLBUILD_TEST_SHARD_COUNT must be a positive integer" >&2; exit 2 ;;
+esac
+if [[ "$HOLBUILD_TEST_SHARD_COUNT" -lt 1 ]]; then
+  echo "HOLBUILD_TEST_SHARD_COUNT must be a positive integer" >&2
+  exit 2
+fi
+case "$HOLBUILD_TEST_SHARD_INDEX" in
+  ''|*[!0-9]*) echo "HOLBUILD_TEST_SHARD_INDEX must be a non-negative integer" >&2; exit 2 ;;
+esac
+if [[ "$HOLBUILD_TEST_SHARD_INDEX" -ge "$HOLBUILD_TEST_SHARD_COUNT" ]]; then
+  echo "HOLBUILD_TEST_SHARD_INDEX must be less than HOLBUILD_TEST_SHARD_COUNT" >&2
   exit 2
 fi
 
@@ -59,7 +76,42 @@ count_lines() {
 }
 
 suite_start_ms=$(now_ms)
-echo "running holbuild tests with HOLBUILD_TEST_JOBS=$HOLBUILD_TEST_JOBS"
+echo "running holbuild tests with HOLBUILD_TEST_JOBS=$HOLBUILD_TEST_JOBS shard=$HOLBUILD_TEST_SHARD_INDEX/$HOLBUILD_TEST_SHARD_COUNT prewarm=$HOLBUILD_TEST_PREWARM"
+
+prewarm_holbuild_cache() {
+  if [[ "$HOLBUILD_TEST_PREWARM" == 0 || "$HOLBUILD_TEST_PREWARM" == false ]]; then
+    return 0
+  fi
+  local prewarm_dir=$log_dir/prewarm-project
+  local prewarm_log=$log_dir/prewarm.log
+  local start_ms end_ms duration_ms
+  mkdir -p "$prewarm_dir/src"
+  cat > "$prewarm_dir/holproject.toml" <<'TOML'
+[project]
+name = "holbuild-test-prewarm"
+
+[build]
+members = ["src"]
+TOML
+  cat > "$prewarm_dir/src/PrewarmScript.sml" <<'SML'
+open HolKernel Parse boolLib bossLib;
+val _ = new_theory "Prewarm";
+val _ = store_thm("prewarm_thm", ``T``, ACCEPT_TAC TRUTH);
+val _ = export_theory();
+SML
+  start_ms=$(now_ms)
+  echo "prewarming holbuild cache with source-built HOL environment"
+  if (cd "$prewarm_dir" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build PrewarmTheory) > "$prewarm_log" 2>&1; then
+    end_ms=$(now_ms)
+    duration_ms=$((end_ms - start_ms))
+    echo "prewarm complete (${duration_ms} ms)"
+  else
+    local status=$?
+    echo "prewarm failed (exit $status); log follows" >&2
+    cat "$prewarm_log" >&2
+    return "$status"
+  fi
+}
 
 write_holbuild_wrapper() {
   local wrapper=$1
@@ -207,13 +259,24 @@ wait_all() {
   done
 }
 
+prewarm_holbuild_cache
+
+case_index=0
+selected_count=0
 for test_script in "$ROOT"/tests/cases/*/test.sh; do
   name=$(basename "$(dirname "$test_script")")
+  if [[ $((case_index % HOLBUILD_TEST_SHARD_COUNT)) -ne "$HOLBUILD_TEST_SHARD_INDEX" ]]; then
+    case_index=$((case_index + 1))
+    continue
+  fi
+  selected_count=$((selected_count + 1))
   start_case "$test_script" "$name"
   if [[ ${#running_pids[@]} -ge "$HOLBUILD_TEST_JOBS" ]]; then
     wait_one
   fi
+  case_index=$((case_index + 1))
 done
+echo "selected $selected_count test case(s) for shard $HOLBUILD_TEST_SHARD_INDEX/$HOLBUILD_TEST_SHARD_COUNT"
 wait_all
 
 print_timing_summary() {
