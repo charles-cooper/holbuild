@@ -76,7 +76,16 @@ count_lines() {
 }
 
 suite_start_ms=$(now_ms)
-echo "running holbuild tests with HOLBUILD_TEST_JOBS=$HOLBUILD_TEST_JOBS shard=$HOLBUILD_TEST_SHARD_INDEX/$HOLBUILD_TEST_SHARD_COUNT prewarm=$HOLBUILD_TEST_PREWARM"
+if [[ -z "${HOLBUILD_HOL_CACHE:-}" ]]; then
+  if [[ -n "${HOLBUILD_CACHE:-}" ]]; then
+    export HOLBUILD_HOL_CACHE=$HOLBUILD_CACHE
+  elif [[ -n "${XDG_CACHE_HOME:-}" ]]; then
+    export HOLBUILD_HOL_CACHE=$XDG_CACHE_HOME/holbuild
+  else
+    export HOLBUILD_HOL_CACHE=${HOME:?Set HOME, XDG_CACHE_HOME, HOLBUILD_CACHE, or HOLBUILD_HOL_CACHE}/.cache/holbuild
+  fi
+fi
+echo "running holbuild tests with HOLBUILD_TEST_JOBS=$HOLBUILD_TEST_JOBS shard=$HOLBUILD_TEST_SHARD_INDEX/$HOLBUILD_TEST_SHARD_COUNT prewarm=$HOLBUILD_TEST_PREWARM HOLBUILD_HOL_CACHE=$HOLBUILD_HOL_CACHE"
 
 prewarm_holbuild_cache() {
   if [[ "$HOLBUILD_TEST_PREWARM" == 0 || "$HOLBUILD_TEST_PREWARM" == false ]]; then

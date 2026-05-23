@@ -737,7 +737,37 @@ fun implicit_hol_action logical deps =
 val implicit_hol_action_policies =
   [implicit_hol_action "NumRelNorms" ["GenRelNorm", "Overlay"]]
 
-fun implicit_hol_package artifact_parent =
+fun implicit_cache_root () =
+  case OS.Process.getEnv "HOLBUILD_HOL_CACHE" of
+      SOME path => path
+    | NONE =>
+      case OS.Process.getEnv "HOLBUILD_CACHE" of
+          SOME path => path
+        | NONE =>
+      case OS.Process.getEnv "XDG_CACHE_HOME" of
+          SOME base => Path.concat(base, "holbuild")
+        | NONE =>
+          case OS.Process.getEnv "HOME" of
+              SOME home => Path.concat(Path.concat(home, ".cache"), "holbuild")
+            | NONE => die "set HOME, XDG_CACHE_HOME, HOLBUILD_CACHE, or HOLBUILD_HOL_CACHE"
+
+fun canonical_path path = Path.mkCanonical path handle Path.InvalidArc => path
+
+fun implicit_hol_source_key holdir =
+  HolbuildHash.string_sha1
+    (String.concatWith "\n"
+       (["holbuild-implicit-hol-source-v1",
+         "holdir=" ^ canonical_path holdir,
+         "members=src,examples"] @
+        map (fn exclude => "exclude=" ^ exclude) implicit_hol_excludes @
+        map (fn ActionPolicy {logical, deps, ...} =>
+               "policy=" ^ logical ^ ":" ^ String.concatWith "," deps)
+            implicit_hol_action_policies) ^ "\n")
+
+fun implicit_hol_artifact_root holdir =
+  Path.concat(Path.concat(implicit_cache_root (), "implicit-hol"), implicit_hol_source_key holdir)
+
+fun implicit_hol_package _ =
   let
     val holdir =
       case !holdir_ref of
@@ -747,7 +777,7 @@ fun implicit_hol_package artifact_parent =
   in
     Package {name = "HOL", root = holdir, manifest = manifest,
              members = ["src", "examples"], excludes = implicit_hol_excludes, roots = [],
-             artifact_root = Path.concat(Path.concat(artifact_parent, ".holbuild/deps"), "HOL"),
+             artifact_root = implicit_hol_artifact_root holdir,
              action_policies = implicit_hol_action_policies, generators = []}
   end
 

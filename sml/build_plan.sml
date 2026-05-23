@@ -34,10 +34,16 @@ fun deps_of (node as {source, deps, ...} : node) =
       SOME value => value
     | NONE =>
       let
-        val value = HolbuildDependencies.extract_cached_with_hash
-                      {cache_path = dependency_cache_path source,
-                       source_path = #source_path source,
-                       source_hash = source_hash_of node}
+        val source_hash = source_hash_of node
+        val value =
+          if #package source = "HOL" then
+            HolbuildDependencies.extract_global_cached_with_hash
+              {source_path = #source_path source, source_hash = source_hash}
+          else
+            HolbuildDependencies.extract_cached_with_hash
+              {cache_path = dependency_cache_path source,
+               source_path = #source_path source,
+               source_hash = source_hash}
       in deps := SOME value; value end
 fun logical_name node = #logical_name (source_of node)
 fun package node = #package (source_of node)

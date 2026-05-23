@@ -874,9 +874,16 @@ fun toolchain_base_context tc = BareState (HolbuildToolchain.base_state0 tc)
 fun standard_env_key toolchain_key input_lines =
   HolbuildHash.string_sha1 (String.concatWith "\n" ([toolchain_key, "standard-env-v2"] @ input_lines) ^ "\n")
 
-fun standard_env_path project key =
-  Path.concat(Path.concat(Path.concat(project_artifact_root project, ".holbuild/checkpoints"), "_standard_env"),
-              key ^ ".save")
+fun hol_cache_root () =
+  case OS.Process.getEnv "HOLBUILD_HOL_CACHE" of
+      SOME path => path
+    | NONE => HolbuildCache.cache_root ()
+
+fun global_checkpoint_path family key =
+  Path.concat(Path.concat(Path.concat(hol_cache_root (), "checkpoints"), family), key ^ ".save")
+
+fun standard_env_path _ key =
+  global_checkpoint_path "standard-env" key
 
 fun standard_env_ok_text key =
   checkpoint_ok_text "standard_env" [("key", key)]
@@ -3082,9 +3089,15 @@ fun auto_context_key toolchain_key parent_key keys root contents =
          "root=" ^ context_node_id root] @
         map (fn node => "node=" ^ context_node_id node ^ "@" ^ HolbuildBuildPlan.input_key_for keys node) contents) ^ "\n")
 
-fun auto_context_path project key =
+fun local_auto_context_path project key =
   Path.concat(Path.concat(Path.concat(project_artifact_root project, ".holbuild/checkpoints"), "_contexts"),
               key ^ ".save")
+
+fun hol_only_nodes nodes = List.all (fn node => HolbuildBuildPlan.package node = "HOL") nodes
+
+fun auto_context_path project key contents =
+  if hol_only_nodes contents then global_checkpoint_path "contexts" key
+  else local_auto_context_path project key
 
 fun auto_context_ok_text key = checkpoint_ok_text "auto_context" [("key", key)]
 
@@ -3130,7 +3143,7 @@ fun build_with_auto_contexts status options tc project base_context plan keys to
           val contents = #contents candidate
           val delta = without_nodes parent_contents contents
           val key = auto_context_key toolchain_key parent_key keys root contents
-          val path = auto_context_path project key
+          val path = auto_context_path project key contents
           val _ = if HolbuildStatus.verbose_mode () then
                     HolbuildStatus.message_stderr
                       ("holbuild: automatic execution context " ^ context_name root ^
