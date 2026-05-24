@@ -452,7 +452,7 @@ fun build_heap tc cli_jobs target =
       in
         HolbuildBuildExec.build {use_cache = true, force = HolbuildBuildExec.ForceNone, force_targets = [], skip_checkpoints = false, auto_contexts = true, goalfrag = true, new_ir = true, tactic_timeout = SOME 2.5, goalfrag_plan = NONE, goalfrag_trace = false, repl_on_failure = false, strict_parse = false}
                                tc project plan toolchain_key jobs;
-        HolbuildBuildExec.export_heap tc project plan output_path
+        HolbuildBuildExec.export_heap tc project plan objects output_path
       end
   in
     HolbuildBuildExec.with_project_lock project ("heap " ^ target) execute_heap

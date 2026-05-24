@@ -3398,10 +3398,17 @@ fun heap_theory_load_lines node =
       raise Error ("heap objects currently must be theory targets: " ^
                    HolbuildBuildPlan.logical_name node)
 
-fun write_heap_loader plan output path =
+fun heap_object_node plan name =
+  case List.filter (fn node => HolbuildBuildPlan.logical_name node = name) (HolbuildBuildPlan.selected_nodes plan) of
+      [node] => node
+    | [] => raise Error ("heap object is not in the resolved build plan: " ^ name)
+    | _ => raise Error ("heap object is ambiguous in the resolved build plan: " ^ name)
+
+fun write_heap_loader plan objects output path =
   let
+    val object_nodes = map (heap_object_node plan) objects
     val lines =
-      List.concat (map heap_theory_load_lines (HolbuildBuildPlan.selected_nodes plan)) @
+      List.concat (map heap_theory_load_lines object_nodes) @
       [checkpoint_save_runtime_line (),
        save_heap_line {label = "heap", share_common_data = false,
                        output = output, ok_text = checkpoint_ok_v1 ()}]
@@ -3409,7 +3416,7 @@ fun write_heap_loader plan output path =
     write_text path (String.concatWith "\n" lines ^ "\n")
   end
 
-fun export_heap tc (project : HolbuildProject.t) plan output =
+fun export_heap tc (project : HolbuildProject.t) plan objects output =
   let
     val base_context = toolchain_base_context tc
     val stage = Path.concat(Path.concat(project_artifact_root project, ".holbuild/stage"), "heap")
@@ -3417,7 +3424,7 @@ fun export_heap tc (project : HolbuildProject.t) plan output =
   in
     ensure_dir stage;
     ensure_parent output;
-    write_heap_loader plan output loader;
+    write_heap_loader plan objects output loader;
     run_hol_files_to_log tc stage stage base_context [loader]
       "holbuild-heap.log"
       ("hol run failed while exporting heap: " ^ output);
