@@ -9,13 +9,12 @@ and cacheable builds that never require users to reason about the cache.
 
 - Build targets are logical names, not files: `FooTheory`, not `FooTheory.uo`.
 - `.uo` and `.ui` are internal ML load artifacts. Users must never request them.
-- Project mode is manifest based. `Holmakefile` semantics are not interpreted.
+- Project mode is manifest based. Ordinary packages do not interpret `Holmakefile` semantics; the implicit `HOL` package may import explicit local Holmakefile rule prerequisites as source metadata, resolved through the package index.
 - The source tree is user-owned; build products live under project `.holbuild/`.
-- Target build contexts should be produced by holbuild from declared sources,
-  predecessor checkpoints, or validated shared dependency state. The external
-  prototype still starts child HOL actions from the configured `HOLDIR/bin/hol.state`
-  and keys that seed in the toolchain; eliminating that bootstrap dependency is a
-  root-HOL transition goal, not current behavior.
+- Target build contexts are produced by holbuild from declared sources,
+  predecessor checkpoints, or validated shared dependency state. HOL source builds
+  start from the selected checkout's bare bootstrap heap (`bin/hol.state0` via
+  `hol --bare`); full HOL environments are constructed as ordinary dependencies.
 - The cache is an optional accelerator. Local `.holbuild/` is the authoritative
   materialized build view.
 - When unsure, rebuild. A bad cache hit is worse than a missed cache hit.
@@ -32,14 +31,14 @@ must name a supported schema:
 schema = 1
 ```
 
-Omitting `[holbuild]` currently means schema 1 for transition convenience.
+Omitting `[holbuild]` means schema 1.
 
 Package roots are declared by one of:
 
 - the current project's `holproject.toml`
 - a dependency's own `holproject.toml`
 - an explicit shim manifest supplied by the consumer
-- the built-in/root HOL manifest
+- the implicit HOL package selected by `--holdir`, `HOLBUILD_HOLDIR`, or `HOLDIR`
 
 Committed manifests describe what dependency is required. They should not rely on
 ambient search paths such as `HOLPATH`. Per-user local paths are supplied by an
@@ -71,44 +70,62 @@ Transition rule:
 
 ```text
 if dependency X has no holproject.toml, the consumer must provide a shim manifest
-until X adopts one; the reserved dependency HOLDIR is the exception and resolves
-through holbuild's built-in root-HOL manifest plus the configured --holdir path
+until X adopts one; HOL itself is implicit and is selected by --holdir /
+HOLBUILD_HOLDIR / HOLDIR
 ```
 
-This keeps resolution explicit without requiring `holbuild` to understand every
-legacy `Holmakefile`, while avoiding per-consumer HOLDIR shim manifests.
+This keeps ordinary dependency resolution explicit while recognizing that every
+HOL project is already parameterized by a HOL checkout/toolchain. Users should
+not need to declare a special `[dependencies.HOLDIR]` or `[dependencies.HOL]`
+entry for ordinary HOL sources.
 
 ## Root HOL
 
-Root HOL should be built through holbuild's own model, using an in-tree or
-default HOL manifest. HOL is not permanently treated as an opaque legacy build.
-The prototype still requires `HOLDIR` so it can reuse HOL implementation pieces
-while the model is incubated. That is a host/tool dependency, not the final
-semantic state model. During the transition, holbuild starts target actions from
-`HOLDIR/bin/hol.state` directly and includes that heap in the toolchain key; it
-does not copy it into a project-local `_base` checkpoint. The target model
-replaces this configured seed with declared bootstrap contexts. Root HOL and user
-dependencies should be ordinary manifest-resolved package nodes whose contexts
-are produced by holbuild. The initial build context is a declared bootstrap
-context; later actions start from predecessor checkpoints or validated shared
-dependency state.
+Root HOL is built through holbuild's own model, using the selected HOL checkout
+as an implicit source package. HOL is not treated as an opaque legacy build.
+`HOLDIR` selects both the HOL command-line toolchain and the implicit HOL source
+package.
 
-Target workflow: after `git pull` in a HOL checkout, `hol build` should be able
-to rebuild any invalidated bootstrap/base context hermetically into the checkout's
-own `.holbuild/` state, or restore a validated equivalent from the global cache.
+The target bootstrap boundary is `HOLDIR/bin/hol.state0`, used through HOL's
+`--bare` mode. The bare heap provides the kernel/parser/loader infrastructure,
+the primitive `min`/`bool` theory base, modules reported by `Meta.loaded ()` in a
+bare session, and a small explicitly modeled bootstrap-support set such as
+`CompilerSpecific`. Everything else under the selected HOL checkout should be
+modeled as source or cacheable holbuild output.
+
+Non-bare theory scripts are ordinary source actions too; they receive the normal
+full-HOL environment by implicit dependencies on the HOL sources that construct
+it rather than by starting from `hol.state`. Empirically, in current HOL checkouts
+`load "bossLib"; load "holTheory"; open bossLib` from `hol --bare` reproduces
+the same loaded-module set and theory ancestry as normal full HOL startup.
+Holbuild materializes this as a managed standard-environment checkpoint keyed by
+the bare toolchain plus the source-built `bossLib` and `holTheory` action keys.
+This recovers the performance role
+of `hol.state` without making a prebuilt full heap the semantic boundary.
+`hol.state` is a compatibility/distribution artifact, not the semantic dependency
+boundary for source builds.
+
+Target future in-tree workflow: after `git pull` in a HOL checkout, `hol build`
+should be able to rebuild any invalidated bootstrap/base context hermetically
+into the checkout's own `.holbuild/` state, or restore a validated equivalent
+from the global cache.
 It should not require the user to run a separate global HOL rebuild first, and it
 should not silently depend on a stale configured heap from before the pull.
 
-The root-HOL transition should be explicit rather than inferred from existing
-Holmakefiles. The current prototype reserves package identity `HOLDIR` for the
-built-in root-HOL manifest, enumerates major source roots as normal manifest
-members, and declares bootstrap/tool phases as manifest concepts rather than as
-ambient directory conventions. External HOL theory dependencies should
-become normal resolved package nodes with the same action-key and cache rules as
-user packages; they should not be satisfied by loading a configured full HOL heap.
-Any HOL subtree that cannot yet be expressed by the manifest model should use an
-explicit shim/adaptor package boundary, not Holmakefile interpretation in project
-mode.
+The root-HOL transition should be explicit rather than a wholesale translation
+of existing Holmakefiles. The selected HOL checkout is an implicit package with
+source members from `src` plus a curated set of mature examples and no default
+roots. HOL theory/library dependencies become normal resolved package nodes with
+the same action-key and cache rules as user packages; they should not be
+satisfied by loading a configured full HOL heap. For the implicit `HOL` package
+only, holbuild may read local Holmakefile rules to import explicit `.uo`/`.ui`
+prerequisites as additional source dependencies, resolving them back through the
+HOL package index. This covers SML functor/signature/module dependencies that
+HOL's reader dependency lexer intentionally does not see; it does not import
+Holmake `INCLUDES`, `$HOLDIR/sigobj`, or prebuilt object-file semantics into
+ordinary project mode. Any non-HOL dependency subtree that cannot yet be
+expressed by the manifest model should use an explicit shim/adaptor package
+boundary.
 
 The default manifest must also preserve the duplicate-logical-name invariant:
 root HOL cannot rely on load-path order to distinguish two `FooTheory` or `Foo`
@@ -132,31 +149,38 @@ The same token pass found non-script examples and libraries with literal/dynamic
 effects. A root-HOL manifest should classify such tooling/examples/tests
 explicitly instead of treating them as pure cacheable theory-script actions.
 
-A first root-HOL manifest should therefore start with the stable pure theory and
-library package roots that already obey project-mode constraints, and push
-non-build tooling/examples/tests behind explicit package/action boundaries.
-`examples/root-hol/holproject.toml` is the current sketch: it enumerates HOL
-`src/*` members, excludes selftests/examples/tool variants that collide on
-logical names, and dry-run planned 1461 HOL package nodes in the audited checkout.
-A follow-up regression test dry-runs that sketch against `$HOLDIR`. Attempting to
-source-build core theories against `$HOLDIR/bin/hol.state` is intentionally wrong:
-that state already contains those theories. Executable root-HOL bootstrap needs
-manifest-level bootstrap/checkpoint phases that holbuild can rebuild or restore
-on demand, not any preconfigured global HOL heap.
-A smaller illustrative fragment:
+The implicit HOL package is treated as an ordinary holbuild package with a
+package-wide logical namespace. It uses the selected checkout's standard Poly/ML,
+stdknl, no-tracing source view, the main `src` tree, and a curated set of mature
+examples that do not create duplicate logical names. Other examples should become
+separate packages when needed:
 
 ```toml
 [project]
 name = "HOL"
-version = "bootstrap"
+version = "implicit"
 
 [build]
-members = [
-  "src/bool", "src/num", "src/list", "src/coretypes",
-  "src/pred_set", "src/finite_maps", "src/integer",
-]
-roots = ["src/hol/HolScript.sml"]
-exclude = ["*/selftest.sml", "*/examples/*", "*/theory_tests/*"]
+members = ["src", "examples/algorithms", "examples/category", "..."]
+# no roots: the package is available for dependency resolution, not built by default
+# default excludes select stdknl/no-tracing/poly and remove tests/duplicate variants
+```
+
+Attempting to source-build core theories against `$HOLDIR/bin/hol.state` is
+intentionally wrong: that state already contains a large full-HOL environment.
+Executable root-HOL bootstrap should instead start from `hol.state0`/`--bare`,
+mask the bare-provided theories/modules, and construct later environments such as
+`bossLib`/`holTheory` through normal holbuild actions.
+A smaller illustrative non-HOL package fragment remains:
+
+```toml
+[project]
+name = "example"
+version = "0.1.0"
+
+[build]
+members = ["src"]
+roots = ["src/MainScript.sml"]
 
 [actions.SomeGeneratedTheory]
 loads = ["GeneratedSupportLib"]
@@ -220,18 +244,25 @@ always_reexecute = true
 impure = true
 ```
 
-Source dependencies are inferred with HOL's existing `Holdep` machinery over the
-resolved manifest package roots and the configured HOL toolchain objects, so
-normal old-style `load`/`open` usage and HOLSource headers become graph edges
-without user-facing include paths. `deps` names additional logical project
-dependencies when source-level imports are insufficient or intentionally absent;
-every listed dependency must resolve to a source in the manifest graph. `loads`
-names additional loadable module/library stems for source-implicit predecessors;
-matching project modules are resolved in the DAG, otherwise the name is loaded
-from the configured HOL toolchain context. `extra_deps` are filesystem
-dependencies whose expanded contents are hashed into the action key. Manifest
-entries are package-root-relative; source files may also declare source-file-relative
-extra dependencies with static literal `holbuild_extra_deps [...]` annotations.
+For ordinary packages, source dependencies are inferred with HOL's existing
+`HOLSource.fileToReader` plus `Holdep_tokens.reader_deps` and resolved through
+holbuild's package-wide logical-name index. Mentioned names must resolve to the
+bare bootstrap environment or a source in the manifest graph. Holbuild must not
+use Holmake `INCLUDES`, `$HOLDIR/sigobj`, prebuilt object files, custom `open`
+scanning, custom `load` scanning, HOLSource header parsing, or cross-package guessed
+`.sig` companions as graph semantics. The implicit `HOL` package has one extra
+source-metadata input: explicit local Holmakefile `.uo`/`.ui` rule prerequisites
+are read with HOL's Holmakefile parser and resolved back to source nodes in the
+HOL package index. Same-package `.sig`/`.sml` pairs form one module interface/implementation pair.
+`deps` and `loads` name additional explicit logical/loadable predecessors when
+source-level imports are insufficient or intentionally absent; every listed
+dependency must resolve to either the bare bootstrap environment or a source in
+the manifest graph. They are not satisfied from a prebuilt full HOL state.
+Source-level `use "file"` is rejected because it bypasses the resolved package
+graph. The only source text annotation interpreted by holbuild is static literal
+`holbuild_extra_deps [...]`. Manifest `extra_deps` are package-root-relative
+filesystem dependencies whose expanded contents are hashed into the action key;
+source-declared entries are source-file-relative.
 Entries may name files, directories, or simple globs, and source-declared entries
 are staged so matching relative filesystem reads work during the action.
 `cache = false` disables global-cache restore/publish for the action.
@@ -239,11 +270,19 @@ are staged so matching relative filesystem reads work during the action.
 checkpoint replay for the action. `impure = true`
 is a conservative shorthand for no cache and always re-execute. These fields are
 intended for audited exceptions such as generated data, root-HOL SML modules with
-explicit predecessor requirements, source-implicit external libraries, or
+explicit predecessor requirements, or
 tool/example side effects; they are not include paths and do not make arbitrary
 `use "file"` directives resolvable.
 
 ## Dependency resolution
+
+Script execution dependencies and generated-theory load dependencies are
+distinct. Script execution dependencies are source-level dependencies inferred
+from `HOLSource.fileToReader` plus `Holdep_tokens.reader_deps`, plus manifest
+action policy and implicit-HOL Holmakefile rule imports. Generated `FooTheory`
+load dependencies are not inferred by scanning generated `FooTheory.sml`; they
+come from HOL-exported metadata: theory parents via `Theory.parents "Foo"` and ML
+deps via `Theory.current_ML_deps()`.
 
 Resolution happens before cache lookup.
 
@@ -264,9 +303,8 @@ This rejection is intentional. HOL/PolyML process state has global theory and ML
 module names; two packages exporting different `FooTheory` or `Foo` modules
 cannot safely coexist by relying on load-path order. `holbuild` should reject the
 resolved graph before build execution instead of choosing whichever artifact
-happens to appear first. The only same-logical-name exception in v1 is a local
-`.sig`/`.sml` companion pair for the same package/module, which together describe
-one module artifact.
+happens to appear first. A same-package `.sig`/`.sml` pair is one module
+interface/implementation pair, not a cross-package ambiguity.
 
 ## Parallel builds
 
@@ -318,14 +356,19 @@ project/.holbuild/
 Path-sensitive files are generated or rebased for this local layout. Older HOL
 `Theory.sml` files may contain paths and are rebased when installed; newer HOL
 `Theory.sml` files locate their adjacent `.dat` file and are copied unchanged.
-Project SML/SIG modules are
-built as internal load manifests: `load "Module"`, `open Module`, and qualified
-module references are resolved through HOL's `Holdep` scanner against the project
-graph plus the configured HOL toolchain objects, not against ambient include
-paths. Generated theory modules also get internal load manifests from HOL's
-recorded theory metadata (`Theory.current_ML_deps` /
-`Theory.add_ML_dependency`), so legitimate generated
-`local open ...` dependencies are preserved without parsing generated SML text.
+Project SML/SIG modules are built from logical predecessor names reported by
+`HOLSource.fileToReader` plus `Holdep_tokens.reader_deps` and resolved in the
+package index. Holbuild does not use Holmake include paths, prebuilt object
+directories, `open` tokens, custom `load` scanning, qualified references, or
+cross-package guessed signature companions as graph semantics. The implicit
+`HOL` package additionally imports explicit local Holmakefile rule prerequisites
+as source metadata, again resolving only through the package index.
+Same-package `.sig`/`.sml` pairs are one module interface/implementation pair.
+Generated theory modules get internal load manifests from HOL-exported metadata,
+not from scanning generated `*Theory.sml`: exported theory parents come from
+`Theory.parents "<thy>"`, and ML dependencies come from `Theory.current_ML_deps()` /
+`Theory.add_ML_dependency`. This preserves legitimate generated dependencies
+without approximating generated SML text.
 Source-level `use "file"` is rejected in project build actions in v1 because it
 is an arbitrary path/input outside the resolved package graph; declare a project
 module and `load` it instead. Generated HOL source is modeled by manifest
@@ -333,9 +376,9 @@ module and `load` it instead. Generated HOL source is modeled by manifest
 outputs are visible source-tree files (commonly under `gen/`), may be overwritten,
 and are scanned/hashed as ordinary sources after generation. Generator keys decide
 whether to rerun the generator; theory/action keys still use the actual generated
-source bytes. `.sml` files get a `.uo` plus an empty companion `.ui` unless a real
-`.sig` companion exists, and same-name signatures are implicit dependencies of
-their implementation. HOL's current
+source bytes. `.sml` files get a `.uo` plus a `.ui` load artifact as required by HOL's loader;
+same-package implementations depend on their matching signatures when present.
+HOL's current
 `HOLFileSys` remaps `.uo`/`.ui` and files ending in
 `Theory.dat`/`.sml`/`.sig` through `.hol/objs`, so a project-level layout may
 need auxiliary internal load paths or rewritten non-semantic load copies while
@@ -401,10 +444,14 @@ The global cache is optional and immutable:
   locks/
 ```
 
-Cache lookup happens only after resolution and action-key computation.
+Cache lookup happens only after resolution and action-key computation. Theory
+artifacts may be cached under the raw source/dependency input key, a
+parent-output key that additionally commits to direct theory-parent `.dat`
+hashes, or a path-dependent parent-output key when unavoidable transient path
+references are detected.
 
 ```text
-if exact action key validates:
+if exact source/dependency or parent-output cache key validates:
   materialize into local .holbuild/
 else:
   build from source into local .holbuild/
@@ -539,9 +586,9 @@ syntactic checkpoint:    if the action changed, where can replay resume?
 A retained/debug checkpoint is replay-eligible only under the same resolved
 dependency context, toolchain/base context, and checkpoint schema. Raw `.save`
 bytes are diagnostic only and must not be used as stable semantic keys. The
-default build does not retain successful checkpoints or materialize checkpoints
-from the global cache; cache restore recreates only logical theory artifacts and
-internal load manifests.
+default build retains successful local checkpoints for incremental proof replay,
+while global cache restore recreates only logical theory artifacts and internal
+load manifests. Retention and size bounds are enforced by `holbuild gc`.
 
 Proof-edit incrementality should not key failed-prefix checkpoints by the full
 proof body hash. That would invalidate exactly the state a proof author needs
@@ -690,7 +737,7 @@ project mode:
 - no `.holpath`
 - no `HOLPATH` ambient dependency search
 - no user-facing INCLUDES
-- no Holmakefile interpretation
+- no Holmakefile interpretation for ordinary packages
 - dependencies require manifests or explicit shims
 - user-specific dependency locations go in uncommitted `.holconfig.toml`
 ```

@@ -55,15 +55,20 @@ Tables validated: `[holbuild]`, `[project]`, `[build]`, `[run]`, `[dependencies.
 
 ## Dependency resolution
 
-Each dependency must resolve to a manifest:
-1. Reserved `[dependencies.HOLDIR]` with no `manifest` uses holbuild's built-in
-   root-HOL manifest; the package root defaults to
-   `--holdir`/`HOLBUILD_HOLDIR`/`HOLDIR` unless `path`/override is set. This
-   built-in manifest excludes HOL examples/tests; model example subtrees such as
-   `$HOLDIR/examples/Crypto/Keccak` as separate dependencies with shim manifests.
-2. If `manifest` field is set, that file is used — dependency's own `holproject.toml` is **never consulted**. This remains true when `.holconfig.toml` overrides the dependency root path.
-3. Otherwise, tries `holproject.toml` in the dependency's directory
-4. If neither exists, build fails with a "no manifest" error
+Each ordinary dependency must resolve to a manifest:
+1. If `manifest` field is set, that file is used — dependency's own `holproject.toml` is **never consulted**. This remains true when `.holconfig.toml` overrides the dependency root path.
+2. Otherwise, tries `holproject.toml` in the dependency's directory
+3. If neither exists, build fails with a "no manifest" error
+
+HOL itself is implicit: every project has an implicit HOL source package selected
+by `--holdir`, `HOLBUILD_HOLDIR`, or `HOLDIR`. That package is drawn from `src`
+plus a curated set of mature examples, uses no default roots, selects the
+stdknl/no-tracing/PolyML source view, excludes selftests/developer throwaway
+directories/duplicate example families, and treats `hol.state0`/`--bare` as the
+bootstrap boundary. For this implicit package only, holbuild imports explicit
+local Holmakefile `.uo`/`.ui` rule prerequisites as source dependencies resolved
+through the HOL package index. Do not declare HOL with `[dependencies.HOLDIR]` or
+`[dependencies.HOL]`.
 
 Dependency `name` in `[dependencies.X]` must match the `project.name` in the resolved manifest. Mismatch is an error.
 
@@ -89,7 +94,7 @@ Recognized source files:
 - `*.sml` → SML module, logical name = filename minus `.sml`
 - `*.sig` → signature, logical name = filename minus `.sig`
 
-A `.sig`/`.sml` pair with the same base name in the same package is a companion pair (one module), not a conflict.
+A `.sig`/`.sml` pair with the same base name in the same package is one SML module interface/implementation pair, not a cross-package conflict. The same physical source path must not be included by multiple packages or package members.
 
 ## HOLSource headers
 
@@ -100,7 +105,7 @@ Theory Foo
 Ancestors Bar
 ```
 
-These are picked up by the Holdep scanner alongside `load`/`open` for dependency inference. `Ancestors` declares direct theory predecessors; `Theory` declares the theory name (redundant with `new_theory` but used by Holdep).
+These are interpreted by HOL's `HOLSource.fileToReader` plus `Holdep_tokens.reader_deps`; holbuild resolves the mentioned logical names through the package index rather than using Holmake `INCLUDES` or prebuilt object files. `Ancestors` declares direct theory predecessors; `Theory` declares the theory name.
 
 ## `[[generate]]` source generation
 
@@ -117,7 +122,7 @@ Rules:
 
 ## Duplicate logical names
 
-One logical name → one resolved artifact across the entire build graph. Two packages exporting `FooTheory` or `Foo` module is an error. The only exception: same-package `.sig`/`.sml` companion pair.
+One logical name → one resolved artifact across the entire build graph. Two packages exporting `FooTheory` or `Foo` module is an error. A same-package `.sig`/`.sml` pair is one SML module interface/implementation pair and is not treated as a cross-package conflict.
 
 ## Action policies
 

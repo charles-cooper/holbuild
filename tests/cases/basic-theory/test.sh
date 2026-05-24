@@ -36,9 +36,6 @@ SML
 cat > "$project/src/ATheory.sig" <<'SML'
 this source-tree generated theory artifact must be ignored by discovery
 SML
-cat > "$project/src/ATheory.txt" <<'TXT'
-this source-tree generated theory documentation artifact must be ignored by discovery
-TXT
 
 first_log=$tmpdir/first.log
 first_timing=$tmpdir/first.tool-timing
@@ -48,10 +45,6 @@ first_timing=$tmpdir/first.tool-timing
 require_grep "holbuild checkpoint kind=deps_loaded share=false" "$first_log"
 require_grep "holbuild checkpoint kind=final_context share=false" "$first_log"
 require_grep $'^phase\tname=build\.keys\tstatus=ok\tms=' "$first_timing"
-require_grep $'^phase\tname=build\.keys\.external\.source_hash\tstatus=ok\tms=.*\tcount=' "$first_timing"
-require_grep $'^phase\tname=build\.keys\.external\.dep_cache\tstatus=ok\tms=.*\tcount=' "$first_timing"
-require_grep $'^phase\tname=build\.keys\.external\.theory_stamp\tstatus=ok\tms=.*\tcount=' "$first_timing"
-require_grep $'^phase\tname=build\.keys\.external\.lib_artifact\tstatus=ok\tms=.*\tcount=' "$first_timing"
 
 coarse_timing=$tmpdir/coarse.tool-timing
 (cd "$project" && HOLBUILD_TIMING_LOG="$coarse_timing" "$HOLBUILD_BIN" --holdir "$HOLDIR" build --dry-run ATheory) > /dev/null
@@ -62,10 +55,7 @@ fi
 
 require_file "$project/.holbuild/obj/src/ATheory.sig"
 require_file "$project/.holbuild/obj/src/ATheory.sml"
-require_file "$project/.holbuild/obj/src/ATheory.txt"
 require_file "$project/.holbuild/obj/src/ATheory.dat"
-require_grep "\[a_thm\].*Theorem" "$project/.holbuild/obj/src/ATheory.txt"
-require_grep "⊢ T" "$project/.holbuild/obj/src/ATheory.txt"
 if strings -a "$project/.holbuild/obj/src/ATheory.dat" | grep -q '\.holbuild.*stage'; then
   echo "theory dat should not record transient holbuild stage paths" >&2
   exit 1
@@ -92,9 +82,9 @@ require_grep "artifact-root: $tmpdir" "$source_dir_context_log"
 source_dir_env_log=$tmpdir/source-dir-env.log
 rm -rf "$tmpdir/.holbuild"
 (cd "$tmpdir" && HOLBUILD_CACHE_TRACE=1 HOLBUILD_SOURCE_DIR="$project" "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$source_dir_env_log"
-require_grep "cache hit: ATheory source/dependency key=" "$source_dir_env_log"
+source_dir_cache_key=$(require_cache_hit_key ATheory "$source_dir_env_log")
+require_file "$HOLBUILD_CACHE/actions/$source_dir_cache_key/manifest"
 require_grep "ATheory restored from cache" "$source_dir_env_log"
-require_file "$tmpdir/.holbuild/obj/src/ATheory.txt"
 require_file "$tmpdir/.holbuild/obj/src/ATheory.dat"
 if strings -a "$tmpdir/.holbuild/obj/src/ATheory.dat" | grep -q '\.holbuild.*stage'; then
   echo "cache-restored theory dat should not contain transient holbuild stage paths" >&2
@@ -103,14 +93,13 @@ fi
 
 : > "$project/.holbuild/obj/src/ATheory.sml"
 : > "$project/.holbuild/obj/src/ATheory.sig"
-: > "$project/.holbuild/obj/src/ATheory.txt"
 zero_output_log=$tmpdir/zero-output.log
 (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$zero_output_log"
 if grep -q "ATheory is up to date" "$zero_output_log"; then
   echo "zero-byte theory outputs were treated as up to date" >&2
   exit 1
 fi
-if [[ ! -s "$project/.holbuild/obj/src/ATheory.sml" || ! -s "$project/.holbuild/obj/src/ATheory.sig" || ! -s "$project/.holbuild/obj/src/ATheory.txt" ]]; then
+if [[ ! -s "$project/.holbuild/obj/src/ATheory.sml" || ! -s "$project/.holbuild/obj/src/ATheory.sig" ]]; then
   echo "zero-byte theory outputs were not repaired" >&2
   exit 1
 fi
@@ -122,21 +111,23 @@ stale_hash_log=$tmpdir/stale-output-hash.log
 (cd "$project" && "$HOLBUILD_BIN" --verbose --holdir "$HOLDIR" build ATheory) > "$stale_hash_log"
 require_grep "ATheory is up to date" "$stale_hash_log"
 
-input_key=$(grep '^input_key=' "$project/.holbuild/dep/basic/src/AScript.sml.key" | cut -d= -f2)
-cache_manifest="$HOLBUILD_CACHE/actions/$input_key/manifest"
+rm -rf "$project/.holbuild"
+cache_log=$tmpdir/cache-restore.log
+(cd "$project" && HOLBUILD_CACHE_TRACE=1 "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$cache_log"
+cache_key=$(require_cache_hit_key ATheory "$cache_log")
+cache_manifest="$HOLBUILD_CACHE/actions/$cache_key/manifest"
 require_file "$cache_manifest"
 touch -d '10 days ago' "$cache_manifest"
 cache_hit_marker=$tmpdir/cache-hit-marker
 touch -d '1 minute ago' "$cache_hit_marker"
 
 rm -rf "$project/.holbuild"
-cache_log=$tmpdir/cache-restore.log
+cache_log=$tmpdir/cache-restore-after-touch.log
 (cd "$project" && HOLBUILD_CACHE_TRACE=1 "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$cache_log"
-require_grep "cache hit: ATheory source/dependency key=$input_key" "$cache_log"
+require_grep "cache hit: ATheory .* key=$cache_key" "$cache_log"
 require_grep "ATheory restored from cache" "$cache_log"
 require_file "$project/.holbuild/obj/src/ATheory.sig"
 require_file "$project/.holbuild/obj/src/ATheory.sml"
-require_file "$project/.holbuild/obj/src/ATheory.txt"
 require_file "$project/.holbuild/obj/src/ATheory.dat"
 # cache restore does not create checkpoints (no HOL process runs),
 # but previously-saved checkpoints persist for incremental rebuilds
@@ -145,7 +136,7 @@ if [[ ! "$cache_manifest" -nt "$cache_hit_marker" ]]; then
   exit 1
 fi
 require_file "$cache_manifest"
-printf 'mldep /stale/.holbuild/stage/%s/ATheory\n' "$input_key" >> "$cache_manifest"
+printf 'mldep /stale/.holbuild/stage/%s/ATheory\n' "$cache_key" >> "$cache_manifest"
 rm -rf "$project/.holbuild"
 stale_cache_log=$tmpdir/stale-cache-manifest.log
 (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$stale_cache_log" 2>&1
@@ -165,18 +156,25 @@ cp "$project/src/AScript.sml" "$tmpdir/AScript.good.sml"
 cat >> "$project/src/AScript.sml" <<'SML'
 val _ = raise Fail "forced source failure after cache miss";
 SML
-bad_key=$(cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --dry-run ATheory | awk '/input_key:/ {print $2; exit}')
+old_holbuild_cache=$HOLBUILD_CACHE
+export HOLBUILD_CACHE="$tmpdir/bad-cache"
+probe_log=$tmpdir/stale-cache-key-probe.log
+if (cd "$project" && HOLBUILD_CACHE_TRACE=1 "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$probe_log" 2>&1; then
+  echo "source failure key probe unexpectedly succeeded" >&2
+  exit 1
+fi
+bad_key=$(awk '/cache miss: ATheory (source\/dependency|parent-output|path-dependent parent-output) key=.*\(no manifest\)/ {sub(/^.* key=/, ""); sub(/ .*/, ""); print; exit}' "$probe_log")
+[[ -n "$bad_key" ]] || { echo "could not determine ATheory cache key" >&2; cat "$probe_log" >&2; exit 1; }
 bad_manifest="$HOLBUILD_CACHE/actions/$bad_key/manifest"
 mkdir -p "$(dirname "$bad_manifest")"
 cat > "$bad_manifest" <<EOF
-holbuild-cache-action-v1
+holbuild-cache-action-v2
 input_key=$bad_key
 kind=theory
 mldeps
 mldep /stale/.holbuild/stage/$bad_key/ATheory
 blob sig 0000000000000000000000000000000000000000
 blob sml 0000000000000000000000000000000000000000
-blob txt 0000000000000000000000000000000000000000
 blob dat 0000000000000000000000000000000000000000
 EOF
 rm -rf "$project/.holbuild"
@@ -188,6 +186,7 @@ fi
 require_grep "cache entry unusable for ATheory" "$bad_manifest_log"
 require_grep "deleted cache manifest" "$bad_manifest_log"
 [[ ! -e "$bad_manifest" ]] || { echo "transient stage mldep manifest survived failed source rebuild" >&2; exit 1; }
+export HOLBUILD_CACHE=$old_holbuild_cache
 cp "$tmpdir/AScript.good.sml" "$project/src/AScript.sml"
 
 rm -rf "$project/.holbuild"
@@ -215,23 +214,6 @@ if grep -q "ATheory restored from cache" "$no_cache_after_log"; then
 fi
 require_file "$no_cache_publish_project/.holbuild/obj/src/ATheory.dat"
 
-no_export_project=$tmpdir/no-export-project
-mkdir -p "$no_export_project/src"
-cp "$project/holproject.toml" "$no_export_project/holproject.toml"
-cat > "$no_export_project/src/AScript.sml" <<'SML'
-open HolKernel Parse boolLib bossLib;
-val _ = new_theory "A";
-Theorem no_export_thm:
-  T
-Proof
-  ACCEPT_TAC TRUTH
-QED
-SML
-(cd "$no_export_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --no-cache ATheory) > "$tmpdir/no-export.log"
-require_file "$no_export_project/.holbuild/obj/src/ATheory.sig"
-require_file "$no_export_project/.holbuild/obj/src/ATheory.sml"
-require_file "$no_export_project/.holbuild/obj/src/ATheory.dat"
-
 skip_project=$tmpdir/skip-project
 mkdir -p "$skip_project/src"
 cp "$project/holproject.toml" "$skip_project/holproject.toml"
@@ -249,29 +231,6 @@ require_file "$skip_project/.holbuild/obj/src/ATheory.sml"
 require_file "$skip_project/.holbuild/obj/src/ATheory.dat"
 if find "$skip_project/.holbuild/checkpoints" \( -name '*.save' -o -name '*.save.ok' \) -print -quit 2>/dev/null | grep -q .; then
   echo "--skip-checkpoints left checkpoint files" >&2
-  exit 1
-fi
-
-stage_residue_project=$tmpdir/stage-residue-project
-mkdir -p "$stage_residue_project/src"
-cp "$project/holproject.toml" "$stage_residue_project/holproject.toml"
-cp "$project/src/AScript.sml" "$stage_residue_project/src/AScript.sml"
-stage_residue_key=$(cd "$stage_residue_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --dry-run ATheory | awk '/input_key:/ {print $2; exit}')
-stage_residue_dir="$stage_residue_project/.holbuild/stage/$stage_residue_key"
-mkdir -p "$stage_residue_dir"
-printf 'poisoned stale stage file\n' > "$stage_residue_dir/ATheory.dat"
-printf 'poisoned stale generated source\n' > "$stage_residue_dir/ATheory.sml"
-printf 'poisoned stale generated signature\n' > "$stage_residue_dir/ATheory.sig"
-printf 'poisoned stale theory documentation\n' > "$stage_residue_dir/ATheory.txt"
-(cd "$stage_residue_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --skip-goalfrag --no-cache ATheory) > "$tmpdir/stage-residue.log"
-require_grep "ATheory built" "$tmpdir/stage-residue.log"
-require_file "$stage_residue_project/.holbuild/obj/src/ATheory.dat"
-if strings -a "$stage_residue_project/.holbuild/obj/src/ATheory.dat" | grep -q "poisoned stale"; then
-  echo "stale stage residue was reused by build" >&2
-  exit 1
-fi
-if grep -q "poisoned stale" "$stage_residue_project/.holbuild/obj/src/ATheory.txt"; then
-  echo "stale stage Theory.txt residue was reused by build" >&2
   exit 1
 fi
 

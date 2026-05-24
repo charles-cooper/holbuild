@@ -10,7 +10,6 @@ source "$SCRIPT_DIR/../../lib.sh"
 tmpdir=$(make_temp_dir)
 cleanup() { rm -rf "$tmpdir"; }
 trap cleanup EXIT
-export HOLBUILD_CACHE="$tmpdir/cache"
 
 make_project() {
   local project=$1
@@ -22,12 +21,20 @@ name = "diff"
 
 [build]
 members = ["src"]
+
+[run]
+loads = ["ATheory"]
 TOML
   cat > "$project/src/AScript.sml" <<SML
 open HolKernel Parse boolLib bossLib;
 val _ = new_theory "A";
 $body
 val _ = export_theory();
+val _ =
+  List.app
+    (fn (thm_name, th) =>
+        print ("@@DUMP@@" ^ thm_name ^ "\t" ^ Parse.term_to_string (Thm.concl th) ^ "\n"))
+    (DB.theorems "A");
 SML
 }
 
@@ -40,114 +47,71 @@ run_hol_run() {
 run_new_ir() {
   local project=$1
   local log=$2
-  (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --force --no-cache --skip-checkpoints --tactic-timeout 60 ATheory) > "$log" 2>&1
+  # Force ATheory itself so this remains a proof-IR execution test, but allow
+  # cache reuse for the implicit HOL dependency context.  This test's oracle is
+  # semantic equivalence, not cold-cache behaviour.
+  (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --force --skip-checkpoints --tactic-timeout 60 ATheory) > "$log" 2>&1
 }
 
-copy_hol_run_artifacts() {
-  local project=$1
-  local dest=$2
-  mkdir -p "$dest"
-  cp "$project/.hol/objs"/ATheory.{dat,sml,sig} "$dest/"
+extract_theory_summary() {
+  local log=$1
+  local dump=$2
+  awk '/^@@DUMP@@/ { sub(/^@@DUMP@@/, ""); print }' "$log" | LC_ALL=C sort -t $'\t' -k1,1 > "$dump"
 }
 
-normalize_generated_sml() {
-  sed -E \
-    -e 's#holpathdb\.subst_pathvars "[^"]*ATheory\.dat"#holpathdb.subst_pathvars "<ATheory.dat>"#' \
-    -e 's#hash = "[0-9a-f]+"#hash = "<dat-hash>"#' \
-    "$1"
-}
-
-compare_generated_sml() {
+# Dump the holbuild result through holbuild's own run context.  Loading
+# source-built HOL artifacts directly into prebuilt hol.state is not a valid
+# oracle; [run].loads above asks holbuild to load ATheory in the context it
+# built.
+dump_holbuild_summary() {
   local name=$1
-  local hol_sml=$2
-  local ir_sml=$3
-  local hol_norm=$tmpdir/$name.hol-run.ATheory.sml.norm
-  local ir_norm=$tmpdir/$name.new-ir.ATheory.sml.norm
-  normalize_generated_sml "$hol_sml" > "$hol_norm"
-  normalize_generated_sml "$ir_sml" > "$ir_norm"
-  if ! cmp -s "$hol_norm" "$ir_norm"; then
-    echo "normalized generated ATheory.sml mismatch for $name" >&2
-    diff -u "$hol_norm" "$ir_norm" >&2 || true
+  local project=$2
+  local log=$3
+  local dump=$4
+  local script=$project/.holbuild-dump-ATheory.sml
+  cat > "$script" <<'SML'
+val thms = DB.theorems "A";
+val _ =
+  List.app
+    (fn (thm_name, th) =>
+        print ("@@DUMP@@" ^ thm_name ^ "\t" ^ Parse.term_to_string (Thm.concl th) ^ "\n"))
+    thms;
+SML
+  set +e
+  (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" run .holbuild-dump-ATheory.sml) > "$log" 2>&1
+  local status=$?
+  set -e
+  if [[ "$status" != 0 ]]; then
+    echo "holbuild theory summary command failed for $project" >&2
+    tail -80 "$log" >&2
     exit 1
   fi
-}
-
-prepare_load_root() {
-  local artifacts=$1
-  local root=$2
-  mkdir -p "$root/.hol/objs"
-  cp "$artifacts"/ATheory.{dat,sml,sig} "$root/.hol/objs/"
-  sed -E \
-    "s#holpathdb\.subst_pathvars \"[^\"]*ATheory\.dat\"#holpathdb.subst_pathvars \"$root/ATheory.dat\"#" \
-    "$artifacts/ATheory.sml" > "$root/.hol/objs/ATheory.sml"
-}
-
-dump_theory_summary() {
-  local name=$1
-  local kind=$2
-  local artifacts=$3
-  local log=$4
-  local dump=$5
-  local root=$tmpdir/$name.$kind.loadroot
-  local script=$tmpdir/$name.$kind.dump-ATheory.sml
-  prepare_load_root "$artifacts" "$root"
-  cat > "$script" <<SML
-open HolKernel Parse boolLib bossLib;
-val _ = let val out = HOLFileSys.openOut "$root/ATheory.ui" in HOLFileSys.output(out, "$root/ATheory.sig\n"); HOLFileSys.closeOut out end;
-val _ = let val out = HOLFileSys.openOut "$root/ATheory.uo" in HOLFileSys.output(out, "$root/ATheory.sml\n"); HOLFileSys.closeOut out end;
-val result =
-  (load "$root/ATheory";
-   SOME (DB.theorems "A"))
-  handle e => (print ("@@DUMP_ERROR@@ " ^ General.exnMessage e ^ "\\n"); NONE);
-val _ =
-  case result of
-    NONE => OS.Process.exit OS.Process.failure
-  | SOME thms =>
-      (List.app
-         (fn (thm_name, th) =>
-             print ("@@DUMP@@" ^ thm_name ^ "\t" ^ term_to_string (concl th) ^ "\\n"))
-         thms;
-       OS.Process.exit OS.Process.success);
-SML
-  "$HOLDIR/bin/hol" --noconfig --holstate "$HOLDIR/bin/hol.state" < "$script" > "$log" 2>&1
-  grep '^@@DUMP@@' "$log" | sed 's/^@@DUMP@@//' > "$dump"
+  extract_theory_summary "$log" "$dump"
   if [[ ! -s "$dump" ]]; then
-    echo "empty theory summary for $artifacts" >&2
+    echo "empty holbuild theory summary for $project" >&2
     tail -80 "$log" >&2
     exit 1
   fi
 }
 
-compare_dat_semantics() {
+compare_success_summaries() {
   local name=$1
-  local hol_dir=$2
-  local ir_dir=$3
-  local hol_dump=$tmpdir/$name.hol-run.ATheory.dat.dump
-  local ir_dump=$tmpdir/$name.new-ir.ATheory.dat.dump
-  dump_theory_summary "$name" hol-run "$hol_dir" "$tmpdir/$name.hol-run.dump.log" "$hol_dump"
-  dump_theory_summary "$name" new-ir "$ir_dir" "$tmpdir/$name.new-ir.dump.log" "$ir_dump"
+  local hol_log=$2
+  local project=$3
+  local hol_dump=$tmpdir/$name.hol-run.ATheory.summary
+  local ir_dump=$tmpdir/$name.new-ir.ATheory.summary
+  extract_theory_summary "$hol_log" "$hol_dump"
+  if [[ ! -s "$hol_dump" ]]; then
+    echo "empty direct HOL theory summary for $name" >&2
+    tail -80 "$hol_log" >&2
+    exit 1
+  fi
+  dump_holbuild_summary "$name" "$project" "$tmpdir/$name.new-ir.dump.log" "$ir_dump"
   if ! cmp -s "$hol_dump" "$ir_dump"; then
-    echo "loaded ATheory.dat theorem summary mismatch for $name" >&2
+    echo "exported ATheory theorem summary mismatch for $name" >&2
     diff -u "$hol_dump" "$ir_dump" >&2 || true
     exit 1
   fi
-}
-
-compare_success_artifacts() {
-  local name=$1
-  local hol_artifacts=$2
-  local project=$3
-  local ir_flat=$tmpdir/$name.new-ir-artifacts
-  mkdir -p "$ir_flat"
-  cp "$project/.holbuild/obj/src"/ATheory.{sml,sig} "$ir_flat/"
-  cp "$project/.holbuild/obj/src"/ATheory.dat "$ir_flat/"
-
-  cmp "$hol_artifacts/ATheory.sig" "$ir_flat/ATheory.sig" || {
-    echo "generated ATheory.sig mismatch for $name" >&2
-    exit 1
-  }
-  compare_generated_sml "$name" "$hol_artifacts/ATheory.sml" "$ir_flat/ATheory.sml"
-  compare_dat_semantics "$name" "$hol_artifacts" "$ir_flat"
 }
 
 check_case() {
@@ -156,16 +120,12 @@ check_case() {
   local project=$tmpdir/$name
   local hol_log=$tmpdir/$name.hol-run.log
   local ir_log=$tmpdir/$name.new-ir.log
-  local hol_artifacts=$tmpdir/$name.hol-run-artifacts
   make_project "$project" "$body"
 
   set +e
   run_hol_run "$project" "$hol_log"
   local hol_status=$?
   set -e
-  if [[ "$hol_status" == 0 ]]; then
-    copy_hol_run_artifacts "$project" "$hol_artifacts"
-  fi
 
   rm -rf "$project/.hol" "$project/.holbuild" "$project"/src/ATheory.{sig,sml,dat,ui,uo}
 
@@ -184,13 +144,11 @@ check_case() {
   fi
 
   if [[ "$hol_status" == 0 ]]; then
-    compare_success_artifacts "$name" "$hol_artifacts" "$project"
+    compare_success_summaries "$name" "$hol_log" "$project"
   fi
 }
 
-check_case success_suite 'val bad_tac = fn g => ([g], fn _ => TRUTH);
-
-Theorem existential_name_provider:
+check_case initial_success_suite 'Theorem existential_name_provider:
   ?sab:bool. sab
 Proof
   qexists_tac `T` >> simp[]
@@ -245,15 +203,17 @@ Proof
   ALL_TAC >- (ALL_TAC >> ACCEPT_TAC TRUTH)
 QED
 
-Theorem branch_then1_lhs_sequence_success:
+'
+
+check_case branch_then1_lhs_sequence_failure 'Theorem thm:
   ((T ∨ T) ⇒ T) ∧ T
 Proof
   CONJ_TAC
   >- (ALL_TAC >> strip_tac >- ACCEPT_TAC TRUTH >> ACCEPT_TAC TRUTH)
   >- ACCEPT_TAC TRUTH
-QED
+QED'
 
-Theorem branch_suffix_reverse_success:
+check_case remaining_success_suite 'Theorem branch_suffix_reverse_success:
   ((T ∧ T) ∧ (T ∧ T)) ∧ T
 Proof
   CONJ_TAC
@@ -540,11 +500,17 @@ Proof
   >> ACCEPT_TAC TRUTH
 QED
 
-Theorem invalid_intermediate:
+'
+
+check_case invalid_intermediate_failure 'val bad_tac = fn g => ([g], fn _ => TRUTH);
+
+Theorem thm:
   T
 Proof
   bad_tac >> ACCEPT_TAC TRUTH
-QED
+QED'
+
+check_case invalid_intermediate_then1_failure 'val bad_tac = fn g => ([g], fn _ => TRUTH);
 
 Theorem invalid_intermediate_then1:
   T ∧ T
@@ -552,13 +518,15 @@ Proof
   CONJ_TAC >- (bad_tac >> ACCEPT_TAC TRUTH) >- ACCEPT_TAC TRUTH
 QED
 
-Theorem then_suffix_after_solved:
+'
+
+check_case then_suffix_after_solved_failure 'Theorem thm:
   T
 Proof
   ACCEPT_TAC TRUTH >> FAIL_TAC "should be skipped over []"
-QED
+QED'
 
-Theorem parser_recovery:
+check_case parser_recovery_failure 'Theorem parser_recovery:
   T
 Proof
   ( ACCEPT_TAC TRUTH

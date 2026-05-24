@@ -84,13 +84,14 @@ fun absolute_from_cwd path =
 
 fun set_source_dir path = source_dir_ref := SOME (absolute_from_cwd path)
 
-fun builtin_holdir_dependency name = name = "HOLDIR"
+val implicit_hol_package_name = "HOL"
 
-fun builtin_holdir_manifest () = HolbuildBuiltinManifests.holdir_manifest_name
+fun reserved_hol_dependency name = name = "HOLDIR" orelse name = implicit_hol_package_name
 
-fun uses_builtin_holdir_manifest (Dependency {name, manifest = NONE, ...}) =
-      builtin_holdir_dependency name
-  | uses_builtin_holdir_manifest _ = false
+fun require_not_reserved_dependency (Dependency {name, ...}) =
+  if reserved_hol_dependency name then
+    die ("do not declare [dependencies." ^ name ^ "]; HOL sources are implicit via --holdir/HOLBUILD_HOLDIR/HOLDIR")
+  else ()
 
 fun original_dir () =
   case OS.Process.getEnv "HOLBUILD_ORIG_CWD" of
@@ -507,7 +508,8 @@ fun parse_table_at table {manifest, root, artifact_root, local_config} =
       members = members,
       excludes = excludes,
       roots = roots,
-      dependencies = dependencies_at table,
+      dependencies = let val deps = dependencies_at table
+                     in List.app require_not_reserved_dependency deps; deps end,
       overrides = overrides,
       local_build_excludes = build_excludes,
       local_build_jobs = build_jobs,
@@ -520,9 +522,6 @@ fun parse_table_at table {manifest, root, artifact_root, local_config} =
   end
 
 fun parse_at args = parse_table_at (TOML.fromFile (#manifest args)) args
-
-fun parse_builtin_holdir_at args =
-  parse_table_at (TOML.fromString HolbuildBuiltinManifests.holdir_manifest_text) args
 
 fun parse manifest =
   let
@@ -611,18 +610,16 @@ fun dependency_local_path ({root, overrides, ...} : t) (Dependency {name, path, 
        | NONE =>
            case path of
                SOME p => SOME (expand_env (dependency_path_context name) p)
-             | NONE => if builtin_holdir_dependency name then !holdir_ref else NONE)
+             | NONE => NONE)
 
 fun dependency_manifest (project as {manifest = project_manifest, ...} : t) dep =
   case dep of
       Dependency {name, manifest = SOME manifest, ...} =>
         SOME (abs_under (manifest_root project_manifest)
                 (expand_env (dependency_manifest_context name) manifest))
-    | Dependency {name, manifest = NONE, ...} =>
-        if builtin_holdir_dependency name then SOME (builtin_holdir_manifest ())
-        else
-          Option.map (fn path => Path.concat(path, "holproject.toml"))
-            (dependency_local_path project dep)
+    | Dependency {manifest = NONE, ...} =>
+        Option.map (fn path => Path.concat(path, "holproject.toml"))
+          (dependency_local_path project dep)
 
 fun heap_to_string (Heap {name, output, objects}) =
   name ^ " -> " ^ output ^ " [" ^ String.concatWith ", " objects ^ "]"
@@ -662,11 +659,9 @@ fun dependency_project (project : t) (dep as Dependency {name, ...}) =
           SOME manifest => manifest
         | NONE => die ("dependency " ^ name ^ " has no manifest")
     val parse_dep =
-      if uses_builtin_holdir_manifest dep then parse_builtin_holdir_at
-      else
-        (if readable dep_manifest then ()
-         else die ("dependency " ^ name ^ " manifest not found: " ^ dep_manifest);
-         parse_at)
+      (if readable dep_manifest then ()
+       else die ("dependency " ^ name ^ " manifest not found: " ^ dep_manifest);
+       parse_at)
     val dep_project = parse_dep {manifest = dep_manifest, root = dep_root, artifact_root = dep_root,
                                  local_config = LocalConfig {overrides = #overrides project,
                                                              build_excludes = #local_build_excludes project,
@@ -698,6 +693,69 @@ fun dependency_package artifact_parent project (dep as Dependency {name, ...}) =
      dep_project)
   end
 
+val implicit_hol_members =
+  ["src",
+   "examples/algorithms",
+   "examples/category",
+   "examples/computability",
+   "examples/Crypto",
+   "examples/data-structures",
+   "examples/formal-languages",
+   "examples/l3-machine-code",
+   "examples/pl-semantics/lprefix_lub",
+   "examples/machine-code/hoare-triple"]
+
+val implicit_hol_excludes =
+  ["*selftest*.sml",
+   "*/test.sml",
+   "src/experimental-kernel/*",
+   "src/tracing/yes/*",
+   "src/portableML/mosml/*",
+   "src/portableML/mlton/*",
+   "src/emit/MLton/*",
+   "src/compute/examples/*",
+   "src/num/reduce/conv-old/*",
+   "src/quotient/examples/*",
+   "src/tfl/examples/*",
+   "src/*/theory_tests/*",
+   "src/*/test/*",
+   "src/holyhammer/examples/*",
+   "src/tactictoe/examples/*",
+   "examples/l3-machine-code/monadic-arm/*"]
+
+val implicit_hol_action_policies = []
+
+fun canonical_path path = Path.mkCanonical path handle Path.InvalidArc => path
+
+fun implicit_hol_source_key holdir =
+  HolbuildHash.string_sha1
+    (String.concatWith "\n"
+       (["holbuild-implicit-hol-source-v1",
+         "holdir=" ^ canonical_path holdir,
+         "members=" ^ String.concatWith "," implicit_hol_members] @
+        map (fn exclude => "exclude=" ^ exclude) implicit_hol_excludes @
+        map (fn ActionPolicy {logical, deps, ...} =>
+               "policy=" ^ logical ^ ":" ^ String.concatWith "," deps)
+            implicit_hol_action_policies) ^ "\n")
+
+fun implicit_hol_artifact_root holdir =
+  Path.concat(Path.concat(HolbuildCacheRoots.hol_cache_root (), "implicit-hol"), implicit_hol_source_key holdir)
+  handle HolbuildCacheRoots.Error msg => die msg
+
+fun implicit_hol_package _ =
+  let
+    val holdir =
+      case !holdir_ref of
+          SOME path => path
+        | NONE => die "set --holdir, HOLBUILD_HOLDIR, or HOLDIR"
+    val manifest = Path.concat(holdir, "holproject.toml")
+  in
+    Package {name = implicit_hol_package_name, root = holdir, manifest = manifest,
+             members = implicit_hol_members, excludes = implicit_hol_excludes, roots = [],
+             artifact_root = implicit_hol_artifact_root holdir,
+             action_policies = implicit_hol_action_policies, generators = []}
+  end
+
 fun packages (project : t) =
   let
     val artifact_parent = artifact_root project
@@ -717,7 +775,9 @@ fun packages (project : t) =
     and add_project current_project state =
       List.foldl (add_dependency current_project) state (#dependencies current_project)
     val root_package = project_package project
-    val (_, packages) = add_project project ([package_name root_package], [root_package])
+    val hol_package = implicit_hol_package artifact_parent
+    val _ = if package_name root_package = implicit_hol_package_name then die "project.name HOL is reserved for the implicit HOL checkout" else ()
+    val (_, packages) = add_project project ([implicit_hol_package_name, package_name root_package], [hol_package, root_package])
   in
     rev packages
   end

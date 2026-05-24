@@ -8,12 +8,12 @@ Before source discovery, holbuild runs stale `[[generate]]` steps in dependency 
 
 holbuild infers source dependencies from the resolved project graph:
 
-1. **Holdep scanning** — `load "X"` / `open X` in source, plus `HOLSource` headers (e.g. `Theory Foo` / `Ancestors Bar`), resolved against the project graph + HOL toolchain `sigobj/`
-2. **Action `deps`** — explicit logical dependencies declared in `[actions.*]`
-3. **Action `loads`** — explicit loadable module stems; resolved in project DAG first, then HOL toolchain
-4. **Companion signatures** — `Foo.sml` implicitly depends on same-package `Foo.sig`
+1. **Holdep token dependencies** — holbuild runs `HOLSource.fileToReader` plus `Holdep_tokens.reader_deps` and resolves mentioned logical names through the package index. Ordinary packages do not use Holmake `INCLUDES`, `$HOLDIR/sigobj`, prebuilt object files, custom `load`/`open` scanning, or cross-package `.sig` guesses.
+2. **Implicit-HOL Holmakefile prerequisites** — for the implicit `HOL` package only, explicit local Holmakefile `.uo`/`.ui` rule prerequisites are imported as source metadata and resolved through the HOL package index. Unresolved object prerequisites are ignored rather than loaded from `sigobj` or prebuilt object directories.
+3. **Action `deps`** — explicit logical dependencies declared in `[actions.*]`
+4. **Action `loads`** — explicit loadable module stems declared in `[actions.*]`
 
-Unresolved `load` directives or `deps` entries → build error.
+Unresolved ordinary-package Holdep mentions, action `loads`, or action `deps` entries → build error. The implicit `HOL` package may still ignore unresolved HOL-internal object/tool prerequisites rather than satisfying them from prebuilt object directories.
 
 ## Source `use "file"` is rejected
 
@@ -32,7 +32,7 @@ Build order: dependencies loaded first, then dependents. Parallel-ready: `-jN` w
 | `FooScript.sml` | `FooTheory` | `FooTheory.sig`, `FooTheory.sml` | `FooScript.uo`, `FooTheory.ui`, `FooTheory.uo` | `FooTheory.dat` |
 | `Foo.sml` (no sig) | `Foo` | — | `Foo.ui`, `Foo.uo` | — |
 | `Foo.sig` | `Foo` | — | `Foo.ui` | — |
-| `Foo.sml` + `Foo.sig` | `Foo` (companion pair) | — | `Foo.ui`, `Foo.uo` | — |
+| `Foo.sml` + `Foo.sig` | `Foo` (interface + implementation) | — | `Foo.ui`, `Foo.uo` | — |
 
 All artifact paths are under `.holbuild/`, with `HOLFileSys` remap copies under nested `.hol/objs/`.
 
@@ -50,7 +50,7 @@ hash(
   dependency input keys (recursively),
   declared action policy (deps, loads, extra_deps, cache, always_reexecute),
   extra dependency hashes,
-  toolchain key (hol binary + hol.state hashes)
+  toolchain key (hol binary + hol.state0/bare bootstrap hashes)
 )
 ```
 
@@ -82,7 +82,7 @@ locks/                          # publish + GC locks
 
 Cache publish: after a source build, theory artifacts (sig, sml, dat) are stored as blobs. New HOL `Theory.sml` files are relocatable and copied unchanged; old HOL `Theory.sml` files are rebased to the local adjacent `.dat` path before publishing.
 
-Cache restore: on action-key or parent-output key match, blobs are materialized into local `.holbuild/`, `HOLFileSys` remap copies are created, and `.uo/.ui` load manifests are written.
+Cache restore: on source/dependency key, parent-output key, or path-dependent parent-output key match, blobs are materialized into local `.holbuild/`, `HOLFileSys` remap copies are created, and `.uo/.ui` load manifests are written.
 
 **A bad cache hit is worse than a missed cache hit.** Validation:
 - Action key must match

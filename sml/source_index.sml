@@ -7,6 +7,10 @@ structure FS = OS.FileSys
 exception Error of string
 exception ErrorWithDebugArtifacts of string * HolbuildStatus.debug_artifacts
 
+val implicit_hol_package_name = HolbuildProject.implicit_hol_package_name
+
+fun is_implicit_hol_package package = package = implicit_hol_package_name
+
 datatype kind = TheoryScript | Sml | Sig
 
 type artifacts =
@@ -20,8 +24,11 @@ type source =
     logical_name : string,
     source_path : string,
     relative_path : string,
+    artifact_root : string,
     artifacts : artifacts,
-    policy : HolbuildProject.action_policy }
+    policy : HolbuildProject.action_policy,
+    bare : bool,
+    holmake_deps : string list }
 
 type t = source list
 
@@ -63,8 +70,7 @@ fun dat_path root rel name = theory_obj_path root rel name ".dat"
 
 fun theory_artifacts root rel theory =
   { generated = [theory_obj_path root rel theory ".sig",
-                 theory_obj_path root rel theory ".sml",
-                 theory_obj_path root rel theory ".txt"],
+                 theory_obj_path root rel theory ".sml"],
     objects = [obj_path root rel ".uo", theory_obj_path root rel theory ".ui",
                theory_obj_path root rel theory ".uo"],
     theory_data = [dat_path root rel theory] }
@@ -75,19 +81,38 @@ fun sml_artifacts root rel =
 fun sig_artifacts root rel =
   { generated = [], objects = [obj_path root rel ".ui"], theory_data = [] }
 
-fun make_source package policies kind logical_name source_path relative_path artifacts =
+fun read_prefix path max_chars =
+  let
+    val ins = TextIO.openIn path
+    val text = TextIO.inputN (ins, max_chars) before TextIO.closeIn ins
+  in text end
+  handle _ => ""
+
+fun contains_substring needle haystack =
+  let
+    val n = size needle
+    val h = size haystack
+    fun at i = i + n <= h andalso String.substring(haystack, i, n) = needle
+    fun loop i = i + n <= h andalso (at i orelse loop (i + 1))
+  in n = 0 orelse loop 0 end
+
+fun source_bare_marker path = contains_substring "[bare]" (read_prefix path 2048)
+
+fun make_source package artifact_root policies kind logical_name source_path relative_path artifacts =
   {package = package,
    kind = kind,
    logical_name = logical_name,
    source_path = source_path,
    relative_path = relative_path,
+   artifact_root = artifact_root,
    artifacts = artifacts,
-   policy = HolbuildProject.action_policy_for policies logical_name}
+   policy = HolbuildProject.action_policy_for policies logical_name,
+   bare = source_bare_marker source_path,
+   holmake_deps = []}
 
 fun generated_theory_artifact file =
   has_suffix "Theory.sml" file orelse
-  has_suffix "Theory.sig" file orelse
-  has_suffix "Theory.txt" file
+  has_suffix "Theory.sig" file
 
 fun classify package source_root artifact_root policies abs_path =
   let
@@ -99,17 +124,24 @@ fun classify package source_root artifact_root policies abs_path =
       let
         val theory = drop_suffix "Script.sml" file ^ "Theory"
       in
-        SOME (make_source package policies TheoryScript theory abs_path rel
+        if is_implicit_hol_package package andalso HolbuildBootstrap.is_bare_theory theory then NONE
+        else SOME (make_source package artifact_root policies TheoryScript theory abs_path rel
                             (theory_artifacts artifact_root rel theory))
       end
     else if has_suffix ".sml" file then
       let val logical = drop_suffix ".sml" file
-      in SOME (make_source package policies Sml logical abs_path rel
-                           (sml_artifacts artifact_root rel)) end
+      in
+        if is_implicit_hol_package package andalso HolbuildBootstrap.is_bare_module logical then NONE
+        else SOME (make_source package artifact_root policies Sml logical abs_path rel
+                           (sml_artifacts artifact_root rel))
+      end
     else if has_suffix ".sig" file then
       let val logical = drop_suffix ".sig" file
-      in SOME (make_source package policies Sig logical abs_path rel
-                           (sig_artifacts artifact_root rel)) end
+      in
+        if is_implicit_hol_package package andalso HolbuildBootstrap.is_bare_module logical then NONE
+        else SOME (make_source package artifact_root policies Sig logical abs_path rel
+                           (sig_artifacts artifact_root rel))
+      end
     else NONE
   end
 
@@ -150,15 +182,11 @@ fun list_dir path =
 
 fun list_dir_if_readable path = list_dir path handle Error _ => []
 
-fun has_source_path path sources =
-  let val path = normalize_path path
-  in List.exists (fn source : source => normalize_path (#source_path source) = path) sources end
-
 fun scan_file package source_root artifact_root policies excludes path acc =
   if excluded excludes (relative_path source_root path) then acc
   else case classify package source_root artifact_root policies path of
       NONE => acc
-    | SOME source => if has_source_path path acc then acc else source :: acc
+    | SOME source => source :: acc
 
 fun scan_dir package source_root artifact_root policies excludes path acc =
   let
@@ -183,40 +211,126 @@ fun compare_source (a : source, b : source) =
       EQUAL => String.compare(#relative_path a, #relative_path b)
     | order => order
 
-fun compatible_same_name (a : source) (b : source) =
-  #package a = #package b andalso
-  (case (#kind a, #kind b) of
-       (Sml, Sig) => true
-     | (Sig, Sml) => true
-     | _ => false)
+fun compare_logical (a : source, b : source) =
+  case String.compare(#logical_name a, #logical_name b) of
+      EQUAL => compare_source(a, b)
+    | order => order
 
-fun by_logical sources =
+fun compare_source_path (a : source, b : source) =
+  case String.compare(normalize_path (#source_path a), normalize_path (#source_path b)) of
+      EQUAL => compare_source(a, b)
+    | order => order
+
+fun compatible_same_name sources =
+  case sources of
+      [a, b] =>
+        #package a = #package b andalso
+        ((#kind a = Sml andalso #kind b = Sig) orelse
+         (#kind a = Sig andalso #kind b = Sml))
+    | _ => false
+
+fun duplicate_logical_error logical sources =
+  raise Error ("duplicate logical name " ^ logical ^ ": " ^
+               String.concatWith " and "
+                 (map (fn source => #package source ^ ":" ^ #relative_path source) sources))
+
+fun validate_logical_uniqueness sources =
   let
-    fun conflicts source other =
-      #logical_name source = #logical_name other andalso
-      not (compatible_same_name source other)
-    fun insert (source, seen) =
-      case List.find (conflicts source) seen of
-          NONE => source :: seen
-        | SOME other =>
-            raise Error ("duplicate logical name " ^ #logical_name source ^ ": " ^
-                         #package other ^ ":" ^ #relative_path other ^ " and " ^
-                         #package source ^ ":" ^ #relative_path source)
+    fun finish_group logical group =
+      case group of
+          [] => ()
+        | [_] => ()
+        | _ => if compatible_same_name group then () else duplicate_logical_error logical (rev group)
+    fun loop current group rest =
+      case rest of
+          [] => finish_group current group
+        | source :: sources' =>
+            if #logical_name source = current then loop current (source :: group) sources'
+            else (finish_group current group; loop (#logical_name source) [source] sources')
   in
-    ignore (List.foldl insert [] sources);
-    sources
+    case sources of
+        [] => ()
+      | source :: rest => loop (#logical_name source) [source] rest
   end
 
-fun insert_sorted source sources =
-  case sources of
-      [] => [source]
-    | x :: xs =>
-        if compare_source(source, x) = LESS then source :: sources
-        else x :: insert_sorted source xs
+fun split_sources sources =
+  let
+    fun loop left right rest =
+      case rest of
+          [] => (left, right)
+        | [x] => (x :: left, right)
+        | x :: y :: xs => loop (x :: left) (y :: right) xs
+  in
+    loop [] [] sources
+  end
 
-fun sort_sources sources = List.foldl (fn (source, acc) => insert_sorted source acc) [] sources
+fun merge_sources compare left right =
+  case (left, right) of
+      ([], _) => right
+    | (_, []) => left
+    | (x :: xs, y :: ys) =>
+        if compare(x, y) = GREATER then y :: merge_sources compare left ys
+        else x :: merge_sources compare xs right
+
+fun sort_by compare sources =
+  case sources of
+      [] => []
+    | [_] => sources
+    | _ =>
+        let val (left, right) = split_sources sources
+        in merge_sources compare (sort_by compare left) (sort_by compare right) end
+
+fun sort_sources sources = sort_by compare_source sources
+
+fun with_holmake_deps deps (source : source) =
+  {package = #package source,
+   kind = #kind source,
+   logical_name = #logical_name source,
+   source_path = #source_path source,
+   relative_path = #relative_path source,
+   artifact_root = #artifact_root source,
+   artifacts = #artifacts source,
+   policy = #policy source,
+   bare = #bare source,
+   holmake_deps = deps}
+
+fun validate_unique_source_paths sources =
+  let
+    fun source_id source = normalize_path (#source_path source)
+    fun duplicate_error path group =
+      raise Error ("source path appears in multiple package members: " ^ path ^ " as " ^
+                   String.concatWith " and "
+                     (map (fn source => #package source ^ ":" ^ #relative_path source) (rev group)))
+    fun finish path group =
+      case group of
+          [] => ()
+        | [_] => ()
+        | _ => duplicate_error path group
+    fun loop current group rest =
+      case rest of
+          [] => finish current group
+        | source :: sources' =>
+            let val path = source_id source
+            in
+              if path = current then loop current (source :: group) sources'
+              else (finish current group; loop path [source] sources')
+            end
+  in
+    case sources of
+        [] => ()
+      | source :: rest => loop (source_id source) [source] rest
+  end
+
+fun by_logical sources =
+  let val logical_sorted = sort_by compare_logical sources
+  in validate_logical_uniqueness logical_sorted; sources end
+
+fun by_source_path sources =
+  let val path_sorted = sort_by compare_source_path sources
+  in validate_unique_source_paths path_sorted; sources end
 
 fun validate_action_policies package_name policies sources =
+  if is_implicit_hol_package package_name then () else
   let
     fun has_logical logical =
       List.exists
@@ -236,7 +350,72 @@ fun validate_action_policies package_name policies sources =
 fun scan_member name source_root artifact_root policies excludes (member, acc) =
   if is_dir member then scan_dir name source_root artifact_root policies excludes member acc
   else if is_readable member then scan_file name source_root artifact_root policies excludes member acc
+  else if is_implicit_hol_package name then acc
   else raise Error ("member does not exist: " ^ member)
+
+fun strip_object_suffix file =
+  if has_suffix ".uo" file then SOME (drop_suffix ".uo" file)
+  else if has_suffix ".ui" file then SOME (drop_suffix ".ui" file)
+  else NONE
+
+fun source_target_name (source : source) =
+  case #kind source of
+      Sig => #logical_name source ^ ".ui"
+    | _ => #logical_name source ^ ".uo"
+
+fun source_dir (source : source) = Path.dir (#source_path source)
+
+fun same_dir a b = normalize_path a = normalize_path b
+
+fun source_logical_in_package package_name sources logical =
+  List.exists (fn source => #package source = package_name andalso #logical_name source = logical) sources
+
+fun dep_logical dep = strip_object_suffix (filename dep)
+
+fun holmake_rule_info holmakefile =
+  let
+    val dir = Path.dir holmakefile
+    val old = FS.getDir ()
+    fun restore () = FS.chDir old handle OS.SysErr _ => ()
+    fun die msg = raise Error msg
+    fun parse () =
+      ReadHMF.diagread {warn = fn _ => (), info = fn _ => (), die = die}
+                       holmakefile (Holmake_types.base_environment ())
+  in
+    (FS.chDir dir;
+     parse () before restore ())
+    handle e =>
+      (restore ();
+       raise Error ("could not read HOL Holmakefile dependency metadata from " ^
+                    holmakefile ^ ": " ^ General.exnMessage e))
+  end
+
+fun holmake_deps_for_source sources source =
+  let
+    val hmf = Path.concat(source_dir source, "Holmakefile")
+  in
+    if not (is_implicit_hol_package (#package source)) orelse not (is_readable hmf) then []
+    else
+      let val (env, ruledb, _) = holmake_rule_info hmf
+      in
+        case Holmake_types.get_rule_info ruledb env (source_target_name source) of
+            NONE => []
+          | SOME {dependencies, ...} =>
+              sort_by String.compare
+                (List.mapPartial
+                   (fn dep =>
+                       case dep_logical dep of
+                           NONE => NONE
+                         | SOME logical =>
+                             if logical = #logical_name source then NONE
+                             else if source_logical_in_package (#package source) sources logical then SOME logical
+                             else NONE)
+                   dependencies)
+      end
+  end
+
+fun add_holmake_deps sources =
+  map (fn source => with_holmake_deps (holmake_deps_for_source sources source) source) sources
 
 fun discover_package package acc =
   let
@@ -252,23 +431,29 @@ fun discover_package package acc =
     val members =
       map (fn member => HolbuildProject.abs_under source_root member)
         (HolbuildProject.package_members package)
-    val sources =
+    val package_sources =
       List.foldl
         (scan_member name source_root artifact_root policies excludes)
-        acc
+        []
         members
-    val _ = validate_action_policies name policies sources
+    val _ = validate_action_policies name policies package_sources
   in
-    sources
+    package_sources @ acc
   end
 
 fun discover (project : HolbuildProject.t) =
-  by_logical
-    (sort_sources
-       (List.foldl
-          (fn (package, acc) => discover_package package acc)
-          []
-          (HolbuildProject.packages project)))
+  let
+    val sources =
+      sort_sources
+        (List.foldl
+           (fn (package, acc) => discover_package package acc)
+           []
+           (HolbuildProject.packages project))
+    val _ = by_source_path sources
+    val _ = by_logical sources
+  in
+    add_holmake_deps sources
+  end
 
 fun kind_string kind =
   case kind of
@@ -281,13 +466,15 @@ fun print_list label values =
       [] => ()
     | _ => print ("  " ^ label ^ ": " ^ String.concatWith ", " values ^ "\n")
 
-fun describe_source ({package, kind, logical_name, relative_path,
+fun describe_source ({package, kind, logical_name, relative_path, bare, holmake_deps,
                       artifacts = {generated, objects, theory_data}, ...} : source) =
   (print (logical_name ^ " (" ^ kind_string kind ^ ", package " ^ package ^ ")\n");
    print ("  source: " ^ package ^ ":" ^ relative_path ^ "\n");
+   if bare then print "  bare: true\n" else ();
    print_list "generated" generated;
    print_list "objects" objects;
-   print_list "theory_data" theory_data)
+   print_list "theory_data" theory_data;
+   print_list "holmake deps" holmake_deps)
 
 fun describe sources = List.app describe_source sources
 
@@ -328,9 +515,17 @@ fun roots_for_package sources package =
     (HolbuildProject.package_roots package)
 
 fun default_targets sources project =
-  List.concat
-    (map (roots_for_package sources)
-         (List.filter (fn package => not (null (HolbuildProject.package_roots package)))
-                      (HolbuildProject.packages project)))
+  let
+    val rooted =
+      List.concat
+        (map (roots_for_package sources)
+             (List.filter (fn package => not (null (HolbuildProject.package_roots package)))
+                          (HolbuildProject.packages project)))
+  in
+    if not (null rooted) then rooted
+    else
+      map #logical_name
+        (List.filter (fn source => not (is_implicit_hol_package (#package source))) sources)
+  end
 
 end

@@ -18,7 +18,7 @@ fun usage () = print
   \  holbuild [--json] [--quiet|--verbose|--verbosity LEVEL] [--source-dir PATH] [--holdir PATH] [--maxheap MB] [-jN] context\n\
   \  holbuild [--json] [--quiet|--verbose|--verbosity LEVEL] [--source-dir PATH] [--holdir PATH] [--maxheap MB] [-jN] execution-plan THEORY:THEOREM\n\
   \  holbuild [--json] [--quiet|--verbose|--verbosity LEVEL] [--source-dir PATH] [--holdir PATH] [--maxheap MB] [-jN] goalfrag-plan THEORY:THEOREM\n\
-  \  holbuild [--json] [--quiet|--verbose|--verbosity LEVEL] [--source-dir PATH] [--holdir PATH] [--maxheap MB] [-jN] build [--dry-run] [--force[=theory|project|full]] [--no-cache] [--skip-checkpoints] [--skip-goalfrag] [--goalfrag] [--strict-parse] [--tactic-timeout SECONDS] [--goalfrag-plan THEORY:THEOREM] [--goalfrag-trace] [--repl-on-failure] [--retain-debug-artifacts] [TARGET ...]\n\
+  \  holbuild [--json] [--quiet|--verbose|--verbosity LEVEL] [--source-dir PATH] [--holdir PATH] [--maxheap MB] [-jN] build [--dry-run] [--force[=theory|project|full]] [--no-cache] [--skip-checkpoints] [--no-auto-intermediate-closures] [--skip-goalfrag] [--goalfrag] [--strict-parse] [--tactic-timeout SECONDS] [--goalfrag-plan THEORY:THEOREM] [--goalfrag-trace] [--repl-on-failure] [--retain-debug-artifacts] [TARGET ...]\n\
   \  holbuild [--json] [--quiet|--verbose|--verbosity LEVEL] [--source-dir PATH] [--holdir PATH] [--maxheap MB] [-jN] heap NAME\n\
   \  holbuild [--json] [--quiet|--verbose|--verbosity LEVEL] [--source-dir PATH] [--holdir PATH] [--maxheap MB] run [ARG ...]\n\
   \  holbuild [--json] [--quiet|--verbose|--verbosity LEVEL] [--source-dir PATH] [--holdir PATH] [--maxheap MB] repl [ARG ...]\n\
@@ -55,10 +55,11 @@ fun force_level_value text =
 
 fun split_flags args =
   let
-    fun loop dry force use_cache skip_checkpoints goalfrag new_ir tactic_timeout tactic_timeout_set goalfrag_plan goalfrag_trace repl_on_failure retain_debug_artifacts strict_parse rest =
+    fun loop dry force use_cache skip_checkpoints auto_contexts goalfrag new_ir tactic_timeout tactic_timeout_set goalfrag_plan goalfrag_trace repl_on_failure retain_debug_artifacts strict_parse rest =
       case rest of
           [] => ({dry_run = dry, force = force, use_cache = use_cache,
                   skip_checkpoints = skip_checkpoints,
+                  auto_contexts = auto_contexts,
                   goalfrag = goalfrag, new_ir = new_ir,
                   tactic_timeout = tactic_timeout,
                   tactic_timeout_set = tactic_timeout_set,
@@ -68,60 +69,62 @@ fun split_flags args =
                   retain_debug_artifacts = retain_debug_artifacts,
                   strict_parse = strict_parse}, [])
         | "--dry-run" :: xs =>
-            loop true force use_cache skip_checkpoints goalfrag new_ir tactic_timeout tactic_timeout_set goalfrag_plan goalfrag_trace repl_on_failure retain_debug_artifacts strict_parse xs
+            loop true force use_cache skip_checkpoints auto_contexts goalfrag new_ir tactic_timeout tactic_timeout_set goalfrag_plan goalfrag_trace repl_on_failure retain_debug_artifacts strict_parse xs
         | "--force" :: xs =>
-            loop dry HolbuildBuildExec.ForceAll use_cache skip_checkpoints goalfrag new_ir tactic_timeout tactic_timeout_set goalfrag_plan goalfrag_trace repl_on_failure retain_debug_artifacts strict_parse xs
+            loop dry HolbuildBuildExec.ForceAll use_cache skip_checkpoints auto_contexts goalfrag new_ir tactic_timeout tactic_timeout_set goalfrag_plan goalfrag_trace repl_on_failure retain_debug_artifacts strict_parse xs
         | "--force-theory" :: xs =>
-            loop dry HolbuildBuildExec.ForceTargets use_cache skip_checkpoints goalfrag new_ir tactic_timeout tactic_timeout_set goalfrag_plan goalfrag_trace repl_on_failure retain_debug_artifacts strict_parse xs
+            loop dry HolbuildBuildExec.ForceTargets use_cache skip_checkpoints auto_contexts goalfrag new_ir tactic_timeout tactic_timeout_set goalfrag_plan goalfrag_trace repl_on_failure retain_debug_artifacts strict_parse xs
         | "--force-project" :: xs =>
-            loop dry HolbuildBuildExec.ForceProject use_cache skip_checkpoints goalfrag new_ir tactic_timeout tactic_timeout_set goalfrag_plan goalfrag_trace repl_on_failure retain_debug_artifacts strict_parse xs
+            loop dry HolbuildBuildExec.ForceProject use_cache skip_checkpoints auto_contexts goalfrag new_ir tactic_timeout tactic_timeout_set goalfrag_plan goalfrag_trace repl_on_failure retain_debug_artifacts strict_parse xs
         | "--force-full" :: xs =>
-            loop dry HolbuildBuildExec.ForceAll use_cache skip_checkpoints goalfrag new_ir tactic_timeout tactic_timeout_set goalfrag_plan goalfrag_trace repl_on_failure retain_debug_artifacts strict_parse xs
+            loop dry HolbuildBuildExec.ForceAll use_cache skip_checkpoints auto_contexts goalfrag new_ir tactic_timeout tactic_timeout_set goalfrag_plan goalfrag_trace repl_on_failure retain_debug_artifacts strict_parse xs
         | "--no-cache" :: xs =>
-            loop dry force false skip_checkpoints goalfrag new_ir tactic_timeout tactic_timeout_set goalfrag_plan goalfrag_trace repl_on_failure retain_debug_artifacts strict_parse xs
+            loop dry force false skip_checkpoints auto_contexts goalfrag new_ir tactic_timeout tactic_timeout_set goalfrag_plan goalfrag_trace repl_on_failure retain_debug_artifacts strict_parse xs
         | "--skip-checkpoints" :: xs =>
-            loop dry force use_cache true goalfrag new_ir tactic_timeout tactic_timeout_set goalfrag_plan goalfrag_trace repl_on_failure retain_debug_artifacts strict_parse xs
+            loop dry force use_cache true auto_contexts goalfrag new_ir tactic_timeout tactic_timeout_set goalfrag_plan goalfrag_trace repl_on_failure retain_debug_artifacts strict_parse xs
+        | "--no-auto-intermediate-closures" :: xs =>
+            loop dry force use_cache skip_checkpoints false goalfrag new_ir tactic_timeout tactic_timeout_set goalfrag_plan goalfrag_trace repl_on_failure retain_debug_artifacts strict_parse xs
         | "--skip-goalfrag" :: xs =>
-            loop dry force use_cache skip_checkpoints false false tactic_timeout tactic_timeout_set goalfrag_plan goalfrag_trace repl_on_failure retain_debug_artifacts strict_parse xs
+            loop dry force use_cache skip_checkpoints auto_contexts false false tactic_timeout tactic_timeout_set goalfrag_plan goalfrag_trace repl_on_failure retain_debug_artifacts strict_parse xs
         | "--goalfrag" :: xs =>
             (warn "--goalfrag is deprecated; proof IR is the default, use --goalfrag only for legacy GoalFrag debugging";
-             loop dry force use_cache skip_checkpoints true false tactic_timeout tactic_timeout_set goalfrag_plan goalfrag_trace repl_on_failure retain_debug_artifacts strict_parse xs)
+             loop dry force use_cache skip_checkpoints auto_contexts true false tactic_timeout tactic_timeout_set goalfrag_plan goalfrag_trace repl_on_failure retain_debug_artifacts strict_parse xs)
         | "--new-ir" :: xs =>
             (warn "--new-ir is deprecated and has no effect; proof IR is the default";
-             loop dry force use_cache skip_checkpoints goalfrag true tactic_timeout tactic_timeout_set goalfrag_plan goalfrag_trace repl_on_failure retain_debug_artifacts strict_parse xs)
+             loop dry force use_cache skip_checkpoints auto_contexts goalfrag true tactic_timeout tactic_timeout_set goalfrag_plan goalfrag_trace repl_on_failure retain_debug_artifacts strict_parse xs)
         | "--goalfrag-plan" :: theorem :: xs =>
-            loop dry force use_cache skip_checkpoints goalfrag new_ir tactic_timeout tactic_timeout_set (SOME theorem) goalfrag_trace repl_on_failure retain_debug_artifacts strict_parse xs
+            loop dry force use_cache skip_checkpoints auto_contexts goalfrag new_ir tactic_timeout tactic_timeout_set (SOME theorem) goalfrag_trace repl_on_failure retain_debug_artifacts strict_parse xs
         | "--goalfrag-plan" :: [] => raise Error "--goalfrag-plan requires THEORY:THEOREM"
         | "--goalfrag-trace" :: xs =>
-            loop dry force use_cache skip_checkpoints goalfrag new_ir tactic_timeout tactic_timeout_set goalfrag_plan true repl_on_failure retain_debug_artifacts strict_parse xs
+            loop dry force use_cache skip_checkpoints auto_contexts goalfrag new_ir tactic_timeout tactic_timeout_set goalfrag_plan true repl_on_failure retain_debug_artifacts strict_parse xs
         | "--repl-on-failure" :: xs =>
-            loop dry force use_cache skip_checkpoints goalfrag new_ir tactic_timeout tactic_timeout_set goalfrag_plan goalfrag_trace true retain_debug_artifacts strict_parse xs
+            loop dry force use_cache skip_checkpoints auto_contexts goalfrag new_ir tactic_timeout tactic_timeout_set goalfrag_plan goalfrag_trace true retain_debug_artifacts strict_parse xs
         | "--retain-debug-artifacts" :: xs =>
-            loop dry force use_cache skip_checkpoints goalfrag new_ir tactic_timeout tactic_timeout_set goalfrag_plan goalfrag_trace repl_on_failure true strict_parse xs
+            loop dry force use_cache skip_checkpoints auto_contexts goalfrag new_ir tactic_timeout tactic_timeout_set goalfrag_plan goalfrag_trace repl_on_failure true strict_parse xs
         | "--strict-parse" :: xs =>
-            loop dry force use_cache skip_checkpoints goalfrag new_ir tactic_timeout tactic_timeout_set goalfrag_plan goalfrag_trace repl_on_failure retain_debug_artifacts true xs
+            loop dry force use_cache skip_checkpoints auto_contexts goalfrag new_ir tactic_timeout tactic_timeout_set goalfrag_plan goalfrag_trace repl_on_failure retain_debug_artifacts true xs
         | "--tactic-timeout" :: seconds :: xs =>
-            loop dry force use_cache skip_checkpoints goalfrag new_ir (tactic_timeout_value seconds) true goalfrag_plan goalfrag_trace repl_on_failure retain_debug_artifacts strict_parse xs
+            loop dry force use_cache skip_checkpoints auto_contexts goalfrag new_ir (tactic_timeout_value seconds) true goalfrag_plan goalfrag_trace repl_on_failure retain_debug_artifacts strict_parse xs
         | "--tactic-timeout" :: [] => raise Error "--tactic-timeout requires SECONDS"
         | x :: xs =>
             if String.isPrefix "--force=" x then
-              loop dry (force_level_value (String.extract (x, size "--force=", NONE))) use_cache skip_checkpoints goalfrag new_ir tactic_timeout tactic_timeout_set goalfrag_plan goalfrag_trace repl_on_failure retain_debug_artifacts strict_parse xs
+              loop dry (force_level_value (String.extract (x, size "--force=", NONE))) use_cache skip_checkpoints auto_contexts goalfrag new_ir tactic_timeout tactic_timeout_set goalfrag_plan goalfrag_trace repl_on_failure retain_debug_artifacts strict_parse xs
             else if String.isPrefix "--tactic-timeout=" x then
-              loop dry force use_cache skip_checkpoints goalfrag new_ir
+              loop dry force use_cache skip_checkpoints auto_contexts goalfrag new_ir
                    (tactic_timeout_value (String.extract (x, size "--tactic-timeout=", NONE)))
                    true goalfrag_plan goalfrag_trace repl_on_failure retain_debug_artifacts strict_parse xs
             else if String.isPrefix "--goalfrag-plan=" x then
-              loop dry force use_cache skip_checkpoints goalfrag new_ir tactic_timeout tactic_timeout_set
+              loop dry force use_cache skip_checkpoints auto_contexts goalfrag new_ir tactic_timeout tactic_timeout_set
                    (SOME (String.extract (x, size "--goalfrag-plan=", NONE))) goalfrag_trace repl_on_failure retain_debug_artifacts strict_parse xs
             else if String.isPrefix "--goalfrag-trace=" x then
               raise Error "--goalfrag-trace does not take a theorem; use --goalfrag-trace TARGET"
             else if String.isPrefix "--" x then
               raise Error ("unknown build option: " ^ x)
             else
-              let val (flags, ys) = loop dry force use_cache skip_checkpoints goalfrag new_ir tactic_timeout tactic_timeout_set goalfrag_plan goalfrag_trace repl_on_failure retain_debug_artifacts strict_parse xs
+              let val (flags, ys) = loop dry force use_cache skip_checkpoints auto_contexts goalfrag new_ir tactic_timeout tactic_timeout_set goalfrag_plan goalfrag_trace repl_on_failure retain_debug_artifacts strict_parse xs
               in (flags, x :: ys) end
   in
-    loop false HolbuildBuildExec.ForceNone true false true true NONE false NONE false false false false args
+    loop false HolbuildBuildExec.ForceNone true false true true true NONE false NONE false false false false args
   end
 
 fun has_suffix suffix s =
@@ -161,7 +164,7 @@ fun root_warning_source rooted_packages built_keys source =
 fun warn_unreachable_root_scripts project index plan =
   let
     val rooted_packages = rooted_package_names project
-    val built_keys = map (source_key o HolbuildBuildPlan.source_of) plan
+    val built_keys = map (source_key o HolbuildBuildPlan.source_of) (HolbuildBuildPlan.selected_nodes plan)
     val unreachable = List.filter (root_warning_source rooted_packages built_keys) index
     fun describe source = #package source ^ ":" ^ #relative_path source ^ " (" ^ #logical_name source ^ ")"
     val limit = 20
@@ -344,7 +347,7 @@ fun timed_phase name f = HolbuildToolchain.time_phase name f
 fun build tc cli_jobs args =
   let
     val project = timed_phase "project.discover" load_project
-    val ({dry_run, force, use_cache, skip_checkpoints, goalfrag, new_ir, tactic_timeout, tactic_timeout_set, goalfrag_plan, goalfrag_trace, repl_on_failure, retain_debug_artifacts, strict_parse}, targets) = split_flags args
+    val ({dry_run, force, use_cache, skip_checkpoints, auto_contexts, goalfrag, new_ir, tactic_timeout, tactic_timeout_set, goalfrag_plan, goalfrag_trace, repl_on_failure, retain_debug_artifacts, strict_parse}, targets) = split_flags args
     val _ = HolbuildStatus.set_retain_debug_artifacts retain_debug_artifacts
     val jobs = if repl_on_failure then 1 else effective_jobs project cli_jobs
     val _ =
@@ -376,6 +379,7 @@ fun build tc cli_jobs args =
        force = force,
        force_targets = force_targets,
        skip_checkpoints = skip_checkpoints,
+       auto_contexts = auto_contexts,
        goalfrag = goalfrag,
        new_ir = new_ir,
        tactic_timeout =
@@ -406,7 +410,8 @@ fun build tc cli_jobs args =
           val build_options = build_options_for force_targets
       in
         timed_phase "dry_run.describe"
-          (fn () => HolbuildBuildPlan.describe (HolbuildBuildExec.build_config_lines_for_node build_options project) toolchain_key plan)
+          (fn () => (HolbuildBuildExec.describe_auto_contexts build_options plan;
+                     HolbuildBuildPlan.describe (HolbuildBuildExec.build_config_lines_for_node build_options project) toolchain_key plan))
       end
     fun execute_build () =
       let val (force_targets, plan, toolchain_key) = prepare_plan ()
@@ -445,9 +450,9 @@ fun build_heap tc cli_jobs target =
         val toolchain_key = timed_phase "toolchain.key" (fn () => HolbuildToolchain.toolchain_key tc)
         val output_path = HolbuildProject.abs_under (#root project) output
       in
-        HolbuildBuildExec.build {use_cache = true, force = HolbuildBuildExec.ForceNone, force_targets = [], skip_checkpoints = false, goalfrag = true, new_ir = true, tactic_timeout = SOME 2.5, goalfrag_plan = NONE, goalfrag_trace = false, repl_on_failure = false, strict_parse = false}
+        HolbuildBuildExec.build {use_cache = true, force = HolbuildBuildExec.ForceNone, force_targets = [], skip_checkpoints = false, auto_contexts = true, goalfrag = true, new_ir = true, tactic_timeout = SOME 2.5, goalfrag_plan = NONE, goalfrag_trace = false, repl_on_failure = false, strict_parse = false}
                                tc project plan toolchain_key jobs;
-        HolbuildBuildExec.export_heap tc project plan output_path
+        HolbuildBuildExec.export_heap tc project plan objects output_path
       end
   in
     HolbuildBuildExec.with_project_lock project ("heap " ^ target) execute_heap
@@ -458,7 +463,7 @@ fun hol_args_for_project tc project subcommand user_args =
     val context = HolbuildToolchain.write_run_context project
     val heap_args =
       case HolbuildProject.abs_run_heap project of
-          NONE => ["--holstate", HolbuildToolchain.base_state tc]
+          NONE => ["--bare"]
         | SOME heap => ["--holstate", heap]
   in
     HolbuildToolchain.hol_subcommand_argv tc subcommand @ heap_args @ [context] @ user_args

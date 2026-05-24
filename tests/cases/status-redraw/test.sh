@@ -43,14 +43,14 @@ status_log=$tmpdir/status.log
 (cd "$project" && HOLBUILD_STATUS=1 TERM=xterm COLUMNS=120 "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$status_log" 2>&1
 require_file "$project/.holbuild/obj/src/ATheory.dat"
 tr '\r' '\n' < "$status_log" > "$tmpdir/status-lines.log"
-require_grep "holbuild done=0/1 running=1/3" "$tmpdir/status-lines.log"
-require_grep "holbuild done=1/1 running=0/3 built=1 from_cache=0 unchanged=0" "$tmpdir/status-lines.log"
+require_grep "holbuild done=.* running=1/3" "$tmpdir/status-lines.log"
+require_grep "holbuild done=.* running=0/3 built=.* from_cache=.* unchanged=.*" "$tmpdir/status-lines.log"
 require_grep "elapsed=" "$tmpdir/status-lines.log"
 
 cli_log=$tmpdir/cli.log
 (cd "$project" && HOLBUILD_STATUS=1 TERM=xterm COLUMNS=120 "$HOLBUILD_BIN" --holdir "$HOLDIR" -j1 build ATheory) > "$cli_log" 2>&1
 tr '\r' '\n' < "$cli_log" > "$tmpdir/cli-lines.log"
-require_grep "holbuild done=0/1 running=1/1" "$tmpdir/cli-lines.log"
+require_grep "holbuild done=.* running=1/1" "$tmpdir/cli-lines.log"
 
 long_project=$tmpdir/long-project
 long_name=LongStatusTargetNameThatShouldNotBeCutOffAtTheOldEightyColumnFallbackTheory

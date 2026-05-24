@@ -84,6 +84,8 @@ fun holbuild_extra_deps (_ : string list) = ()
 val _ = holbuild_extra_deps ["../data/message.txt"]
 val input = TextIO.openIn "../data/message.txt"
 val message = TextIO.inputAll input before TextIO.closeIn input
+val _ = ignore (OS.Process.getEnv "HOLBUILD_BASIS_DEP_SMOKE")
+val _ = ignore (Time.toMilliseconds (Time.fromReal 0.0))
 val _ = if size message > 0 then () else raise Fail "empty message"
 open HolKernel Parse boolLib bossLib;
 val _ = new_theory "A";
@@ -126,7 +128,7 @@ cache = false'
 (cd "$no_cache_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$tmpdir/no_cache1.log" 2>&1
 rm -rf "$no_cache_project/.holbuild"
 (cd "$no_cache_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$tmpdir/no_cache2.log" 2>&1
-if grep -q "restored from cache" "$tmpdir/no_cache2.log"; then
+if grep -q "ATheory restored from cache" "$tmpdir/no_cache2.log"; then
   echo "cache=false action restored from cache" >&2
   exit 1
 fi
@@ -145,7 +147,27 @@ missing_dep_project="$tmpdir/missing_declared_dep"
 make_theory_project "$missing_dep_project" '[actions.ATheory]
 deps = ["Missing"]'
 if (cd "$missing_dep_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$tmpdir/missing-dep.log" 2>&1; then
-  echo "unresolved action dependency was accepted" >&2
+  echo "unresolved dependency was accepted" >&2
   exit 1
 fi
-require_grep "unresolved action dependency Missing" "$tmpdir/missing-dep.log"
+require_grep "unresolved dependency Missing" "$tmpdir/missing-dep.log"
+
+missing_holdep_project="$tmpdir/missing_holdep_dep"
+mkdir -p "$missing_holdep_project/src"
+cat > "$missing_holdep_project/holproject.toml" <<'TOML'
+[project]
+name = "missing-holdep"
+
+[build]
+members = ["src"]
+TOML
+cat > "$missing_holdep_project/src/Bad.sml" <<'SML'
+(* [bare] *)
+open Missing;
+structure Bad = struct end
+SML
+if (cd "$missing_holdep_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --dry-run Bad) > "$tmpdir/missing-holdep.log" 2>&1; then
+  echo "unresolved Holdep dependency was accepted" >&2
+  exit 1
+fi
+require_grep "unresolved dependency Missing" "$tmpdir/missing-holdep.log"

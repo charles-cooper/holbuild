@@ -205,21 +205,9 @@ fun save_heap_line {label, share_common_data, output, ok_text} =
      ", ok_text = ", HolbuildToolchain.sml_string ok_text,
      ", depth = length (PolyML.SaveState.showHierarchy())};"]
 
-fun direct_external_loads plan node =
-  unique_strings
-    (HolbuildBuildPlan.direct_external_theories plan node @
-     HolbuildBuildPlan.direct_external_libs plan node)
-
 fun preload_lines plan node =
-  let
-    val external_deps = HolbuildBuildPlan.direct_external_theories plan node
-    val external_libs = HolbuildBuildPlan.direct_external_libs plan node
-    val project_deps = HolbuildBuildPlan.direct_project_deps plan node
-  in
-    map load_theory_line external_deps @
-    map load_project_line external_libs @
-    List.concat (map project_preload_lines project_deps)
-  end
+  let val project_deps = HolbuildBuildPlan.direct_project_deps plan node
+  in List.concat (map project_preload_lines project_deps) end
 
 fun write_preload plan node deps_loaded deps_ok path =
   let
@@ -234,14 +222,17 @@ fun write_preload plan node deps_loaded deps_ok path =
 fun write_plain_preload plan node path =
   write_text path (String.concatWith "\n" (preload_lines plan node) ^ "\n")
 
-fun mldep_report_lines NONE = []
-  | mldep_report_lines (SOME report_path) =
-      ["val holbuild_mldeps_out = TextIO.openOut " ^ HolbuildToolchain.sml_string report_path ^ ";",
-       "val _ = (List.app (fn s => TextIO.output(holbuild_mldeps_out, s ^ \"\\n\")) (Theory.current_ML_deps()); TextIO.closeOut holbuild_mldeps_out);"]
+fun report_string_list_lines _ NONE _ = []
+  | report_string_list_lines var (SOME report_path) values =
+      ["val " ^ var ^ " = TextIO.openOut " ^ HolbuildToolchain.sml_string report_path ^ ";",
+       "val _ = (List.app (fn s => TextIO.output(" ^ var ^ ", s ^ \"\\n\")) (" ^ values ^ "); TextIO.closeOut " ^ var ^ ");"]
 
-fun export_theory_if_needed_line sig_path =
-  "val _ = if OS.FileSys.access(" ^ HolbuildToolchain.sml_string sig_path ^
-  ", [OS.FileSys.A_READ]) then () else export_theory();"
+fun mldep_report_lines report_path =
+  report_string_list_lines "holbuild_mldeps_out" report_path "Theory.current_ML_deps()"
+
+fun parent_report_lines theory_name report_path =
+  report_string_list_lines "holbuild_parents_out" report_path
+    ("map (fn thy => thy ^ \"Theory\") (Theory.parents " ^ HolbuildToolchain.sml_string theory_name ^ ")")
 
 fun write_manifest_line path lines =
   String.concat
@@ -259,7 +250,7 @@ fun hfs_unmapped_path path =
     else path
   end
 
-fun final_context_loader_lines {sig_path, sml_path, mldeps_report} =
+fun final_context_loader_lines {theory_name, sig_path, sml_path, parents_report, mldeps_report} =
   let
     val load_sig_path = hfs_unmapped_path sig_path
     val load_sml_path = hfs_unmapped_path sml_path
@@ -267,16 +258,18 @@ fun final_context_loader_lines {sig_path, sml_path, mldeps_report} =
     val ui_path = stem ^ ".ui"
     val uo_path = stem ^ ".uo"
   in
-    export_theory_if_needed_line sig_path ::
     write_manifest_line ui_path [load_sig_path] ::
     write_manifest_line uo_path [load_sml_path] ::
+    parent_report_lines theory_name parents_report @
     mldep_report_lines mldeps_report @
     ["load " ^ HolbuildToolchain.sml_string stem ^ ";"]
   end
 
-fun write_final_context_loader {sig_path, sml_path, output, path, mldeps_report} =
+fun write_final_context_loader {theory_name, sig_path, sml_path, output, path, parents_report, mldeps_report} =
   let
-    val lines = final_context_loader_lines {sig_path = sig_path, sml_path = sml_path,
+    val lines = final_context_loader_lines {theory_name = theory_name,
+                                            sig_path = sig_path, sml_path = sml_path,
+                                            parents_report = parents_report,
                                             mldeps_report = mldeps_report} @
                 [checkpoint_save_runtime_line (),
                  save_heap_line {label = "final_context", share_common_data = true,
@@ -285,16 +278,17 @@ fun write_final_context_loader {sig_path, sml_path, output, path, mldeps_report}
     write_text path (String.concatWith "\n" lines ^ "\n")
   end
 
-fun write_plain_final_context_loader {sig_path, sml_path, path, mldeps_report} =
+fun write_plain_final_context_loader {theory_name, sig_path, sml_path, path, parents_report, mldeps_report} =
   write_text path (String.concatWith "\n"
-                     (final_context_loader_lines {sig_path = sig_path, sml_path = sml_path,
+                     (final_context_loader_lines {theory_name = theory_name,
+                                                  sig_path = sig_path, sml_path = sml_path,
+                                                  parents_report = parents_report,
                                                   mldeps_report = mldeps_report}) ^ "\n")
 
 fun generated_outputs node =
   let val generated = #generated (source_artifacts node)
   in {sig_path = one_with_suffix ".sig" generated,
-      sml_path = one_with_suffix ".sml" generated,
-      txt_path = one_with_suffix ".txt" generated}
+      sml_path = one_with_suffix ".sml" generated}
   end
 
 fun theory_outputs node =
@@ -311,19 +305,26 @@ fun theory_outputs node =
 
 fun project_artifact_root project = HolbuildProject.artifact_root project
 
-fun stage_dir (project : HolbuildProject.t) input_key =
-  Path.concat(Path.concat(project_artifact_root project, ".holbuild/stage"), input_key)
+fun source_artifact_root node = #artifact_root (HolbuildBuildPlan.source_of node)
+
+fun state_artifact_root project node =
+  if HolbuildBuildPlan.is_implicit_hol_node node then source_artifact_root node
+  else project_artifact_root project
+
+fun stage_dir_for_node project node input_key =
+  Path.concat(Path.concat(state_artifact_root project node, ".holbuild/stage"), input_key)
+
+fun log_dir_for_node project node = Path.concat(state_artifact_root project node, ".holbuild/logs")
 
 fun log_dir (project : HolbuildProject.t) = Path.concat(project_artifact_root project, ".holbuild/logs")
 
 fun retained_checkpoint_failure_log project node input_key =
-  Path.concat(log_dir project, input_key ^ "-" ^ logical_name node ^ "-instrumented-failure.log")
+  Path.concat(log_dir_for_node project node, input_key ^ "-" ^ logical_name node ^ "-instrumented-failure.log")
 
 fun retained_goalfrag_trace_log project node input_key =
-  Path.concat(log_dir project, input_key ^ "-" ^ logical_name node ^ "-goalfrag-trace.log")
+  Path.concat(log_dir_for_node project node, input_key ^ "-" ^ logical_name node ^ "-goalfrag-trace.log")
 
 fun staged_theory_file stage node ext = Path.concat(Path.concat(stage, ".hol/objs"), logical_name node ^ ext)
-fun staged_theory_doc_file stage node = Path.concat(stage, logical_name node ^ ".txt")
 fun staged_dat_reference stage node = Path.concat(stage, logical_name node ^ ".dat")
 
 fun canonical_path path = Path.mkCanonical path handle Path.InvalidArc => path
@@ -386,10 +387,17 @@ fun stage_dat_references stage node =
 fun stage_dat_replacements stage node final_dat =
   map (fn path_ref => (path_ref, final_dat)) (stage_dat_references stage node)
 
+fun object_state_base node =
+  case #objects (#artifacts (HolbuildBuildPlan.source_of node)) of
+      object :: _ => object
+    | [] => raise Error ("node has no object artifact for checkpoint state: " ^ logical_name node)
+
 fun checkpoint_base (project : HolbuildProject.t) node =
-  Path.concat(Path.concat(Path.concat(project_artifact_root project, ".holbuild/checkpoints"),
-                          HolbuildBuildPlan.package node),
-              HolbuildBuildPlan.relative_path node)
+  if HolbuildBuildPlan.is_implicit_hol_node node then object_state_base node ^ ".checkpoints"
+  else
+    Path.concat(Path.concat(Path.concat(project_artifact_root project, ".holbuild/checkpoints"),
+                            HolbuildBuildPlan.package node),
+                HolbuildBuildPlan.relative_path node)
 
 fun deps_checkpoint_root project node = checkpoint_base project node ^ ".deps"
 
@@ -810,11 +818,13 @@ fun extra_dep_lines label base decls =
 
 fun current_metadata path = SOME (read_text path) handle IO.Io _ => NONE
 
-datatype hol_context = HolState of string
+datatype hol_context = HolState of string | BareState of string
 
 fun hol_context_path (HolState path) = path
+  | hol_context_path (BareState path) = path
 
 fun hol_context_args (HolState path) = ["--holstate", path]
+  | hol_context_args (BareState _) = ["--bare"]
 
 fun validate_hol_context context =
   let val path = hol_context_path context
@@ -885,7 +895,75 @@ fun run_hol_files_to_log tc stage workdir context files log_name error_message =
          child_log_detail log])
   end
 
-fun toolchain_base_context tc = HolState (HolbuildToolchain.base_state tc)
+fun toolchain_base_context tc = BareState (HolbuildToolchain.base_state0 tc)
+
+fun standard_env_key toolchain_key input_lines =
+  HolbuildHash.string_sha1 (String.concatWith "\n" ([toolchain_key, "standard-env-v2"] @ input_lines) ^ "\n")
+
+fun hol_cache_root () = HolbuildCacheRoots.hol_cache_root () handle HolbuildCacheRoots.Error msg => raise Error msg
+
+fun global_checkpoint_path family key =
+  Path.concat(Path.concat(Path.concat(hol_cache_root (), "checkpoints"), family), key ^ ".save")
+
+fun standard_env_path _ key =
+  global_checkpoint_path "standard-env" key
+
+fun standard_env_ok_text key =
+  checkpoint_ok_text "standard_env" [("key", key)]
+
+fun standard_env_exists path key =
+  checkpoint_exists path andalso
+  HolbuildCheckpointStore.ok_matches (fn _ => ()) path [("kind", "standard_env"), ("key", key)]
+
+fun find_unique_logical plan name =
+  let
+    fun loadable node = #kind (HolbuildBuildPlan.source_of node) <> HolbuildSourceIndex.Sig
+  in
+    case List.filter loadable (HolbuildBuildPlan.lookup plan name) of
+        [node] => SOME node
+      | [] => NONE
+      | _ => raise Error ("multiple standard-env candidates for " ^ name)
+  end
+
+fun standard_env_inputs keys plan =
+  case (find_unique_logical plan "bossLib", find_unique_logical plan "holTheory") of
+      (SOME boss, SOME hol) =>
+        SOME {nodes = [boss, hol],
+              lines = ["bossLib=" ^ HolbuildBuildPlan.input_key_for keys boss,
+                       "holTheory=" ^ HolbuildBuildPlan.input_key_for keys hol]}
+    | _ => NONE
+
+fun write_standard_env_loader load_lines output ok_text path =
+  write_text path
+    (String.concatWith "\n"
+       (load_lines @
+        ["open bossLib;",
+         checkpoint_save_runtime_line (),
+         save_heap_line {label = "standard_env", share_common_data = true,
+                         output = output, ok_text = ok_text}]) ^ "\n")
+
+fun ensure_standard_env_context_from_sources tc project toolchain_key keys plan =
+  case standard_env_inputs keys plan of
+      NONE => NONE
+    | SOME {nodes, lines} =>
+      let
+        val key = standard_env_key toolchain_key lines
+        val output = standard_env_path project key
+        val stage = Path.concat(Path.concat(project_artifact_root project, ".holbuild/stage"), "standard-env")
+        val loader = Path.concat(stage, "holbuild-save-standard-env.sml")
+        val load_lines = map (load_project_line o load_stem) nodes
+      in
+        if standard_env_exists output key then SOME (HolState output)
+        else
+          (ensure_dir stage;
+           ensure_parent output;
+           write_standard_env_loader load_lines output (standard_env_ok_text key) loader;
+           run_hol_files_to_log tc stage stage (toolchain_base_context tc) [loader]
+             "holbuild-standard-env.log"
+             "hol run failed while creating source-built standard HOL environment checkpoint";
+           remove_tree stage;
+           SOME (HolState output))
+      end
 
 val cache_sml_token = "__HOLBUILD_THEORY_DAT_LOAD__"
 
@@ -1039,6 +1117,9 @@ fun cleanup_json_stage stage =
 
 fun cache_root () = HolbuildCache.cache_root ()
 
+fun cache_root_for_node node =
+  if HolbuildBuildPlan.is_implicit_hol_node node then hol_cache_root () else cache_root ()
+
 fun file_hash_matches path hash =
   file_exists path andalso file_hash path = hash
   handle _ => false
@@ -1052,16 +1133,17 @@ fun cache_blob root path =
     hash
   end
 
-fun cache_manifest_text {input_key, sig_hash, sml_hash, txt_hash, dat_hash, mldeps} =
+fun cache_manifest_text {input_key, sig_hash, sml_hash, dat_hash, parents, mldeps} =
   String.concatWith "\n"
-    (["holbuild-cache-action-v1",
+    (["holbuild-cache-action-v2",
       "input_key=" ^ input_key,
       "kind=theory",
-      "mldeps"] @
+      "parents"] @
+     map (fn parent => "parent " ^ parent) parents @
+     ["mldeps"] @
      map (fn dep => "mldep " ^ dep) mldeps @
      ["blob sig " ^ sig_hash,
       "blob sml " ^ sml_hash,
-      "blob txt " ^ txt_hash,
       "blob dat " ^ dat_hash]) ^ "\n"
 
 fun cache_manifest_lines text = String.tokens (fn c => c = #"\n") text
@@ -1084,7 +1166,7 @@ fun require_sha1 role hash =
   if valid_sha1_text hash then hash
   else raise Error ("cache manifest invalid " ^ role ^ " blob hash: " ^ hash)
 
-fun known_blob_role role = role = "sig" orelse role = "sml" orelse role = "sml-template" orelse role = "txt" orelse role = "dat"
+fun known_blob_role role = role = "sig" orelse role = "sml" orelse role = "sml-template" orelse role = "dat"
 
 fun add_manifest_blob role hash blobs =
   if not (known_blob_role role) then
@@ -1151,34 +1233,44 @@ fun add_mldep dep deps =
   else if List.exists (fn existing => existing = dep) deps then deps
   else dep :: deps
 
-fun parse_cache_manifest_line input_key line (saw_header, saw_input, saw_kind, saw_mldeps, blobs, mldeps) =
-  if line = "holbuild-cache-action-v1" then
+fun add_parent parent parents =
+  if not (valid_mldep_name parent) then
+    raise Error ("cache manifest invalid parent: " ^ parent)
+  else if List.exists (fn existing => existing = parent) parents then parents
+  else parent :: parents
+
+fun parse_cache_manifest_line input_key line (saw_header, saw_input, saw_kind, saw_parents, saw_mldeps, blobs, parents, mldeps) =
+  if line = "holbuild-cache-action-v2" then
     if saw_header then raise Error "cache manifest duplicate header"
-    else (true, saw_input, saw_kind, saw_mldeps, blobs, mldeps)
+    else (true, saw_input, saw_kind, saw_parents, saw_mldeps, blobs, parents, mldeps)
   else if line = "input_key=" ^ input_key then
     if saw_input then raise Error "cache manifest duplicate input key"
-    else (saw_header, true, saw_kind, saw_mldeps, blobs, mldeps)
+    else (saw_header, true, saw_kind, saw_parents, saw_mldeps, blobs, parents, mldeps)
   else if String.isPrefix "input_key=" line then
     raise Error "cache manifest input key mismatch"
   else if line = "kind=theory" then
     if saw_kind then raise Error "cache manifest duplicate kind"
-    else (saw_header, saw_input, true, saw_mldeps, blobs, mldeps)
+    else (saw_header, saw_input, true, saw_parents, saw_mldeps, blobs, parents, mldeps)
   else if String.isPrefix "kind=" line then
     raise Error "cache manifest unsupported kind"
+  else if line = "parents" then
+    if saw_parents then raise Error "cache manifest duplicate parents marker"
+    else (saw_header, saw_input, saw_kind, true, saw_mldeps, blobs, parents, mldeps)
   else if line = "mldeps" then
     if saw_mldeps then raise Error "cache manifest duplicate mldeps marker"
-    else (saw_header, saw_input, saw_kind, true, blobs, mldeps)
+    else (saw_header, saw_input, saw_kind, saw_parents, true, blobs, parents, mldeps)
   else
     case String.tokens Char.isSpace line of
-        ["mldep", dep] => (saw_header, saw_input, saw_kind, saw_mldeps, blobs, add_mldep dep mldeps)
-      | ["blob", role, hash] => (saw_header, saw_input, saw_kind, saw_mldeps, add_manifest_blob role hash blobs, mldeps)
+        ["parent", parent] => (saw_header, saw_input, saw_kind, saw_parents, saw_mldeps, blobs, add_parent parent parents, mldeps)
+      | ["mldep", dep] => (saw_header, saw_input, saw_kind, saw_parents, saw_mldeps, blobs, parents, add_mldep dep mldeps)
+      | ["blob", role, hash] => (saw_header, saw_input, saw_kind, saw_parents, saw_mldeps, add_manifest_blob role hash blobs, parents, mldeps)
       | _ => raise Error ("cache manifest unknown line: " ^ line)
 
 fun cache_manifest_blobs_from_lines input_key lines =
   let
-    val (saw_header, saw_input, saw_kind, saw_mldeps, blobs, mldeps) =
+    val (saw_header, saw_input, saw_kind, _, saw_mldeps, blobs, parents, mldeps) =
       List.foldl (fn (line, state) => parse_cache_manifest_line input_key line state)
-                 (false, false, false, false, [], []) lines
+                 (false, false, false, false, false, [], [], []) lines
     val _ = if saw_header then () else raise Error "cache manifest missing header"
     val _ = if saw_input then () else raise Error "cache manifest missing input key"
     val _ = if saw_kind then () else raise Error "cache manifest missing kind"
@@ -1189,8 +1281,8 @@ fun cache_manifest_blobs_from_lines input_key lines =
     in
       {sig_hash = blob_from_manifest "sig" blobs,
        sml_hash = sml_blob_from_manifest blobs,
-       txt_hash = blob_from_manifest "txt" blobs,
        dat_hash = blob_from_manifest "dat" blobs,
+       parents = rev parents,
        mldeps = stable_mldeps}
     end
   end
@@ -1201,22 +1293,21 @@ fun cache_manifest_blobs root input_key =
 
 fun cache_entry_usable root input_key text =
   let
-    val {sig_hash, sml_hash, txt_hash, dat_hash, ...} =
+    val {sig_hash, sml_hash, dat_hash, ...} =
       cache_manifest_blobs_from_lines input_key (cache_manifest_lines text)
   in
     file_hash_matches (HolbuildCache.blob_path root sig_hash) sig_hash andalso
     file_hash_matches (HolbuildCache.blob_path root sml_hash) sml_hash andalso
-    file_hash_matches (HolbuildCache.blob_path root txt_hash) txt_hash andalso
     file_hash_matches (HolbuildCache.blob_path root dat_hash) dat_hash
   end
   handle _ => false
 
-fun cache_manifest_output_summary {sig_hash, sml_hash, txt_hash, dat_hash, mldeps} =
+fun cache_manifest_output_summary {sig_hash, sml_hash, dat_hash, parents, mldeps} =
   String.concat
     ["sig=", sig_hash,
      " sml=", sml_hash,
-     " txt=", txt_hash,
      " dat=", dat_hash,
+     " parents=", Int.toString (length parents),
      " mldeps=", Int.toString (length mldeps)]
 
 fun cache_conflict_warning cache_key manifest_path subject old_manifest new_manifest =
@@ -1268,12 +1359,14 @@ fun dat_mentions_stage_key input_key staged_dat =
     String.isSubstring "stage" text
   end
 
-fun path_dependent_cache_key project input_key =
+fun path_dependent_cache_root project node = state_artifact_root project node
+
+fun path_dependent_cache_key project node input_key =
   HolbuildHash.string_sha1
     (String.concatWith "\n"
        ["holbuild-path-dependent-cache-v1",
         "input_key=" ^ input_key,
-        "root=" ^ canonical_path (project_artifact_root project)] ^ "\n")
+        "root=" ^ canonical_path (path_dependent_cache_root project node)] ^ "\n")
 
 fun direct_project_theory_deps plan node =
   List.filter
@@ -1300,21 +1393,21 @@ fun parent_output_cache_key plan node input_key =
 
 fun theory_cache_keys project plan node input_key =
   let val context_key = parent_output_cache_key plan node input_key
-  in unique_strings [context_key, path_dependent_cache_key project context_key] end
+  in unique_strings [context_key, path_dependent_cache_key project node context_key] end
 
 fun cache_warning_subject node =
   String.concat [logical_name node, " (", source_file node, ")"]
 
-fun publish_cache_manifest root cache_key subject staged_sig published_sml published_txt staged_dat cache_mldeps =
+fun publish_cache_manifest root cache_key subject staged_sig published_sml staged_dat parents cache_mldeps =
   let
     val manifest_path = HolbuildCache.action_manifest root cache_key
     val sig_hash = cache_blob root staged_sig
     val sml_hash = cache_blob root published_sml
-    val txt_hash = cache_blob root published_txt
     val dat_hash = cache_blob root staged_dat
     val manifest = cache_manifest_text {input_key = cache_key, sig_hash = sig_hash,
-                                        sml_hash = sml_hash, txt_hash = txt_hash,
+                                        sml_hash = sml_hash,
                                         dat_hash = dat_hash,
+                                        parents = parents,
                                         mldeps = cache_mldeps}
     val existing = current_metadata manifest_path
   in
@@ -1328,17 +1421,17 @@ fun publish_cache_manifest root cache_key subject staged_sig published_sml publi
       | NONE => write_text manifest_path manifest
   end
 
-fun publish_theory_cache project plan node input_key staged_sig published_sml published_txt staged_dat mldeps =
+fun publish_theory_cache project plan node input_key staged_sig published_sml staged_dat parents mldeps =
   let
-    val root = cache_root ()
+    val root = cache_root_for_node node
     val _ = HolbuildCache.ensure_layout root
     val cache_mldeps = List.filter (not o transient_stage_mldep) mldeps
     val context_key = parent_output_cache_key plan node input_key
     val path_dependent = List.exists transient_stage_mldep mldeps andalso dat_mentions_stage_key context_key staged_dat
-    val cache_key = if path_dependent then path_dependent_cache_key project context_key else context_key
+    val cache_key = if path_dependent then path_dependent_cache_key project node context_key else context_key
     fun drop_stale_manifest key = remove_file (HolbuildCache.action_manifest root key)
     val subject = cache_warning_subject node
-    fun publish () = publish_cache_manifest root cache_key subject staged_sig published_sml published_txt staged_dat cache_mldeps
+    fun publish () = publish_cache_manifest root cache_key subject staged_sig published_sml staged_dat parents cache_mldeps
     fun skip_locked_publish () = ()
   in
     ((if cache_key <> input_key then
@@ -1352,7 +1445,12 @@ fun publish_theory_cache project plan node input_key staged_sig published_sml pu
   end
 
 fun project_node_named plan name =
-  List.find (fn candidate => HolbuildBuildPlan.logical_name candidate = name) plan
+  let fun loadable node = #kind (HolbuildBuildPlan.source_of node) <> HolbuildSourceIndex.Sig
+  in
+    case List.filter loadable (HolbuildBuildPlan.lookup plan name) of
+        node :: _ => SOME node
+      | [] => NONE
+  end
 
 fun mldep_load_stem plan dep =
   case project_node_named plan dep of
@@ -1364,66 +1462,37 @@ fun mldep_load_stems plan mldeps = unique_strings (map (mldep_load_stem plan) ml
 fun stable_generated_mldeps mldeps =
   List.filter (not o transient_stage_mldep) mldeps
 
-fun drop_object_suffix path =
-  if has_suffix ".uo" path then String.substring(path, 0, size path - 3)
-  else if has_suffix ".ui" path then String.substring(path, 0, size path - 3)
-  else path
-
-fun same_path a b = Path.mkCanonical a = Path.mkCanonical b handle Path.InvalidArc => a = b
-
-fun generated_holdep_stem plan tc dep =
+fun read_string_list_report label path =
   let
-    val stem = drop_object_suffix dep
-    val sigobj = Path.concat(#holdir tc, "sigobj")
-    fun same_load_stem node = same_path (load_stem node) stem
-  in
-    case List.find same_load_stem plan of
-        SOME node => HolbuildBuildPlan.logical_name node
-      | NONE => if same_path (Path.dir stem) sigobj then Path.file stem else stem
-  end
-
-fun holfs_unmapped_theory_artifact path =
-  let
-    val {dir, file} = Path.splitDirFile path
-    val {dir = parent, file = leaf} = Path.splitDirFile dir
-  in
-    if leaf = "objs" andalso Path.file parent = ".hol" then
-      Path.concat(Path.dir parent, file)
-    else path
-  end
-
-fun generated_holdep_include_dirs tc plan =
-  unique_strings (Path.concat(#holdir tc, "sigobj") :: map (Path.dir o load_stem) plan)
-
-fun generated_holdep_mldeps plan tc path =
-  let
-    val deps = HolbuildDependencies.resolved_holdep_deps
-                 (generated_holdep_include_dirs tc plan)
-                 (holfs_unmapped_theory_artifact path)
-  in
-    unique_strings (map (generated_holdep_stem plan tc) deps)
-  end
-
-fun read_mldeps_report path =
-  let
-    val deps = String.tokens (fn c => c = #"\n") (read_text path)
+    val values = String.tokens (fn c => c = #"\n") (read_text path)
     val _ =
       List.app
-        (fn dep => if valid_mldep_name dep then ()
-                   else raise Error ("invalid generated theory ML dependency: " ^ dep))
-        deps
+        (fn value => if valid_mldep_name value then ()
+                     else raise Error ("invalid generated theory " ^ label ^ ": " ^ value))
+        values
   in
-    unique_strings deps
+    unique_strings values
   end
 
-fun write_local_theory_manifests plan node mldeps =
+fun read_mldeps_report path = read_string_list_report "ML dependency" path
+fun read_parents_report path = read_string_list_report "parent" path
+
+fun parent_load_stem plan parent =
+  if HolbuildBootstrap.is_bare_logical parent then NONE
+  else
+    case project_node_named plan parent of
+        SOME node => SOME (load_stem node)
+      | NONE => raise Error ("exported theory parent is not in the resolved build graph: " ^ parent)
+
+fun parent_load_stems plan parents = unique_strings (List.mapPartial (parent_load_stem plan) parents)
+
+fun write_local_theory_manifests plan node parents mldeps =
   let
     val {sig_path, sml_path, script_uo, theory_ui, theory_uo, ...} = theory_outputs node
     val deps = HolbuildBuildPlan.direct_project_deps plan node
-    val theory_loads = HolbuildBuildPlan.direct_external_theories plan node @
-                       project_theory_load_stems deps @
+    val theory_loads = parent_load_stems plan parents @
                        mldep_load_stems plan (stable_generated_mldeps mldeps)
-    val script_loads = direct_external_loads plan node @ project_load_stems deps
+    val script_loads = project_load_stems deps
   in
     write_object_manifest theory_ui [sig_path];
     write_object_manifest theory_uo (theory_loads @ [sml_path]);
@@ -1433,12 +1502,10 @@ fun write_local_theory_manifests plan node mldeps =
 fun remove_failed_cache_outputs project node =
   let
     val {sig_path, sml_path, data_path, script_uo, theory_ui, theory_uo} = theory_outputs node
-    val {txt_path, ...} = generated_outputs node
     val paths =
       [data_path, hfs_remapped_path data_path,
        sig_path, hfs_remapped_path sig_path,
        sml_path, hfs_remapped_path sml_path,
-       txt_path, hfs_remapped_path txt_path,
        script_uo, hfs_remapped_path script_uo,
        theory_ui, hfs_remapped_path theory_ui,
        theory_uo, hfs_remapped_path theory_uo]
@@ -1450,7 +1517,7 @@ fun remove_failed_cache_outputs project node =
 fun cache_key_role project plan node input_key cache_key =
   let
     val context_key = parent_output_cache_key plan node input_key
-    val path_key = path_dependent_cache_key project context_key
+    val path_key = path_dependent_cache_key project node context_key
   in
     if cache_key = input_key then "source/dependency key"
     else if cache_key = context_key then "parent-output key"
@@ -1460,7 +1527,7 @@ fun cache_key_role project plan node input_key cache_key =
 
 fun materialize_theory_cache_key project plan input_key cache_key node =
   let
-    val root = cache_root ()
+    val root = cache_root_for_node node
     val manifest = HolbuildCache.action_manifest root cache_key
     val role = cache_key_role project plan node input_key cache_key
     val _ = if file_exists manifest then ()
@@ -1471,21 +1538,18 @@ fun materialize_theory_cache_key project plan input_key cache_key node =
       case transient_stage_mldep_in_manifest manifest_text of
           SOME dep => transient_cache_manifest_error root cache_key manifest manifest_text dep
         | NONE => ()
-    val {sig_hash, sml_hash, txt_hash, dat_hash, mldeps} =
+    val {sig_hash, sml_hash, dat_hash, parents, mldeps} =
       cache_manifest_blobs_from_lines cache_key (cache_manifest_lines manifest_text)
     val {sig_path, sml_path, data_path, ...} = theory_outputs node
-    val {txt_path, ...} = generated_outputs node
     fun install () =
       (copy_blob root dat_hash data_path;
        copy_blob root dat_hash (hfs_remapped_path data_path);
        copy_blob root sig_hash sig_path;
        copy_blob root sig_hash (hfs_remapped_path sig_path);
-       copy_blob root txt_hash txt_path;
-       copy_blob root txt_hash (hfs_remapped_path txt_path);
        copy_blob root sml_hash sml_path;
        write_text sml_path (replace_all cache_sml_token data_path (read_text sml_path));
        write_text (hfs_remapped_path sml_path) (read_text sml_path);
-       write_local_theory_manifests plan node mldeps;
+       write_local_theory_manifests plan node parents mldeps;
        HolbuildCache.touch manifest;
        cache_trace ("cache hit: " ^ logical_name node ^ " " ^ role ^ "=" ^ cache_key);
        true)
@@ -1507,9 +1571,14 @@ fun materialize_theory_cache _ project plan input_key node =
 fun metadata_path (project : HolbuildProject.t) node =
   let
     val source = HolbuildBuildPlan.source_of node
-    val base = Path.concat(Path.concat(project_artifact_root project, ".holbuild/dep"), #package source)
   in
-    Path.concat(base, #relative_path source ^ ".key")
+    if HolbuildBuildPlan.is_implicit_hol_source source then
+      (case #objects (#artifacts source) of
+           object :: _ => object ^ ".key"
+         | [] => #source_path source ^ ".holbuild-key")
+    else
+      let val base = Path.concat(Path.concat(project_artifact_root project, ".holbuild/dep"), #package source)
+      in Path.concat(base, #relative_path source ^ ".key") end
   end
 
 fun theorem_context_path project node deps_key proof_engine prefix_hash safe_name =
@@ -1645,18 +1714,14 @@ fun declaration_checkpoint_specs proof_engine project node deps_key source termi
 fun dependency_context_key toolchain_key plan keys node =
   let
     val project_deps = HolbuildBuildPlan.transitive_project_deps plan node
-    val external_theories = HolbuildBuildPlan.direct_external_theories plan node
-    val external_libs = HolbuildBuildPlan.direct_external_libs plan node
     val project_lines = map (fn dep => "project " ^ HolbuildBuildPlan.key dep ^ " " ^
                                        HolbuildBuildPlan.input_key_for keys dep)
                             project_deps
-    val theory_lines = map (fn dep => "external_theory " ^ dep) external_theories
-    val lib_lines = map (fn dep => "external_lib " ^ dep) external_libs
   in
     HolbuildToolchain.hash_text
       (String.concatWith "\n"
          (["holbuild-dependency-context-v1",
-           "toolchain_key=" ^ toolchain_key] @ project_lines @ theory_lines @ lib_lines) ^ "\n")
+           "toolchain_key=" ^ toolchain_key] @ project_lines) ^ "\n")
   end
 
 fun metadata_lines text = String.tokens (fn c => c = #"\n") text
@@ -1778,7 +1843,7 @@ fun best_failed_prefix_checkpoint checkpoints =
 
 datatype force_level = ForceNone | ForceTargets | ForceProject | ForceAll
 
-type build_options = {use_cache : bool, force : force_level, force_targets : string list, skip_checkpoints : bool, goalfrag : bool, new_ir : bool, tactic_timeout : real option, goalfrag_plan : string option, goalfrag_trace : bool, repl_on_failure : bool, strict_parse : bool}
+type build_options = {use_cache : bool, force : force_level, force_targets : string list, skip_checkpoints : bool, auto_contexts : bool, goalfrag : bool, new_ir : bool, tactic_timeout : real option, goalfrag_plan : string option, goalfrag_trace : bool, repl_on_failure : bool, strict_parse : bool}
 
 datatype checkpoint_policy =
   CheckpointPolicy of {checkpoint : bool, goalfrag : bool, new_ir : bool, tactic_timeout : real option, goalfrag_plan : string option, goalfrag_trace : bool, repl_on_failure : bool}
@@ -1876,6 +1941,35 @@ fun source_location_text source_path source_text offset =
     String.concat [source_path, ":", Int.toString line, ":", Int.toString col]
   end
 
+fun trim_left s =
+  let
+    val n = size s
+    fun loop i =
+      if i >= n then ""
+      else
+        let val c = String.sub(s, i)
+        in
+          if c = #" " orelse c = #"\t" orelse c = #"\r" then loop (i + 1)
+          else String.extract(s, i, NONE)
+        end
+  in loop 0 end
+
+fun starts_with prefix s =
+  size s >= size prefix andalso String.substring(s, 0, size prefix) = prefix
+
+fun theory_header_line source_text =
+  List.find (fn line => starts_with "Theory " (trim_left line))
+            (String.fields (fn c => c = #"\n") source_text)
+
+fun modern_theory_export_footer source_text =
+  case theory_header_line source_text of
+      NONE => ""
+    | SOME line =>
+        if String.isSubstring "[no_sig_docs]" line then
+          "\nval _ = Feedback.set_trace \"TheoryPP.include_html_docs\" 0 before Theory.export_theory();\n"
+        else
+          "\nval _ = Theory.export_theory();\n"
+
 fun checkpoint_resume_message node lines =
   HolbuildStatus.message_stdout
     (String.concat ("resuming " ^ logical_name node ^ "\n" :: map (fn line => "  " ^ line ^ "\n") lines))
@@ -1960,7 +2054,7 @@ fun failed_prefix_resume_source policy timeout_marker plan_only_marker source ch
          plan_only_marker = plan_only_marker,
          new_ir = proof_ir_enabled policy}
   in
-    prelude ^ replay_block ^ suffix
+    prelude ^ replay_block ^ suffix ^ modern_theory_export_footer source
   end
 
 datatype failure_repl_checkpoint =
@@ -2064,7 +2158,8 @@ fun write_theory_script policy project base_context plan keys input_key toolchai
       fun run_from_replay {boundary, path, safe_name, kind, failure_checkpoints} =
         let
           val _ = ensure_source_checkpoint_parents ()
-          val _ = write_text staged_script (instrumented_source policy (SOME timeout_marker) plan_only_marker source_text boundary checkpoints declaration_checkpoints terminations)
+          val _ = write_text staged_script (instrumented_source policy (SOME timeout_marker) plan_only_marker source_text boundary checkpoints declaration_checkpoints terminations ^
+                                            modern_theory_export_footer source_text)
           val _ = source_context_resume_message node source_text kind safe_name boundary
         in
           {context = HolState path, files = [staged_script], failure_checkpoints = failure_checkpoints @ [deps_loaded]}
@@ -2090,10 +2185,11 @@ fun write_theory_script policy project base_context plan keys input_key toolchai
 fun build_theory cache_allowed policy tc project base_context plan keys toolchain_key node source_text theorem_checkpoints declaration_checkpoints termination_diagnostics =
   let
     val input_key = HolbuildBuildPlan.input_key_for keys node
-    val stage = stage_dir project input_key
+    val stage = stage_dir_for_node project node input_key
     val staged_script = Path.concat(stage, Path.file (source_file node))
     val preload = Path.concat(stage, "holbuild-preload.sml")
     val final_loader = Path.concat(stage, "holbuild-save-final-context.sml")
+    val parents_report = Path.concat(stage, "holbuild-theory-parents.txt")
     val mldeps_report = Path.concat(stage, "holbuild-theory-mldeps.txt")
     val timeout_marker = Path.concat(stage, "holbuild-tactic-timeout.txt")
     val plan_only_marker = Path.concat(stage, "holbuild-goalfrag-plan.txt")
@@ -2104,7 +2200,6 @@ fun build_theory cache_allowed policy tc project base_context plan keys toolchai
     val {sig_path, sml_path, data_path, script_uo, theory_ui, theory_uo} = theory_outputs node
     val staged_sig = staged_theory_file stage node ".sig"
     val staged_sml = staged_theory_file stage node ".sml"
-    val staged_txt = staged_theory_doc_file stage node
     val staged_dat = staged_theory_file stage node ".dat"
     val _ = remove_tree stage
     val _ = ensure_dir stage
@@ -2119,13 +2214,18 @@ fun build_theory cache_allowed policy tc project base_context plan keys toolchai
     val _ =
       if checkpoint_enabled policy then
         write_final_context_loader
-          {sig_path = staged_sig, sml_path = staged_sml,
+          {theory_name = drop_suffix "Theory" (logical_name node),
+           sig_path = staged_sig, sml_path = staged_sml,
            output = final_context, path = final_loader,
+           parents_report = SOME parents_report,
            mldeps_report = SOME mldeps_report}
       else
         write_plain_final_context_loader
-          {sig_path = staged_sig, sml_path = staged_sml,
-           path = final_loader, mldeps_report = SOME mldeps_report}
+          {theory_name = drop_suffix "Theory" (logical_name node),
+           sig_path = staged_sig, sml_path = staged_sml,
+           path = final_loader,
+           parents_report = SOME parents_report,
+           mldeps_report = SOME mldeps_report}
     val _ = remove_file timeout_marker
     val _ = remove_file plan_only_marker
     val run_spec = write_theory_script policy project base_context plan keys input_key toolchain_key node
@@ -2261,23 +2361,20 @@ fun build_theory cache_allowed policy tc project base_context plan keys toolchai
       else ()
     val _ = copy_binary staged_dat data_path
     val _ = copy_binary staged_dat (hfs_remapped_path data_path)
-    val {txt_path, ...} = generated_outputs node
     val _ = copy_binary staged_sig sig_path
     val _ = copy_binary staged_sig (hfs_remapped_path sig_path)
-    val _ = copy_binary staged_txt txt_path
-    val _ = copy_binary staged_txt (hfs_remapped_path txt_path)
     val dat_replacements = stage_dat_replacements stage node data_path
     val _ = copy_rewriting_path {src = staged_sml, dst = sml_path,
                                  replacements = dat_replacements}
     val _ = copy_binary sml_path (hfs_remapped_path sml_path)
-    val mldeps = unique_strings (read_mldeps_report mldeps_report @
-                                  generated_holdep_mldeps plan tc staged_sml)
+    val parents = read_parents_report parents_report
+    val mldeps = read_mldeps_report mldeps_report
     val _ =
       if cache_allowed then
-        publish_theory_cache project plan node input_key staged_sig sml_path txt_path staged_dat mldeps
+        publish_theory_cache project plan node input_key staged_sig sml_path staged_dat parents mldeps
       else ()
   in
-    write_local_theory_manifests plan node mldeps;
+    write_local_theory_manifests plan node parents mldeps;
     remove_tree stage
   end
 
@@ -2289,7 +2386,7 @@ fun has_signature_companion plan node =
   List.exists
     (fn candidate => same_package_logical candidate node andalso
                      #kind (HolbuildBuildPlan.source_of candidate) = HolbuildSourceIndex.Sig)
-    plan
+    (HolbuildBuildPlan.selected_nodes plan)
 
 fun write_empty_ui_if_needed plan node =
   if has_signature_companion plan node then ()
@@ -2299,9 +2396,8 @@ fun build_sml_like plan node output_suffix =
   let
     val output = one_with_suffix output_suffix (#objects (source_artifacts node))
     val deps = HolbuildBuildPlan.direct_project_deps plan node
-    val external_loads = direct_external_loads plan node
   in
-    write_object_manifest output (external_loads @ project_load_stems deps @ [source_file node]);
+    write_object_manifest output (project_load_stems deps @ [source_file node]);
     if output_suffix = ".uo" then write_empty_ui_if_needed plan node else ()
   end
 
@@ -2492,13 +2588,17 @@ fun effective_tactic_timeout goalfrag root_package tactic_timeout =
   if goalfrag andalso root_package then tactic_timeout else NONE
 
 fun checkpoint_policy_for_node ({skip_checkpoints, goalfrag, new_ir, tactic_timeout, goalfrag_plan, goalfrag_trace, repl_on_failure, ...} : build_options) project node =
-  CheckpointPolicy {checkpoint = not skip_checkpoints,
-                    goalfrag = goalfrag,
-                    new_ir = new_ir,
-                    tactic_timeout = effective_tactic_timeout goalfrag (root_package_node project node) tactic_timeout,
-                    goalfrag_plan = if goalfrag then goalfrag_plan else NONE,
-                    goalfrag_trace = goalfrag andalso goalfrag_trace,
-                    repl_on_failure = repl_on_failure}
+  let val root_node = root_package_node project node
+      val instrument = goalfrag andalso root_node
+  in
+    CheckpointPolicy {checkpoint = not skip_checkpoints,
+                      goalfrag = instrument,
+                      new_ir = new_ir,
+                      tactic_timeout = effective_tactic_timeout goalfrag root_node tactic_timeout,
+                      goalfrag_plan = if instrument then goalfrag_plan else NONE,
+                      goalfrag_trace = instrument andalso goalfrag_trace,
+                      repl_on_failure = repl_on_failure}
+  end
 
 fun proof_engine (CheckpointPolicy {goalfrag = false, ...}) = "plain_v1"
   | proof_engine (CheckpointPolicy {new_ir = true, ...}) = "proof_ir_v3"
@@ -2565,7 +2665,7 @@ fun build_theory_node (options : build_options) tc project base_context plan key
     val strict_source_boundaries =
       Option.map (fn text => valOf (source_boundaries_for_node true node text)) strict_source_text
     val metadata_checkpoints = []
-    val stage = stage_dir project input_key
+    val stage = stage_dir_for_node project node input_key
     val forced = force_node options project node
     val cache_allowed = #use_cache options andalso cache_enabled node
     val cache_restore_allowed = cache_allowed andalso not forced
@@ -2656,16 +2756,16 @@ fun report_up_to_date_node status project keys node =
   in
     HolbuildStatus.start_node status key label;
     case #kind (HolbuildBuildPlan.source_of node) of
-        HolbuildSourceIndex.TheoryScript => remove_tree_if_exists (stage_dir project input_key)
+        HolbuildSourceIndex.TheoryScript => remove_tree_if_exists (stage_dir_for_node project node input_key)
       | _ => ();
     HolbuildStatus.finish_node status key label HolbuildStatus.UpToDate
   end
 
 fun all_nodes_up_to_date options project plan keys toolchain_key =
-  List.all (node_is_up_to_date options project plan keys toolchain_key) plan
+  List.all (node_is_up_to_date options project plan keys toolchain_key) (HolbuildBuildPlan.selected_nodes plan)
 
 fun report_all_up_to_date status project keys plan =
-  List.app (report_up_to_date_node status project keys) plan
+  List.app (report_up_to_date_node status project keys) (HolbuildBuildPlan.selected_nodes plan)
 
 fun build_one status options tc project base_context plan keys toolchain_key node =
   let
@@ -2678,7 +2778,7 @@ fun build_one status options tc project base_context plan keys toolchain_key nod
     outcome
   end
 
-fun build_serial status options tc project base_context plan keys toolchain_key =
+fun build_serial status options tc project base_context universe phase_plan keys toolchain_key =
   let
     fun error_message e =
       case e of
@@ -2690,7 +2790,7 @@ fun build_serial status options tc project base_context plan keys toolchain_key 
           ErrorWithDebugArtifacts (_, artifacts) => artifacts
         | _ => HolbuildStatus.no_debug_artifacts
     fun one node =
-      build_one status options tc project base_context plan keys toolchain_key node
+      build_one status options tc project base_context universe keys toolchain_key node
       handle e =>
         let
           val msg = error_message e
@@ -2707,24 +2807,7 @@ fun build_serial status options tc project base_context plan keys toolchain_key 
               HolbuildStatus.Inspected => ()
             | _ => loop rest
   in
-    loop plan
-  end
-
-fun node_done done node = List.exists (fn k => k = HolbuildBuildPlan.key node) done
-
-fun deps_done plan done node =
-  List.all (node_done done) (HolbuildBuildPlan.direct_project_deps plan node)
-
-fun find_ready plan done pending =
-  let
-    fun loop prefix rest =
-      case rest of
-          [] => NONE
-        | node :: suffix =>
-            if deps_done plan done node then SOME (node, rev prefix @ suffix)
-            else loop (node :: prefix) suffix
-  in
-    loop [] pending
+    loop phase_plan
   end
 
 fun build_error_message e =
@@ -2738,16 +2821,16 @@ fun build_error_debug_artifacts e =
       ErrorWithDebugArtifacts (_, artifacts) => artifacts
     | _ => HolbuildStatus.no_debug_artifacts
 
-fun build_parallel status options tc project base_context plan keys toolchain_key jobs =
+fun build_parallel status options tc project base_context universe phase_plan keys toolchain_key jobs =
   let
     (* Keep scheduler state explicit and reusable: precompute reverse dependency
        edges once, then release dependents by decrementing remaining_dep counts.
        Do not add a serial all-up-to-date preflight in front of this path; that
        duplicates the unchanged-prefix work before any parallel worker can run. *)
-    val node_count = length plan
-    val nodes = Vector.fromList plan
-    val key_index = HolbuildBuildPlan.build_key_index plan
-    val lookup = HolbuildBuildPlan.indexed_nodes_named (HolbuildBuildPlan.build_name_index plan)
+    val node_count = length phase_plan
+    val nodes = Vector.fromList phase_plan
+    val phase = HolbuildBuildPlan.phase phase_plan
+    val key_index = HolbuildBuildPlan.build_key_index phase_plan
     val remaining_deps = Array.array (node_count, 0)
     val dependents = Array.array (node_count, [] : int list)
     val ready = ref ([] : int list)
@@ -2766,7 +2849,7 @@ fun build_parallel status options tc project base_context plan keys toolchain_ke
     fun add_ready id = ready := id :: !ready
 
     fun register_node (id, node) =
-      let val deps = HolbuildBuildPlan.direct_project_deps_with lookup plan node
+      let val deps = HolbuildBuildPlan.direct_phase_deps phase node
       in
         Array.update (remaining_deps, id, length deps);
         if null deps then add_ready id else ();
@@ -2792,7 +2875,7 @@ fun build_parallel status options tc project base_context plan keys toolchain_ke
       else
         let
           val node = Vector.sub (nodes, id)
-          val deps = HolbuildBuildPlan.direct_project_deps_with lookup plan node
+          val deps = HolbuildBuildPlan.direct_phase_deps phase node
           val _ = Array.update (priority_focus, id, true)
           val _ = priority_focus_remaining := !priority_focus_remaining + 1
         in
@@ -2950,7 +3033,7 @@ fun build_parallel status options tc project base_context plan keys toolchain_ke
             | SOME id =>
                 let val node = Vector.sub (nodes, id)
                 in
-                  ((case build_one status options tc project base_context plan keys toolchain_key node of
+                  ((case build_one status options tc project base_context universe keys toolchain_key node of
                         HolbuildStatus.Inspected => finish_inspected id
                       | _ => finish_success id;
                     loop ())
@@ -3010,25 +3093,277 @@ fun enforce_checkpoint_budget project =
     else ()
   end
 
+fun build_nodes status options tc project context universe phase_plan keys toolchain_key jobs =
+  if null phase_plan then ()
+  else if jobs <= 1 then build_serial status options tc project context universe phase_plan keys toolchain_key
+  else build_parallel status options tc project context universe phase_plan keys toolchain_key jobs
+
+fun build_node_subset status options tc project context universe keys toolchain_key nodes =
+  List.app (fn node => ignore (build_one status options tc project context universe keys toolchain_key node)) nodes
+
+fun node_key node = HolbuildBuildPlan.key node
+
+fun node_member node nodes = List.exists (fn candidate => node_key candidate = node_key node) nodes
+
+fun unique_nodes nodes =
+  rev (List.foldl (fn (node, kept) => if node_member node kept then kept else node :: kept) [] nodes)
+
+fun find_logical_nodes plan name =
+  List.filter (fn node => HolbuildBuildPlan.logical_name node = name) (HolbuildBuildPlan.selected_nodes plan)
+
+fun standard_env_root_nodes plan =
+  find_logical_nodes plan "bossLib" @ find_logical_nodes plan "holTheory"
+
+fun closure_for_roots plan roots =
+  unique_nodes (List.concat (map (fn node => HolbuildBuildPlan.transitive_project_deps plan node @ [node]) roots))
+
+fun explicitly_bare_node node = #bare (HolbuildBuildPlan.source_of node)
+
+fun bare_phase_nodes plan =
+  let
+    val std_roots = standard_env_root_nodes plan
+    val bare_roots = List.filter explicitly_bare_node (HolbuildBuildPlan.selected_nodes plan)
+  in
+    closure_for_roots plan (std_roots @ bare_roots)
+  end
+
+fun without_nodes excluded nodes =
+  List.filter (fn node => not (node_member node excluded)) nodes
+
+fun loadable_node node =
+  #kind (HolbuildBuildPlan.source_of node) <> HolbuildSourceIndex.Sig
+
+fun context_node_id node =
+  HolbuildBuildPlan.package node ^ ":" ^ HolbuildBuildPlan.relative_path node ^ ":" ^ HolbuildBuildPlan.logical_name node
+
+fun context_name node =
+  HolbuildBuildPlan.package node ^ ":" ^ HolbuildBuildPlan.logical_name node
+
+fun int_max (a, b) = if a > b then a else b
+
+fun node_in nodes node = node_member node nodes
+
+fun closure_function plan =
+  let
+    val memo = ref ([] : (string * HolbuildBuildPlan.node list) list)
+    fun lookup k = Option.map #2 (List.find (fn (k', _) => k = k') (!memo))
+    fun remember k v = (memo := (k, v) :: !memo; v)
+    fun closure node =
+      let val k = node_key node
+      in
+        case lookup k of
+            SOME value => value
+          | NONE =>
+              let
+                val deps = HolbuildBuildPlan.direct_project_deps plan node
+                val value = unique_nodes (List.concat (map closure deps) @ deps)
+              in remember k value end
+      end
+  in
+    closure
+  end
+
+type auto_context_candidate = {root : HolbuildBuildPlan.node, contents : HolbuildBuildPlan.node list, users : int, size : int, score : int}
+
+(* Automatic contexts are chosen from the current execution phase, but their
+   contents are semantic dependency closures in the full indexed universe. *)
+fun auto_context_candidates universe phase_nodes =
+  if length phase_nodes < 100 then []
+  else
+    let
+      val closure = closure_function universe
+      fun contents root = closure root @ [root]
+      fun users root = length (List.filter (fn node => node_in (closure node) root) phase_nodes)
+      fun score root =
+        let val u = users root
+            val c = contents root
+            val s = length (List.filter loadable_node c)
+        in {root = root, contents = c, users = u, size = s, score = u * s} end
+      val scored = map score (List.filter loadable_node phase_nodes)
+      fun good ({users, size, ...} : auto_context_candidate) = users >= 20 andalso size >= 20
+      fun insert (c : auto_context_candidate) [] = [c]
+        | insert c (x :: xs) =
+            if #score c > #score x then c :: x :: xs else x :: insert c xs
+    in
+      List.foldl (fn (c, acc) => if good c then insert c acc else acc) [] scored
+    end
+
+fun selected_auto_contexts universe phase_nodes =
+  let
+    val candidates = auto_context_candidates universe phase_nodes
+    fun deps_contain root (cand : auto_context_candidate) = node_in (#contents cand) root
+    fun choose current selected remaining =
+      if length selected >= 1 then rev selected
+      else
+        let
+          val eligible =
+            case current of
+                NONE => remaining
+              | SOME root => List.filter (deps_contain root) remaining
+        in
+          case eligible of
+              [] => rev selected
+            | best :: _ =>
+                choose (SOME (#root best)) (best :: selected)
+                  (List.filter (fn c => not (node_member (#root c) [#root best])) remaining)
+        end
+  in
+    choose NONE [] candidates
+  end
+
+type auto_context = {root : HolbuildBuildPlan.node, contents : HolbuildBuildPlan.node list, key : string, path : string, context : hol_context}
+
+fun auto_context_key toolchain_key parent_key keys root contents =
+  HolbuildHash.string_sha1
+    (String.concatWith "\n"
+       (["holbuild-auto-context-v1",
+         "toolchain=" ^ toolchain_key,
+         "parent=" ^ parent_key,
+         "root=" ^ context_node_id root] @
+        map (fn node => "node=" ^ context_node_id node ^ "@" ^ HolbuildBuildPlan.input_key_for keys node) contents) ^ "\n")
+
+fun local_auto_context_path project key =
+  Path.concat(Path.concat(Path.concat(project_artifact_root project, ".holbuild/checkpoints"), "_contexts"),
+              key ^ ".save")
+
+fun hol_only_nodes nodes = List.all HolbuildBuildPlan.is_implicit_hol_node nodes
+
+fun auto_context_path project key contents =
+  if hol_only_nodes contents then global_checkpoint_path "contexts" key
+  else local_auto_context_path project key
+
+fun auto_context_ok_text key = checkpoint_ok_text "auto_context" [("key", key)]
+
+fun auto_context_exists path key =
+  checkpoint_exists path andalso
+  HolbuildCheckpointStore.ok_matches (fn _ => ()) path [("kind", "auto_context"), ("key", key)]
+
+fun write_auto_context_loader load_nodes output ok_text path =
+  write_text path
+    (String.concatWith "\n"
+       (map (load_project_line o load_stem) load_nodes @
+        [checkpoint_save_runtime_line (),
+         save_heap_line {label = "auto_context", share_common_data = true,
+                         output = output, ok_text = ok_text}]) ^ "\n")
+
+fun auto_context_stage_root project nodes =
+  case nodes of
+      [] => project_artifact_root project
+    | node :: _ => if hol_only_nodes nodes then source_artifact_root node else project_artifact_root project
+
+fun ensure_auto_context tc project parent_context key load_nodes output =
+  if auto_context_exists output key then HolState output
+  else
+    let
+      val stage = Path.concat(Path.concat(auto_context_stage_root project load_nodes, ".holbuild/stage"), "auto-context-" ^ key)
+      val loader = Path.concat(stage, "holbuild-save-auto-context.sml")
+    in
+      ensure_dir stage;
+      ensure_parent output;
+      write_auto_context_loader (List.filter loadable_node load_nodes) output (auto_context_ok_text key) loader;
+      run_hol_files_to_log tc stage stage parent_context [loader]
+        "holbuild-auto-context.log"
+        ("hol run failed while creating automatic execution context " ^ key);
+      remove_tree stage;
+      HolState output
+    end
+
+fun build_with_auto_contexts status options tc project base_context universe phase_plan keys toolchain_key jobs =
+  if null phase_plan then ()
+  else if (not (#auto_contexts options)) orelse #skip_checkpoints options orelse not (#use_cache options) orelse #force options <> ForceNone orelse length phase_plan < 100 then
+    build_nodes status options tc project base_context universe phase_plan keys toolchain_key jobs
+  else
+    let
+      val selected = selected_auto_contexts universe phase_plan
+      fun make_context ((candidate : auto_context_candidate), (parent_key, parent_context, parent_contents, contexts)) =
+        let
+          val root = #root candidate
+          val contents = #contents candidate
+          val phase_contents = List.filter (fn node => node_in phase_plan node) contents
+          val delta = without_nodes parent_contents phase_contents
+          val key = auto_context_key toolchain_key parent_key keys root contents
+          val path = auto_context_path project key contents
+          val _ = if HolbuildStatus.verbose_mode () then
+                    HolbuildStatus.message_stderr
+                      ("holbuild: automatic execution context " ^ context_name root ^
+                       " users=" ^ Int.toString (#users candidate) ^
+                       " contents=" ^ Int.toString (#size candidate) ^ "\n")
+                  else ()
+          val _ = build_node_subset status options tc project parent_context universe keys toolchain_key delta
+          val context = ensure_auto_context tc project parent_context key delta path
+          val ctx = {root = root, contents = contents, key = key, path = path, context = context}
+        in
+          (key, context, contents, contexts @ [ctx])
+        end
+      val (_, _, _, contexts) = List.foldl make_context (toolchain_key, base_context, [], []) selected
+      val built_by_contexts = unique_nodes (List.concat (map #contents contexts))
+      val remaining = without_nodes built_by_contexts phase_plan
+      fun deps_in_plan node = HolbuildBuildPlan.transitive_project_deps universe node
+      fun best node =
+        let
+          val deps = deps_in_plan node
+          fun applies ({root, ...} : auto_context) = node_in deps root
+          val matching = List.filter applies contexts
+        in case rev matching of [] => NONE | ctx :: _ => SOME ctx end
+      val no_context = List.filter (fn node => case best node of NONE => true | SOME _ => false) remaining
+      val _ = build_node_subset status options tc project base_context universe keys toolchain_key no_context
+      fun build_context_group ({context, key, ...} : auto_context) =
+        build_node_subset status options tc project context universe keys toolchain_key
+          (List.filter (fn node => case best node of SOME best_ctx => #key best_ctx = key | NONE => false) remaining)
+    in
+      List.app build_context_group contexts
+    end
+
+fun describe_auto_contexts (options : build_options) plan =
+  if (not (#auto_contexts options)) orelse #skip_checkpoints options orelse not (HolbuildStatus.verbose_mode ()) then ()
+  else
+    let
+      val contexts = selected_auto_contexts plan (HolbuildBuildPlan.selected_nodes plan)
+      fun line (candidate : auto_context_candidate) =
+        HolbuildStatus.message_stderr
+          ("holbuild: automatic execution context candidate " ^ context_name (#root candidate) ^
+           " users=" ^ Int.toString (#users candidate) ^
+           " contents=" ^ Int.toString (#size candidate) ^ "\n")
+    in
+      List.app line contexts
+    end
+
+fun needs_nonbare_standard_env node =
+  let val source = HolbuildBuildPlan.source_of node
+  in
+    not (#bare source) andalso #kind source <> HolbuildSourceIndex.Sig
+  end
+
 fun build (options : build_options) tc project plan toolchain_key jobs =
   let
     val _ = enforce_checkpoint_budget project
-    val base_context = toolchain_base_context tc
     val keys = HolbuildBuildPlan.input_keys (build_config_lines_for_node options project) toolchain_key plan
   in
     let
-      val status = HolbuildStatus.create {total = length plan, jobs = jobs}
+      val status = HolbuildStatus.create {total = length (HolbuildBuildPlan.selected_nodes plan), jobs = jobs}
       fun run () =
-        if jobs <= 1 then build_serial status options tc project base_context plan keys toolchain_key
-        else build_parallel status options tc project base_context plan keys toolchain_key jobs
+        let
+          val bare = toolchain_base_context tc
+          val bare_plan = bare_phase_nodes plan
+          val std_plan = without_nodes bare_plan (HolbuildBuildPlan.selected_nodes plan)
+          val needs_std = List.exists needs_nonbare_standard_env std_plan
+        in
+          if null bare_plan then
+            build_with_auto_contexts status options tc project bare plan (HolbuildBuildPlan.selected_nodes plan) keys toolchain_key jobs
+          else
+            (build_with_auto_contexts status options tc project bare plan bare_plan keys toolchain_key jobs;
+             if #skip_checkpoints options orelse not needs_std then
+               build_with_auto_contexts status options tc project bare plan std_plan keys toolchain_key jobs
+             else
+               case ensure_standard_env_context_from_sources tc project toolchain_key keys plan of
+                   SOME context => build_with_auto_contexts status options tc project context plan std_plan keys toolchain_key jobs
+                 | NONE => build_with_auto_contexts status options tc project bare plan std_plan keys toolchain_key jobs)
+        end
     in
       (run (); HolbuildStatus.finish status; enforce_checkpoint_budget project)
       handle e => (HolbuildStatus.finish status; enforce_checkpoint_budget project; raise e)
     end
   end
-
-fun heap_external_theories plan =
-  unique_strings (List.concat (map (HolbuildBuildPlan.direct_external_theories plan) plan))
 
 fun heap_theory_load_lines node =
   case #kind (HolbuildBuildPlan.source_of node) of
@@ -3037,11 +3372,17 @@ fun heap_theory_load_lines node =
       raise Error ("heap objects currently must be theory targets: " ^
                    HolbuildBuildPlan.logical_name node)
 
-fun write_heap_loader plan output path =
+fun heap_object_node plan name =
+  case List.filter (fn node => HolbuildBuildPlan.logical_name node = name) (HolbuildBuildPlan.selected_nodes plan) of
+      [node] => node
+    | [] => raise Error ("heap object is not in the resolved build plan: " ^ name)
+    | _ => raise Error ("heap object is ambiguous in the resolved build plan: " ^ name)
+
+fun write_heap_loader plan objects output path =
   let
+    val object_nodes = map (heap_object_node plan) objects
     val lines =
-      map load_theory_line (heap_external_theories plan) @
-      List.concat (map heap_theory_load_lines plan) @
+      List.concat (map heap_theory_load_lines object_nodes) @
       [checkpoint_save_runtime_line (),
        save_heap_line {label = "heap", share_common_data = false,
                        output = output, ok_text = checkpoint_ok_v1 ()}]
@@ -3049,7 +3390,7 @@ fun write_heap_loader plan output path =
     write_text path (String.concatWith "\n" lines ^ "\n")
   end
 
-fun export_heap tc (project : HolbuildProject.t) plan output =
+fun export_heap tc (project : HolbuildProject.t) plan objects output =
   let
     val base_context = toolchain_base_context tc
     val stage = Path.concat(Path.concat(project_artifact_root project, ".holbuild/stage"), "heap")
@@ -3057,7 +3398,7 @@ fun export_heap tc (project : HolbuildProject.t) plan output =
   in
     ensure_dir stage;
     ensure_parent output;
-    write_heap_loader plan output loader;
+    write_heap_loader plan objects output loader;
     run_hol_files_to_log tc stage stage base_context [loader]
       "holbuild-heap.log"
       ("hol run failed while exporting heap: " ^ output);
