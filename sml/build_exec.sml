@@ -3155,7 +3155,8 @@ fun build_with_auto_contexts status options tc project base_context universe pha
         let
           val root = #root candidate
           val contents = #contents candidate
-          val delta = without_nodes parent_contents contents
+          val phase_contents = List.filter (fn node => node_in phase_plan node) contents
+          val delta = without_nodes parent_contents phase_contents
           val key = auto_context_key toolchain_key parent_key keys root contents
           val path = auto_context_path project key contents
           val _ = if HolbuildStatus.verbose_mode () then
