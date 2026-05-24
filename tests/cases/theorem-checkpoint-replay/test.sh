@@ -836,6 +836,54 @@ priority_count=$(wc -c < "$priority_counter" | tr -d ' ')
 [[ "$priority_count" = "0" ]] || { echo "scheduler ran unrelated always-reexecute target before failed_prefix; count $priority_count" >&2; exit 1; }
 require_grep "from: failed-prefix checkpoint in b_fail" "$priority_again_log"
 
+always_context_project=$tmpdir/always-context-project
+always_context_counter=$tmpdir/always-context-counter.txt
+mkdir -p "$always_context_project/src"
+touch "$always_context_counter"
+cat > "$always_context_project/holproject.toml" <<'TOML'
+[project]
+name = "always-context"
+[build]
+members = ["src"]
+[actions.ATheory]
+always_reexecute = true
+TOML
+cat > "$always_context_project/src/AScript.sml" <<SML
+open HolKernel Parse boolLib bossLib;
+val _ = new_theory "A";
+val out = TextIO.openAppend "$always_context_counter";
+val _ = (TextIO.output(out, "x"); TextIO.closeOut out);
+Theorem first_thm:
+  T
+Proof
+  ACCEPT_TAC TRUTH
+QED
+Theorem second_thm:
+  T
+Proof
+  ACCEPT_TAC TRUTH
+QED
+val _ = export_theory();
+SML
+always_context_first_log=$tmpdir/always-context-first.log
+(cd "$always_context_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --no-cache ATheory) > "$always_context_first_log" 2>&1
+require_grep "ATheory built" "$always_context_first_log"
+require_file "$(find "$always_context_project/.holbuild/checkpoints" -name '*first_thm_context.save' -print -quit)"
+python3 - <<PY
+from pathlib import Path
+p = Path("$always_context_project/src/AScript.sml")
+p.write_text(p.read_text().replace('ACCEPT_TAC TRUTH\nQED\nval _ = export_theory();', 'FAIL_TAC "always context failure"\nQED\nval _ = export_theory();'))
+PY
+: > "$always_context_counter"
+always_context_again_log=$tmpdir/always-context-again.log
+if (cd "$always_context_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --no-cache ATheory) > "$always_context_again_log" 2>&1; then
+  echo "expected always-context repeated build to fail" >&2
+  exit 1
+fi
+require_grep "from: theorem-context checkpoint after first_thm" "$always_context_again_log"
+always_context_count=$(wc -c < "$always_context_counter" | tr -d ' ')
+[[ "$always_context_count" = "0" ]] || { echo "always_reexecute reran prefix before theorem-context replay; count $always_context_count" >&2; exit 1; }
+
 branch_failure_project=$tmpdir/branch-failure-project
 mkdir -p "$branch_failure_project/src"
 cp "$project/holproject.toml" "$branch_failure_project/holproject.toml"

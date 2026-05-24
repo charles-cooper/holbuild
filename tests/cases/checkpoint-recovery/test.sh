@@ -417,9 +417,13 @@ force_rebuild
 multi_corrupt_log=$tmpdir/multi-corrupt.log
 (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$multi_corrupt_log" 2>&1
 require_grep "from: theorem-context checkpoint after third" "$multi_corrupt_log"
-require_grep "from: theorem-context checkpoint after second" "$multi_corrupt_log"
-if [[ $(grep -c "discarding invalid checkpoint after HOL state load failure" "$multi_corrupt_log") -lt 2 ]]; then
-  echo "multiple invalid checkpoints were not retried in one build" >&2
+require_grep "from: deps-loaded checkpoint" "$multi_corrupt_log"
+if grep -q "from: theorem-context checkpoint after second" "$multi_corrupt_log"; then
+  echo "invalid source-context checkpoints cascaded instead of falling back to deps-loaded" >&2
+  exit 1
+fi
+if [[ $(grep -c "discarding invalid checkpoint after HOL state load failure" "$multi_corrupt_log") -ne 1 ]]; then
+  echo "invalid source-context checkpoints were not discarded as one group" >&2
   exit 1
 fi
 if grep -q "RetryInvalidCheckpoint\|Couldn't load HOL base-state\|Unable to load header" "$multi_corrupt_log"; then

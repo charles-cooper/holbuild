@@ -920,12 +920,6 @@ fun invalid_checkpoint_retryable base_context run_context msg =
   hol_state_load_failure msg andalso
   hol_context_path run_context <> hol_context_path base_context
 
-fun remove_theorem_checkpoint_artifacts
-      ({context_path, end_of_proof_path, failed_prefix_path, ...} : HolbuildTheoryCheckpoints.checkpoint) =
-  (remove_checkpoint context_path;
-   remove_checkpoint end_of_proof_path;
-   remove_checkpoint failed_prefix_path)
-
 fun theorem_context_or_end_path path
       ({context_path, end_of_proof_path, ...} : HolbuildTheoryCheckpoints.checkpoint) =
   path = context_path orelse path = end_of_proof_path
@@ -934,29 +928,12 @@ fun theorem_failed_prefix_path path
       ({failed_prefix_path, ...} : HolbuildTheoryCheckpoints.checkpoint) =
   path = failed_prefix_path
 
-fun remove_theorem_checkpoint_descendants checkpoints boundary =
-  List.app remove_theorem_checkpoint_artifacts
-    (List.filter
-       (fn ({boundary = candidate_boundary, ...} : HolbuildTheoryCheckpoints.checkpoint) =>
-           candidate_boundary >= boundary)
-       checkpoints)
-
-fun remove_declaration_checkpoint_artifacts ({context_path, ...} : HolbuildTheoryCheckpoints.declaration_checkpoint) =
-  remove_checkpoint context_path
-
 fun declaration_context_path_matches path ({context_path, ...} : HolbuildTheoryCheckpoints.declaration_checkpoint) =
   path = context_path
 
-fun remove_declaration_checkpoint_descendants checkpoints boundary =
-  List.app remove_declaration_checkpoint_artifacts
-    (List.filter
-       (fn ({boundary = candidate_boundary, ...} : HolbuildTheoryCheckpoints.declaration_checkpoint) =>
-           candidate_boundary >= boundary)
-       checkpoints)
-
-fun remove_source_checkpoint_descendants theorem_checkpoints declaration_checkpoints boundary =
-  (remove_theorem_checkpoint_descendants theorem_checkpoints boundary;
-   remove_declaration_checkpoint_descendants declaration_checkpoints boundary)
+fun remove_source_checkpoints_for_deps project node deps_key =
+  (remove_theorem_checkpoints_for_deps project node deps_key;
+   remove_declaration_checkpoints_for_deps project node deps_key)
 
 fun remove_loaded_checkpoint_descendants project node deps_key deps_loaded theorem_checkpoints declaration_checkpoints loaded_path =
   if loaded_path = deps_loaded then
@@ -966,12 +943,10 @@ fun remove_loaded_checkpoint_descendants project node deps_key deps_loaded theor
         SOME checkpoint => remove_checkpoint (#failed_prefix_path checkpoint)
       | NONE =>
           case List.find (theorem_context_or_end_path loaded_path) theorem_checkpoints of
-              SOME ({boundary, ...} : HolbuildTheoryCheckpoints.checkpoint) =>
-                remove_source_checkpoint_descendants theorem_checkpoints declaration_checkpoints boundary
+              SOME _ => remove_source_checkpoints_for_deps project node deps_key
             | NONE =>
                 case List.find (declaration_context_path_matches loaded_path) declaration_checkpoints of
-                    SOME ({boundary, ...} : HolbuildTheoryCheckpoints.declaration_checkpoint) =>
-                      remove_source_checkpoint_descendants theorem_checkpoints declaration_checkpoints boundary
+                    SOME _ => remove_source_checkpoints_for_deps project node deps_key
                   | NONE => remove_checkpoint loaded_path
 
 fun preserve_log src dst =
@@ -1858,8 +1833,7 @@ fun instrumented_source policy timeout_marker plan_only_marker source_text start
   else plain_source_from_checkpoint source_text start_offset
 
 fun replay_candidate project node theorem_checkpoints declaration_checkpoints =
-  if always_reexecute node then NONE
-  else best_replay_candidate project node theorem_checkpoints declaration_checkpoints
+  best_replay_candidate project node theorem_checkpoints declaration_checkpoints
 
 fun common_prefix_size old_text new_text =
   let
