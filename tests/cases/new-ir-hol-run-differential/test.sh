@@ -59,11 +59,11 @@ copy_hol_run_artifacts() {
 prepare_load_root() {
   local artifacts=$1
   local root=$2
-  mkdir -p "$root/.hol/objs"
-  cp "$artifacts"/ATheory.{dat,sml,sig} "$root/.hol/objs/"
+  mkdir -p "$root"
+  cp "$artifacts"/ATheory.{dat,sig} "$root/"
   sed -E \
     "s#holpathdb\.subst_pathvars \"[^\"]*ATheory\.dat\"#holpathdb.subst_pathvars \"$root/ATheory.dat\"#" \
-    "$artifacts/ATheory.sml" > "$root/.hol/objs/ATheory.sml"
+    "$artifacts/ATheory.sml" > "$root/ATheory.sml"
 }
 
 # Dump the direct HOLSource result by loading its exported artifacts back into
@@ -96,7 +96,7 @@ val _ =
        OS.Process.exit OS.Process.success);
 SML
   "$HOLDIR/bin/hol" --noconfig --holstate "$HOLDIR/bin/hol.state" < "$script" > "$log" 2>&1
-  grep '^@@DUMP@@' "$log" | sed 's/^@@DUMP@@//' > "$dump"
+  grep '^@@DUMP@@' "$log" | sed 's/^@@DUMP@@//' | LC_ALL=C sort -t $'\t' -k1,1 > "$dump"
   if [[ ! -s "$dump" ]]; then
     echo "empty HOL-run theory summary for $artifacts" >&2
     tail -80 "$log" >&2
@@ -123,7 +123,7 @@ val _ =
     thms;
 SML
   (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" run .holbuild-dump-ATheory.sml) > "$log" 2>&1
-  grep '^@@DUMP@@' "$log" | sed 's/^@@DUMP@@//' > "$dump"
+  grep '^@@DUMP@@' "$log" | sed 's/^@@DUMP@@//' | LC_ALL=C sort -t $'\t' -k1,1 > "$dump"
   if [[ ! -s "$dump" ]]; then
     echo "empty holbuild theory summary for $project" >&2
     tail -80 "$log" >&2
