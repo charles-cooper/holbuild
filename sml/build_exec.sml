@@ -234,10 +234,6 @@ fun parent_report_lines theory_name report_path =
   report_string_list_lines "holbuild_parents_out" report_path
     ("map (fn thy => thy ^ \"Theory\") (Theory.parents " ^ HolbuildToolchain.sml_string theory_name ^ ")")
 
-fun export_theory_if_needed_line sig_path =
-  "val _ = if OS.FileSys.access(" ^ HolbuildToolchain.sml_string sig_path ^
-  ", [OS.FileSys.A_READ]) then () else export_theory();"
-
 fun write_manifest_line path lines =
   String.concat
     ["val _ = let val out = HOLFileSys.openOut ", HolbuildToolchain.sml_string path,
@@ -262,7 +258,6 @@ fun final_context_loader_lines {theory_name, sig_path, sml_path, parents_report,
     val ui_path = stem ^ ".ui"
     val uo_path = stem ^ ".uo"
   in
-    export_theory_if_needed_line sig_path ::
     write_manifest_line ui_path [load_sig_path] ::
     write_manifest_line uo_path [load_sml_path] ::
     parent_report_lines theory_name parents_report @
@@ -1438,7 +1433,12 @@ fun publish_theory_cache project plan node input_key staged_sig published_sml st
   end
 
 fun project_node_named plan name =
-  List.find (fn candidate => HolbuildBuildPlan.logical_name candidate = name) (HolbuildBuildPlan.selected_nodes plan)
+  let fun loadable node = #kind (HolbuildBuildPlan.source_of node) <> HolbuildSourceIndex.Sig
+  in
+    case List.filter loadable (HolbuildBuildPlan.lookup plan name) of
+        node :: _ => SOME node
+      | [] => NONE
+  end
 
 fun mldep_load_stem plan dep =
   case project_node_named plan dep of

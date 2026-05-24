@@ -34,15 +34,8 @@ name = "interrupt_cleanup"
 members = ["src"]
 TOML
 cat > "$project/src/AScript.sml" <<SML
-open HolKernel Parse boolLib bossLib;
-val _ = new_theory "A";
+Theory A[bare]
 val _ = OS.Process.system "sh -c 'echo \$\$ > $pid_file; touch $started; exec sleep 30'";
-Theorem a_thm:
-  T
-Proof
-  ACCEPT_TAC TRUTH
-QED
-val _ = export_theory();
 SML
 
 (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$tmpdir/build.log" 2>&1 &

@@ -24,6 +24,9 @@ members = ["src"]
 
 [dependencies.lib]
 path = "../lib"
+
+[run]
+loads = ["ATheory"]
 TOML
 cat > "$dep/holproject.toml" <<'TOML'
 [project]
@@ -79,11 +82,10 @@ if grep -q ".holbuild/obj/src/Bar" "$project/.holbuild/obj/src/ATheory.uo"; then
   exit 1
 fi
 
-cat > "$tmpdir/load-internal-theory.sml" <<SML
-load "$project/.holbuild/obj/src/ATheory";
+cat > "$tmpdir/load-internal-theory.sml" <<'SML'
 val _ = ATheory.a_thm;
 SML
-"$HOLDIR/bin/hol" run --noconfig --holstate "$HOLDIR/bin/hol.state" "$tmpdir/load-internal-theory.sml"
+(cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" run "$tmpdir/load-internal-theory.sml") > "$tmpdir/load-internal-theory.log" 2>&1
 
 rm -rf "$project/.holbuild"
 restore_log=$tmpdir/restore.log

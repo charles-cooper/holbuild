@@ -26,16 +26,13 @@ child_log=$project/child.log
 : > "$child_log"
 for i in 1 2 3 4 5 6; do
   cat > "$project/src/T${i}Script.sml" <<SML
-open HolKernel Parse boolLib bossLib;
+Theory T${i}[bare]
 fun append msg =
   let val out = TextIO.openAppend "$child_log"
   in TextIO.output(out, msg ^ "\\n"); TextIO.closeOut out end;
 val _ = append "START T${i}";
 val _ = OS.Process.system "sleep 2";
 val _ = append "END T${i}";
-val _ = new_theory "T${i}";
-val t${i}_thm = store_thm("t${i}_thm", ``T``, ACCEPT_TAC TRUTH);
-val _ = export_theory();
 SML
 done
 
@@ -70,22 +67,18 @@ TOML
 
 fail_child_log=$fail_project/child.log
 cat > "$fail_project/src/SlowScript.sml" <<SML
-open HolKernel Parse boolLib bossLib;
+Theory Slow[bare]
 fun append msg =
   let val out = TextIO.openAppend "$fail_child_log"
   in TextIO.output(out, msg ^ "\\n"); TextIO.closeOut out end;
 val _ = append "START slow";
 val _ = OS.Process.system "sleep 12";
 val _ = append "END slow";
-val _ = new_theory "Slow";
-val slow_thm = store_thm("slow_thm", ``T``, ACCEPT_TAC TRUTH);
-val _ = export_theory();
 SML
 cat > "$fail_project/src/FailScript.sml" <<'SML'
-open HolKernel Parse boolLib bossLib;
-val _ = new_theory "Fail";
+Theory Fail[bare]
+val _ = OS.Process.system "sleep 1";
 val _ = raise Fail "expected parallel failure";
-val _ = export_theory();
 SML
 
 start_seconds=$SECONDS
