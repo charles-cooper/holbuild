@@ -169,6 +169,7 @@ run_case() {
 start_case() {
   local test_script=$1
   local name=$2
+  echo "START $name"
   run_case "$test_script" "$name" &
   running_pids+=("$!")
   running_names+=("$name")
