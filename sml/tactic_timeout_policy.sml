@@ -18,8 +18,15 @@ fun add_node_timeout node timeout acc =
     insert acc
   end
 
-fun plan_timeouts plan timeout =
-  List.foldl (fn (node, acc) => add_node_timeout node timeout acc) [] plan
+fun root_package_name project = HolbuildProject.package_name (HolbuildProject.project_package project)
+
+fun root_package_node project node = HolbuildBuildPlan.package node = root_package_name project
+
+fun add_root_node_timeout project timeout (node, acc) =
+  if root_package_node project node then add_node_timeout node timeout acc else acc
+
+fun plan_timeouts project plan timeout =
+  List.foldl (add_root_node_timeout project timeout) [] plan
 
 fun source_entry source = (#relative_path source, #logical_name source)
 
@@ -52,14 +59,14 @@ fun node_named plan logical =
 fun closure_nodes plan root =
   HolbuildBuildPlan.transitive_project_deps plan root @ [root]
 
-fun add_entry_timeout plan (logical, timeout) acc =
+fun add_entry_timeout project plan (logical, timeout) acc =
   case node_named plan logical of
       NONE => acc
-    | SOME root => List.foldl (fn (node, acc') => add_node_timeout node timeout acc') acc (closure_nodes plan root)
+    | SOME root => List.foldl (add_root_node_timeout project timeout) acc (closure_nodes plan root)
 
 fun entry_timeouts project index entry_plan default_timeout =
   List.foldl
-    (fn ((root, logical), acc) => add_entry_timeout entry_plan (logical, entry_timeout project default_timeout root) acc)
+    (fn ((root, logical), acc) => add_entry_timeout project entry_plan (logical, entry_timeout project default_timeout root) acc)
     []
     (declared_entries project index)
 

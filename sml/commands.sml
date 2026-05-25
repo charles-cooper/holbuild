@@ -383,7 +383,7 @@ fun build tc cli_jobs args =
        goalfrag = goalfrag,
        new_ir = new_ir,
        node_tactic_timeouts =
-         if tactic_timeout_set then HolbuildTacticTimeoutPolicy.plan_timeouts plan tactic_timeout
+         if tactic_timeout_set then HolbuildTacticTimeoutPolicy.plan_timeouts project plan tactic_timeout
          else HolbuildTacticTimeoutPolicy.entry_timeouts project index entry_plan (default_tactic_timeout ()),
        goalfrag_plan = goalfrag_plan,
        goalfrag_trace = goalfrag_trace,

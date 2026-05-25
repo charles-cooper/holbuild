@@ -58,11 +58,13 @@ val _ = export_theory();
 SML
 
 build_log=$tmpdir/build.log
-if (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --tactic-timeout 0.1 BTheory) > "$build_log" 2>&1; then
-  echo "dependency package ignored entry closure tactic timeout" >&2
+(cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --tactic-timeout 0.1 BTheory) > "$build_log" 2>&1
+require_file "$project/.holbuild/deps/dep/obj/src/ATheory.dat"
+require_file "$project/.holbuild/obj/src/BTheory.dat"
+if grep -q "tactic timed out while building ATheory" "$build_log"; then
+  echo "dependency package used root tactic timeout" >&2
   exit 1
 fi
-require_grep "tactic timed out after 0.1s while building ATheory: slow_tac" "$build_log"
 
 passing_build_log=$tmpdir/passing-build.log
 (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --tactic-timeout 1.0 BTheory) > "$passing_build_log" 2>&1
