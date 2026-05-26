@@ -5,8 +5,6 @@ ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 HOLBUILD_BIN=${HOLBUILD_BIN:-"$ROOT/bin/holbuild"}
 HOLDIR=${HOLDIR:-${HOLBUILD_HOLDIR:-}}
 HOLBUILD_TEST_JOBS=${HOLBUILD_TEST_JOBS:-1}
-HOLBUILD_TEST_SHARD_INDEX=${HOLBUILD_TEST_SHARD_INDEX:-0}
-HOLBUILD_TEST_SHARD_COUNT=${HOLBUILD_TEST_SHARD_COUNT:-1}
 
 if [[ -z "$HOLDIR" ]]; then
   echo "Set HOLDIR=/path/to/HOL or HOLBUILD_HOLDIR" >&2
@@ -20,21 +18,6 @@ if [[ "$HOLBUILD_TEST_JOBS" -lt 1 ]]; then
   echo "HOLBUILD_TEST_JOBS must be a positive integer" >&2
   exit 2
 fi
-case "$HOLBUILD_TEST_SHARD_COUNT" in
-  ''|*[!0-9]*) echo "HOLBUILD_TEST_SHARD_COUNT must be a positive integer" >&2; exit 2 ;;
-esac
-if [[ "$HOLBUILD_TEST_SHARD_COUNT" -lt 1 ]]; then
-  echo "HOLBUILD_TEST_SHARD_COUNT must be a positive integer" >&2
-  exit 2
-fi
-case "$HOLBUILD_TEST_SHARD_INDEX" in
-  ''|*[!0-9]*) echo "HOLBUILD_TEST_SHARD_INDEX must be a non-negative integer" >&2; exit 2 ;;
-esac
-if [[ "$HOLBUILD_TEST_SHARD_INDEX" -ge "$HOLBUILD_TEST_SHARD_COUNT" ]]; then
-  echo "HOLBUILD_TEST_SHARD_INDEX must be less than HOLBUILD_TEST_SHARD_COUNT" >&2
-  exit 2
-fi
-
 test_tmp_root=${TMPDIR:-"$ROOT/scratch/tmp"}
 mkdir -p "$test_tmp_root"
 log_dir=$(mktemp -d "$test_tmp_root/holbuild-test-logs.XXXXXX")
@@ -75,7 +58,7 @@ count_lines() {
 }
 
 suite_start_ms=$(now_ms)
-echo "running holbuild tests with HOLBUILD_TEST_JOBS=$HOLBUILD_TEST_JOBS shard=$HOLBUILD_TEST_SHARD_INDEX/$HOLBUILD_TEST_SHARD_COUNT"
+echo "running holbuild tests with HOLBUILD_TEST_JOBS=$HOLBUILD_TEST_JOBS"
 
 write_holbuild_wrapper() {
   local wrapper=$1
@@ -224,22 +207,16 @@ wait_all() {
   done
 }
 
-case_index=0
 selected_count=0
 for test_script in "$ROOT"/tests/cases/*/test.sh; do
   name=$(basename "$(dirname "$test_script")")
-  if [[ $((case_index % HOLBUILD_TEST_SHARD_COUNT)) -ne "$HOLBUILD_TEST_SHARD_INDEX" ]]; then
-    case_index=$((case_index + 1))
-    continue
-  fi
   selected_count=$((selected_count + 1))
   start_case "$test_script" "$name"
   if [[ ${#running_pids[@]} -ge "$HOLBUILD_TEST_JOBS" ]]; then
     wait_one
   fi
-  case_index=$((case_index + 1))
 done
-echo "selected $selected_count test case(s) for shard $HOLBUILD_TEST_SHARD_INDEX/$HOLBUILD_TEST_SHARD_COUNT"
+echo "selected $selected_count test case(s)"
 wait_all
 
 print_timing_summary() {
