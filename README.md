@@ -144,13 +144,11 @@ a build but are removed after successful artifact/metadata writes.
 `--skip-goalfrag` opts out of modern theorem instrumentation.
 The default theorem instrumentation engine is holbuild's proof IR: it parses tactic
 syntax from `HOLSourceAST` directly instead of using HOL `goalFrag`, while preserving
-HOL parser recovery and exact tactic/list-tactic runtime boundaries for recognized
-constructs. `--goalfrag` is deprecated and selects the legacy GoalFrag engine only
-for comparison/debugging. The old `--new-ir` build flag is accepted as a deprecated
-no-op because proof IR is now the default. By default, holbuild preserves HOL parser recovery: recovered
-proof boundaries are instrumented where possible, and unknown/recovered source
-regions pass through to HOL. `--strict-parse` instead treats HOLSourceParser
-parse recovery as a build error before running HOL.
+exact tactic/list-tactic runtime boundaries for recognized constructs. `--goalfrag`
+is deprecated and selects the legacy GoalFrag engine only for comparison/debugging.
+The old `--new-ir` build flag is accepted as a deprecated no-op because proof IR is
+now the default. holbuild may use HOL parser recovery to produce best-effort
+instrumentation and diagnostics, but source parse errors remain build failures.
 `--tactic-timeout SECONDS` overrides the per-tactic proof timeout for this invocation;
 the default is 2.5 seconds, and `0` disables the timeout. Manifest entry points may
 set `[build.root_tactic_timeouts]` by root source path. An entry-point timeout applies

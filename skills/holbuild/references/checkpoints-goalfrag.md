@@ -60,11 +60,9 @@ Opts out of theorem instrumentation/proof IR. Source is sent through the plain `
 
 **Incompatible**: `--skip-goalfrag` with `--tactic-timeout`, `--goalfrag-plan`, or `--goalfrag-trace`.
 
-## Parser recovery and `--strict-parse`
+## Parser recovery
 
-Default build mode preserves HOL compatibility: HOLSourceParser recovery is not a build gate. When parser recovery occurs, holbuild warns, keeps recovered theorem/resume boundaries for instrumentation, and lets unknown/recovered source regions pass through to HOL. This avoids the old all-or-nothing fallback where one later parse recovery could disable proof IR/timeouts for the whole theory.
-
-Use `--strict-parse` when parser recovery itself should be fatal. In strict mode, holbuild runs strict HOLSourceParser boundary discovery before up-to-date/cache restore or HOL execution and reports the parse error immediately.
+HOL source parse errors are build failures. When HOLSourceParser recovery occurs, holbuild may warn and keep recovered theorem/resume boundaries for best-effort instrumentation and diagnostics before HOL reports the failing script-play status. This avoids the old all-or-nothing fallback where one later parse recovery could disable proof IR/timeouts for the whole theory.
 
 ## Tactic timeout flow
 
