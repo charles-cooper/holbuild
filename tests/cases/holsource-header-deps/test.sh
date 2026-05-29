@@ -74,9 +74,12 @@ require_file "$project/.holbuild/obj/src/BTheory.dat"
 require_grep "numLib" "$project/.holbuild/obj/src/AScript.uo"
 require_grep "monadsyntax" "$project/.holbuild/obj/src/AScript.uo"
 require_grep "cv_transLib" "$project/.holbuild/obj/src/AScript.uo"
-require_grep "arithmeticTheory" "$project/.holbuild/obj/src/ATheory.uo"
 require_grep "monadsyntax" "$project/.holbuild/obj/src/ATheory.uo"
 require_grep "cv_primTheory" "$project/.holbuild/obj/src/ATheory.uo"
+if grep -q "arithmeticTheory" "$project/.holbuild/obj/src/ATheory.uo"; then
+  echo "source-header-only arithmeticTheory leaked into generated theory load manifest" >&2
+  exit 1
+fi
 if grep -q "\.holbuild/stage" "$project/.holbuild/obj/src/ATheory.uo"; then
   echo "transient stage path leaked into generated theory load manifest" >&2
   exit 1
