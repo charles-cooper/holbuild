@@ -96,6 +96,9 @@ fun uses_builtin_holdir_manifest (Dependency {name, source = LegacyPathSource {m
       builtin_holdir_dependency name
   | uses_builtin_holdir_manifest _ = false
 
+fun schema2_hol_dependency (Dependency {name = "hol", source = GitSource _}) = true
+  | schema2_hol_dependency _ = false
+
 fun original_dir () =
   case OS.Process.getEnv "HOLBUILD_ORIG_CWD" of
       SOME d => d
@@ -751,9 +754,10 @@ fun dependency_manifest (project as {manifest = project_manifest, graph_artifact
         else
           Option.map (fn path => Path.concat(path, "holproject.toml"))
             (dependency_local_path project dep)
-    | Dependency {name, source = GitSource _, ...} =>
-        SOME (Path.concat(Path.concat(Path.concat(Path.concat(graph_artifact_root, ".holbuild"), "src"), name),
-                          "holproject.toml"))
+    | dep as Dependency {name, source = GitSource _, ...} =>
+        if schema2_hol_dependency dep then SOME (builtin_holdir_manifest ())
+        else SOME (Path.concat(Path.concat(Path.concat(Path.concat(graph_artifact_root, ".holbuild"), "src"), name),
+                               "holproject.toml"))
     | Dependency {source = FromSource {from, path, manifest}, ...} =>
         SOME (Path.concat(abs_under (Path.concat(Path.concat(graph_artifact_root, ".holbuild"), "src"))
                                     (Path.concat(from, path)),
@@ -806,7 +810,7 @@ fun dependency_project (project : t) (dep as Dependency {name, source}) =
           SOME manifest => manifest
         | NONE => die ("dependency " ^ name ^ " has no manifest")
     val parse_dep =
-      if uses_builtin_holdir_manifest dep then parse_builtin_holdir_at
+      if uses_builtin_holdir_manifest dep orelse schema2_hol_dependency dep then parse_builtin_holdir_at
       else
         (if readable dep_manifest then ()
          else die ("dependency " ^ name ^ " manifest not found: " ^ dep_manifest);
@@ -826,7 +830,7 @@ fun dependency_project (project : t) (dep as Dependency {name, source}) =
       case declared_name of
           NONE => ()
         | SOME actual =>
-            if actual = name then ()
+            if actual = name orelse schema2_hol_dependency dep then ()
             else die ("dependency " ^ name ^ " manifest declares project.name = " ^ actual)
   in
     dep_project

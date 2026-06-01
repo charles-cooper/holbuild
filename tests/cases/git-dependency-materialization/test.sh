@@ -43,10 +43,7 @@ hol_repo=$tmpdir/hol-repo
 mkdir -p "$hol_repo"
 git -C "$hol_repo" init -q
 git_identity "$hol_repo"
-cat > "$hol_repo/holproject.toml" <<'TOML'
-[project]
-name = "hol"
-TOML
+echo upstream-hol-without-holproject > "$hol_repo/README"
 git -C "$hol_repo" add .
 git -C "$hol_repo" commit -q -m hol
 hol_rev=$(git -C "$hol_repo" rev-parse HEAD)
