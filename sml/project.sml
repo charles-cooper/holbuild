@@ -28,13 +28,12 @@ datatype generator =
       outputs : string list,
       deps : string list }
 
-datatype dependency =
-  Dependency of
-    { name : string,
-      path : string option,
-      manifest : string option,
-      git : string option,
-      rev : string option }
+datatype dependency_source =
+    GitSource of {git : string, rev : string}
+  | FromSource of {from : string, path : string, manifest : string}
+  | LegacyPathSource of {path : string option, manifest : string option}
+
+datatype dependency = Dependency of {name : string, source : dependency_source}
 
 datatype override = Override of {name : string, path : string}
 
@@ -91,7 +90,7 @@ fun builtin_holdir_dependency name = name = "HOLDIR"
 
 fun builtin_holdir_manifest () = HolbuildBuiltinManifests.holdir_manifest_name
 
-fun uses_builtin_holdir_manifest (Dependency {name, manifest = NONE, ...}) =
+fun uses_builtin_holdir_manifest (Dependency {name, source = LegacyPathSource {manifest = NONE, ...}}) =
       builtin_holdir_dependency name
   | uses_builtin_holdir_manifest _ = false
 
@@ -363,19 +362,48 @@ fun generators_at table =
     | SOME (TOML.ARRAY values) => map parse_generator values
     | SOME _ => die "generate must be an array of tables"
 
+fun schema_version table =
+  case table_field table ["holbuild"] of
+      NONE => 1
+    | SOME holbuild =>
+        case int_at holbuild ["schema"] of
+            NONE => 1
+          | SOME n =>
+              if n = IntInf.fromInt 1 then 1
+              else if n = IntInf.fromInt 2 then 2
+              else die ("unsupported holproject schema: " ^ IntInf.toString n)
+
 fun validate_schema table =
   case table_field table ["holbuild"] of
       NONE => ()
     | SOME holbuild =>
-        (require_known_fields "holbuild" ["schema"] holbuild;
-         case int_at holbuild ["schema"] of
-             NONE => ()
-           | SOME n =>
-               if n = IntInf.fromInt 1 then ()
-               else die ("unsupported holproject schema: " ^ IntInf.toString n))
+        (require_known_fields "holbuild" ["schema", "required_version"] holbuild;
+         ignore (schema_version table);
+         Option.app (fn _ => ()) (string_at holbuild ["required_version"]))
 
-fun validate_dependency_table (name, table) =
-  require_known_fields ("dependencies." ^ name) ["path", "manifest", "git", "rev"] table
+fun validate_dependency_table schema (name, table) =
+  let
+    val context = "dependencies." ^ name
+    val path = string_field table "path"
+    val manifest = string_field table "manifest"
+    val git = string_field table "git"
+    val rev = string_field table "rev"
+    val from = string_field table "from"
+  in
+    if schema = 1 then require_known_fields context ["path", "manifest", "git", "rev"] table
+    else
+      (require_known_fields context ["git", "rev", "from", "path", "manifest"] table;
+       case (git, rev, from, path, manifest) of
+           (SOME _, SOME _, NONE, NONE, NONE) => ()
+         | (SOME _, NONE, _, _, _) => die (context ^ " with git requires rev")
+         | (NONE, SOME _, _, _, _) => die (context ^ " with rev requires git")
+         | (SOME _, SOME _, _, _, _) => die (context ^ " git dependency may only contain git and rev")
+         | (NONE, NONE, SOME _, SOME _, SOME _) => ()
+         | (NONE, NONE, SOME _, _, _) => die (context ^ " with from requires path and manifest")
+         | (NONE, NONE, NONE, SOME _, _) => die (context ^ " path dependencies are not supported in schema 2")
+         | (NONE, NONE, NONE, NONE, SOME _) => die (context ^ " manifest requires from in schema 2")
+         | (NONE, NONE, NONE, NONE, NONE) => die (context ^ " must specify either git/rev or from/path/manifest"))
+  end
 
 fun validate_action_table (logical, table) =
   require_known_fields ("actions." ^ logical)
@@ -396,7 +424,8 @@ fun validate_manifest_table table =
               (table_field table ["build"])
     val _ = Option.app (require_known_fields "run" ["heap", "loads"])
               (table_field table ["run"])
-    val _ = List.app validate_dependency_table (named_table_entries table ["dependencies"])
+    val schema = schema_version table
+    val _ = List.app (validate_dependency_table schema) (named_table_entries table ["dependencies"])
     val _ = List.app validate_action_table (named_table_entries table ["actions"])
     val _ =
       case lookup table ["generate"] of
@@ -427,15 +456,25 @@ fun validate_local_config_table table =
    Option.app validate_local_build_table (table_field table ["build"]);
    List.app validate_override_table (named_table_entries table ["overrides"]))
 
-fun parse_dependency (name, table) =
-  Dependency
-    { name = name,
-      path = string_field table "path",
-      manifest = string_field table "manifest",
-      git = string_field table "git",
-      rev = string_field table "rev" }
+fun parse_dependency schema (name, table) =
+  let
+    val source =
+      if schema = 1 then
+        LegacyPathSource {path = string_field table "path", manifest = string_field table "manifest"}
+      else
+        case (string_field table "git", string_field table "rev", string_field table "from",
+              string_field table "path", string_field table "manifest") of
+            (SOME git, SOME rev, NONE, NONE, NONE) => GitSource {git = git, rev = rev}
+          | (NONE, NONE, SOME from, SOME path, SOME manifest) =>
+              FromSource {from = from, path = path, manifest = manifest}
+          | _ => die ("invalid dependency form for dependencies." ^ name)
+  in
+    Dependency {name = name, source = source}
+  end
 
-fun dependencies_at table = map parse_dependency (named_table_entries table ["dependencies"])
+fun dependencies_at table =
+  let val schema = schema_version table
+  in map (parse_dependency schema) (named_table_entries table ["dependencies"]) end
 
 fun parse_action_policy root (logical, table) =
   let
@@ -538,6 +577,10 @@ fun parse_table_at table {manifest, root, artifact_root, local_config} =
     val root_tactic_timeouts = root_tactic_timeouts_from_manifest build
     val _ = validate_root_tactic_timeouts roots root_tactic_timeouts
     val manifest_timeout = build_tactic_timeout_from_manifest build
+    val _ =
+      if schema_version table = 2 andalso not (null overrides) then
+        die "local dependency overrides are not supported in schema 2"
+      else ()
   in
     { root = root,
       artifact_root = artifact_root,
@@ -648,40 +691,49 @@ fun action_policy_for policies logical =
 fun dependency_path_context name = "dependencies." ^ name ^ ".path"
 fun dependency_manifest_context name = "dependencies." ^ name ^ ".manifest"
 
-fun dependency_local_path ({root, overrides, ...} : t) (Dependency {name, path, ...}) =
+fun dependency_local_path ({root, overrides, ...} : t) (Dependency {name, source}) =
   Option.map (abs_under root)
     (case override_path overrides name of
          SOME override => SOME override
        | NONE =>
-           case path of
-               SOME p => SOME (expand_env (dependency_path_context name) p)
-             | NONE => if builtin_holdir_dependency name then !holdir_ref else NONE)
+           case source of
+               LegacyPathSource {path = SOME p, ...} => SOME (expand_env (dependency_path_context name) p)
+             | LegacyPathSource {path = NONE, ...} => if builtin_holdir_dependency name then !holdir_ref else NONE
+             | _ => NONE)
 
 fun dependency_manifest (project as {manifest = project_manifest, ...} : t) dep =
   case dep of
-      Dependency {name, manifest = SOME manifest, ...} =>
+      Dependency {name, source = LegacyPathSource {manifest = SOME manifest, ...}} =>
         SOME (abs_under (manifest_root project_manifest)
                 (expand_env (dependency_manifest_context name) manifest))
-    | Dependency {name, manifest = NONE, ...} =>
+    | Dependency {name, source = LegacyPathSource {manifest = NONE, ...}} =>
         if builtin_holdir_dependency name then SOME (builtin_holdir_manifest ())
         else
           Option.map (fn path => Path.concat(path, "holproject.toml"))
             (dependency_local_path project dep)
+    | Dependency {source = FromSource {manifest, ...}, ...} =>
+        SOME (abs_under (manifest_root project_manifest)
+                (expand_env (dependency_manifest_context "from") manifest))
+    | Dependency {source = GitSource _, ...} => NONE
 
 fun heap_to_string (Heap {name, output, objects}) =
   name ^ " -> " ^ output ^ " [" ^ String.concatWith ", " objects ^ "]"
 
-fun dependency_to_string project (dep as Dependency {name, path, manifest, git, rev}) =
+fun dependency_to_string project (dep as Dependency {name, source}) =
   let
     fun field label value =
       case value of NONE => [] | SOME s => [label ^ "=" ^ s]
     val override = override_path (#overrides project) name
     val local_path = dependency_local_path project dep
     val resolved_manifest = dependency_manifest project dep
+    val source_fields =
+      case source of
+          LegacyPathSource {path, manifest} => field "path" path @ field "manifest" manifest
+        | GitSource {git, rev} => ["git=" ^ git, "rev=" ^ rev]
+        | FromSource {from, path, manifest} => ["from=" ^ from, "path=" ^ path, "manifest=" ^ manifest]
     val fields =
-      field "path" path @ field "override" override @ field "local" local_path @
-      field "manifest" manifest @ field "resolved-manifest" resolved_manifest @
-      field "git" git @ field "rev" rev
+      source_fields @ field "override" override @ field "local" local_path @
+      field "resolved-manifest" resolved_manifest
   in
     name ^ " [" ^ String.concatWith ", " fields ^ "]"
   end
