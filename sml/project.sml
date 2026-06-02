@@ -700,6 +700,10 @@ fun root_tactic_timeout_for ({root_tactic_timeouts, ...} : t) root =
   Option.map #timeout (List.find (fn entry => #root entry = root) root_tactic_timeouts)
 fun package_generators (Package {generators, ...}) = generators
 fun artifact_root ({artifact_root, ...} : t) = artifact_root
+fun schema ({schema, ...} : t) = schema
+fun project_hol_dir ({graph_artifact_root, schema, ...} : t) =
+  if schema = 2 then SOME (Path.concat(Path.concat(Path.concat(graph_artifact_root, ".holbuild"), "src"), "hol"))
+  else NONE
 fun build_roots ({roots, ...} : t) = roots
 fun package_action_policies (Package {action_policies, ...}) = action_policies
 

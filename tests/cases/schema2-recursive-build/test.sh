@@ -17,13 +17,10 @@ hol=$tmpdir/hol
 mkdir -p "$hol"
 git -C "$hol" init -q
 git_identity "$hol"
-cat > "$hol/holproject.toml" <<'TOML'
-[holbuild]
-schema = 2
-
-[project]
-name = "hol"
-TOML
+mkdir -p "$hol/bin"
+echo '#!/usr/bin/env sh' > "$hol/bin/hol"
+echo 'fake hol.state' > "$hol/bin/hol.state"
+chmod +x "$hol/bin/hol"
 hol_rev=$(commit_repo "$hol")
 
 b=$tmpdir/b
@@ -87,12 +84,16 @@ rev = "$a_rev"
 TOML
 
 dry_log=$tmpdir/dry.log
-(cd "$root" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --dry-run Foo) > "$dry_log"
+(cd "$root" && env -u HOLDIR -u HOLBUILD_HOLDIR "$HOLBUILD_BIN" build --dry-run Foo) > "$dry_log"
 require_grep "Foo (sml, package b)" "$dry_log"
 
-(cd "$root" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build Foo) > "$tmpdir/build.log"
-require_file "$root/.holbuild/packages/b/obj/src/Foo.uo"
-require_file "$root/.holbuild/packages/b/obj/src/Foo.ui"
+if (cd "$root" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --dry-run Foo) > "$tmpdir/holdir.log" 2>&1; then
+  echo "schema 2 build unexpectedly accepted --holdir" >&2
+  exit 1
+fi
+require_grep 'not supported for schema 2 projects' "$tmpdir/holdir.log"
+
+[ -d "$root/.holbuild/src/b/.git" ]
 [ ! -d "$root/.holbuild/src/b/.holbuild" ]
 [ ! -d "$root/.holbuild/packages/a/.holbuild" ]
 [ ! -d "$root/.holbuild/packages/a/.holbuild/src/b" ]

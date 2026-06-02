@@ -555,6 +555,23 @@ fun gc args =
     ()
   end
 
+fun effective_toolchain holdir maxheap =
+  let
+    val project = load_project ()
+  in
+    if HolbuildProject.schema project = 2 then
+      (case holdir of
+           SOME _ => raise Error "--holdir is not supported for schema 2 projects; use dependencies.hol"
+         | NONE =>
+             case HolbuildProject.project_hol_dir project of
+                 SOME h => {holdir = h, maxheap = maxheap}
+               | NONE => raise Error "schema 2 project has no dependencies.hol")
+    else
+      let val tc = {holdir = runtime_holdir holdir, maxheap = maxheap}
+          val _ = HolbuildProject.set_holdir (#holdir tc)
+      in tc end
+  end
+
 fun dispatch_with_options {holdir, source_dir, jobs, maxheap, json, verbosity} args =
   (HolbuildStatus.set_json_mode json;
    HolbuildStatus.set_verbosity verbosity;
@@ -563,13 +580,9 @@ fun dispatch_with_options {holdir, source_dir, jobs, maxheap, json, verbosity} a
    case args of
        "gc" :: rest => (reject_json "gc"; gc rest)
      | "cache" :: rest => (reject_json "cache"; HolbuildCache.dispatch rest)
-     | _ =>
-       let
-         val tc = {holdir = runtime_holdir holdir, maxheap = maxheap}
-         val _ = HolbuildProject.set_holdir (#holdir tc)
-       in
-         dispatch tc jobs args
-       end)
+     | [] => dispatch {holdir = Option.getOpt(holdir, ""), maxheap = maxheap} jobs args
+     | "context" :: _ => dispatch {holdir = Option.getOpt(holdir, ""), maxheap = maxheap} jobs args
+     | _ => dispatch (effective_toolchain holdir maxheap) jobs args)
 
 fun is_broken_pipe (IO.Io {cause = OS.SysErr (msg, _), ...}) = msg = "Broken pipe"
   | is_broken_pipe _ = false
