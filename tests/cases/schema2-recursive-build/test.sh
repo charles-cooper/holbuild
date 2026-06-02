@@ -17,11 +17,38 @@ hol=$tmpdir/hol
 mkdir -p "$hol"
 git -C "$hol" init -q
 git_identity "$hol"
-mkdir -p "$hol/bin"
-echo '#!/usr/bin/env sh' > "$hol/bin/hol"
-echo 'fake hol.state' > "$hol/bin/hol.state"
-chmod +x "$hol/bin/hol"
+mkdir -p "$hol/bin" "$hol/tools"
+cat > "$hol/.gitignore" <<'EOF_IGNORE'
+/bin/hol
+/bin/hol.state
+/configured
+/built
+EOF_IGNORE
+cat > "$hol/tools/smart-configure.sml" <<'SML'
+(* fake configure script; HOLBUILD_POLY fixture handles it *)
+SML
+cat > "$hol/bin/build" <<'SH'
+#!/usr/bin/env sh
+set -eu
+touch built
+cat > bin/hol <<'HOL'
+#!/usr/bin/env sh
+exit 0
+HOL
+chmod +x bin/hol
+echo fake-state > bin/hol.state
+SH
+chmod +x "$hol/bin/build"
 hol_rev=$(commit_repo "$hol")
+
+fakebin=$tmpdir/fakebin
+mkdir -p "$fakebin"
+cat > "$fakebin/poly" <<'SH'
+#!/usr/bin/env sh
+set -eu
+touch configured
+SH
+chmod +x "$fakebin/poly"
 
 b=$tmpdir/b
 mkdir -p "$b/src"
@@ -84,14 +111,31 @@ rev = "$a_rev"
 TOML
 
 dry_log=$tmpdir/dry.log
-(cd "$root" && env -u HOLDIR -u HOLBUILD_HOLDIR "$HOLBUILD_BIN" build --dry-run Foo) > "$dry_log"
+(cd "$root" && env -u HOLDIR -u HOLBUILD_HOLDIR HOLBUILD_POLY="$fakebin/poly" "$HOLBUILD_BIN" build --dry-run Foo) > "$dry_log"
 require_grep "Foo (sml, package b)" "$dry_log"
+require_file "$root/.holbuild/src/hol/configured"
+require_file "$root/.holbuild/src/hol/built"
+require_file "$root/.holbuild/src/hol/bin/hol"
+require_file "$root/.holbuild/src/hol/bin/hol.state"
+rm "$root/.holbuild/src/hol/configured" "$root/.holbuild/src/hol/built"
+(cd "$root" && env -u HOLDIR -u HOLBUILD_HOLDIR HOLBUILD_POLY="$fakebin/poly" "$HOLBUILD_BIN" build --dry-run Foo) > "$tmpdir/dry2.log"
+if [ -e "$root/.holbuild/src/hol/configured" ] || [ -e "$root/.holbuild/src/hol/built" ]; then
+  echo "already-built schema 2 HOL was rebuilt" >&2
+  exit 1
+fi
 
 if (cd "$root" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --dry-run Foo) > "$tmpdir/holdir.log" 2>&1; then
   echo "schema 2 build unexpectedly accepted --holdir" >&2
   exit 1
 fi
 require_grep 'not supported for schema 2 projects' "$tmpdir/holdir.log"
+
+echo dirty >> "$root/.holbuild/src/hol/bin/build"
+if (cd "$root" && env -u HOLDIR -u HOLBUILD_HOLDIR HOLBUILD_POLY="$fakebin/poly" "$HOLBUILD_BIN" build --dry-run Foo) > "$tmpdir/dirty.log" 2>&1; then
+  echo "dirty HOL checkout unexpectedly accepted" >&2
+  exit 1
+fi
+require_grep 'HOL checkout is dirty' "$tmpdir/dirty.log"
 
 [ -d "$root/.holbuild/src/b/.git" ]
 [ ! -d "$root/.holbuild/src/b/.holbuild" ]

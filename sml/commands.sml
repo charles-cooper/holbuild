@@ -560,12 +560,15 @@ fun effective_toolchain holdir maxheap =
     val project = load_project ()
   in
     if HolbuildProject.schema project = 2 then
-      (case holdir of
+      let val _ = HolbuildProject.packages project
+      in case holdir of
            SOME _ => raise Error "--holdir is not supported for schema 2 projects; use dependencies.hol"
          | NONE =>
              case HolbuildProject.project_hol_dir project of
-                 SOME h => {holdir = h, maxheap = maxheap}
-               | NONE => raise Error "schema 2 project has no dependencies.hol")
+                 SOME h => (HolbuildHolToolchainBuild.ensure_built h;
+                            {holdir = h, maxheap = maxheap})
+               | NONE => raise Error "schema 2 project has no dependencies.hol"
+      end
     else
       let val tc = {holdir = runtime_holdir holdir, maxheap = maxheap}
           val _ = HolbuildProject.set_holdir (#holdir tc)
@@ -610,6 +613,7 @@ fun main raw_args =
        | HolbuildBuildPlan.Error msg => err msg
        | HolbuildBuildExec.Error msg => err msg
        | HolbuildBuildExec.ErrorWithDebugArtifacts (msg, artifacts) => err_with_debug_artifacts msg artifacts
+       | HolbuildHolToolchainBuild.Error msg => err msg
        | HolbuildCache.Error msg => err msg
        | e => if is_broken_pipe e then OS.Process.exit OS.Process.success
               else err (General.exnMessage e)
