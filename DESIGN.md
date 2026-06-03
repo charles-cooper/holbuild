@@ -78,6 +78,71 @@ through holbuild's built-in root-HOL manifest plus the configured --holdir path
 This keeps resolution explicit without requiring `holbuild` to understand every
 legacy `Holmakefile`, while avoiding per-consumer HOLDIR shim manifests.
 
+## Schema 2 dependency-managed mode
+
+Schema 2 is the first dependency-managed manifest format. It has intentionally no
+solver: dependencies are exact git commits, and duplicate package names must
+resolve to the same source or resolution fails. A resolved schema 2 graph must
+contain exactly one package named `hol`.
+
+```toml
+[holbuild]
+schema = 2
+
+[dependencies.hol]
+git = "https://github.com/HOL-Theorem-Prover/HOL.git"
+rev = "0123456789abcdef0123456789abcdef01234567"
+
+[dependencies.examples]
+from = "hol"
+path = "."
+manifest = "holexamples.manifest.toml"
+```
+
+Supported dependency forms are deliberately narrow:
+
+- `git` + `rev`, where `rev` is a lowercase 40-character commit hash
+- `from` + `path` + `manifest`, where `from` names a direct git dependency in
+  the same manifest and the paths are relative without `..`
+
+Schema 2 rejects path dependencies, local overrides, git manifests, branches,
+tags, ranges, registry names, and multiple versions. `[holbuild].required_version`
+is reserved and currently rejected when non-empty.
+
+For a root project, all dependency source checkouts are materialized once under:
+
+```text
+<root>/.holbuild/src/<package>
+```
+
+Dependency package build artifacts live separately under:
+
+```text
+<root>/.holbuild/packages/<package>
+```
+
+Nested dependency manifests use the root graph materialization directory, not the
+parent package artifact directory, so resolving `a -> b` creates
+`<root>/.holbuild/src/b`, never `<root>/.holbuild/packages/a/.holbuild/src/b`.
+
+The reserved schema 2 `hol` package is the project HOL toolchain. It is
+materialized as `.holbuild/src/hol`; upstream HOL does not need a
+`holproject.toml`, because holbuild uses its built-in HOL manifest for package
+metadata. `context` resolves/materializes sources but does not build HOL. Commands
+that need HOL reject `--holdir`, use `.holbuild/src/hol` as `HOLDIR`, and build it
+on demand in place with:
+
+```sh
+${HOLBUILD_POLY:-poly} --script tools/smart-configure.sml
+bin/build
+```
+
+A built HOL checkout is expected to contain `bin/hol`, `bin/build`, and
+`bin/hol.state`, and must be git-clean ignoring ignored build products. v1 builds
+HOL per root project for simplicity and isolation. Future optimization may add a
+global shared HOL build cache keyed by HOL URL/rev, platform, Poly/ML, and build
+configuration.
+
 ## Root HOL
 
 Root HOL should be built through holbuild's own model, using an in-tree or
