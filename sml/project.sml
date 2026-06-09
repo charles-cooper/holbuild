@@ -28,13 +28,12 @@ datatype generator =
       outputs : string list,
       deps : string list }
 
-datatype dependency =
-  Dependency of
-    { name : string,
-      path : string option,
-      manifest : string option,
-      git : string option,
-      rev : string option }
+datatype dependency_source =
+    GitSource of {git : string, rev : string}
+  | FromSource of {from : string, path : string, manifest : string}
+  | LegacyPathSource of {path : string option, manifest : string option}
+
+datatype dependency = Dependency of {name : string, source : dependency_source}
 
 datatype override = Override of {name : string, path : string}
 
@@ -55,7 +54,9 @@ datatype package =
 type t =
   { root : string,
     artifact_root : string,
+    graph_artifact_root : string,
     manifest : string,
+    schema : int,
     name : string option,
     version : string option,
     members : string list,
@@ -91,9 +92,12 @@ fun builtin_holdir_dependency name = name = "HOLDIR"
 
 fun builtin_holdir_manifest () = HolbuildBuiltinManifests.holdir_manifest_name
 
-fun uses_builtin_holdir_manifest (Dependency {name, manifest = NONE, ...}) =
+fun uses_builtin_holdir_manifest (Dependency {name, source = LegacyPathSource {manifest = NONE, ...}}) =
       builtin_holdir_dependency name
   | uses_builtin_holdir_manifest _ = false
+
+fun schema2_hol_dependency (Dependency {name = "hol", source = GitSource _}) = true
+  | schema2_hol_dependency _ = false
 
 fun original_dir () =
   case OS.Process.getEnv "HOLBUILD_ORIG_CWD" of
@@ -300,6 +304,15 @@ fun package_relative_path field path =
 
 fun package_relative_paths field paths = map (package_relative_path field) paths
 
+fun safe_materialized_dependency_name name =
+  size name > 0 andalso
+  List.all (fn c => Char.isAlphaNum c orelse c = #"_" orelse c = #"." orelse c = #"-")
+           (String.explode name)
+
+fun require_safe_materialized_dependency_name context name =
+  if safe_materialized_dependency_name name then ()
+  else die (context ^ " must be a safe dependency name: " ^ name)
+
 fun named_table_entries table key =
   case table_field table key of
       NONE => []
@@ -363,19 +376,54 @@ fun generators_at table =
     | SOME (TOML.ARRAY values) => map parse_generator values
     | SOME _ => die "generate must be an array of tables"
 
+fun schema_version table =
+  case table_field table ["holbuild"] of
+      NONE => 1
+    | SOME holbuild =>
+        case int_at holbuild ["schema"] of
+            NONE => 1
+          | SOME n =>
+              if n = IntInf.fromInt 1 then 1
+              else if n = IntInf.fromInt 2 then 2
+              else die ("unsupported holproject schema: " ^ IntInf.toString n)
+
 fun validate_schema table =
   case table_field table ["holbuild"] of
       NONE => ()
     | SOME holbuild =>
-        (require_known_fields "holbuild" ["schema"] holbuild;
-         case int_at holbuild ["schema"] of
+        (require_known_fields "holbuild" ["schema", "required_version"] holbuild;
+         ignore (schema_version table);
+         case string_at holbuild ["required_version"] of
              NONE => ()
-           | SOME n =>
-               if n = IntInf.fromInt 1 then ()
-               else die ("unsupported holproject schema: " ^ IntInf.toString n))
+           | SOME "" => ()
+           | SOME _ => die "holbuild.required_version is recognized but not implemented yet")
 
-fun validate_dependency_table (name, table) =
-  require_known_fields ("dependencies." ^ name) ["path", "manifest", "git", "rev"] table
+fun validate_dependency_table schema (name, table) =
+  let
+    val context = "dependencies." ^ name
+    val path = string_field table "path"
+    val manifest = string_field table "manifest"
+    val git = string_field table "git"
+    val rev = string_field table "rev"
+    val from = string_field table "from"
+  in
+    if schema = 1 then require_known_fields context ["path", "manifest", "git", "rev"] table
+    else
+      (require_known_fields context ["git", "rev", "from", "path", "manifest"] table;
+       case (git, rev, from, path, manifest) of
+           (SOME _, SOME _, NONE, NONE, NONE) => ()
+         | (SOME _, NONE, _, _, _) => die (context ^ " with git requires rev")
+         | (NONE, SOME _, _, _, _) => die (context ^ " with rev requires git")
+         | (SOME _, SOME _, _, _, _) => die (context ^ " git dependency may only contain git and rev")
+         | (NONE, NONE, SOME from, SOME path, SOME manifest) =>
+             (require_safe_materialized_dependency_name (context ^ ".from") from;
+              ignore (package_relative_path (context ^ ".path") path);
+              ignore (package_relative_path (context ^ ".manifest") manifest))
+         | (NONE, NONE, SOME _, _, _) => die (context ^ " with from requires path and manifest")
+         | (NONE, NONE, NONE, SOME _, _) => die (context ^ " path dependencies are not supported in schema 2")
+         | (NONE, NONE, NONE, NONE, SOME _) => die (context ^ " manifest requires from in schema 2")
+         | (NONE, NONE, NONE, NONE, NONE) => die (context ^ " must specify either git/rev or from/path/manifest"))
+  end
 
 fun validate_action_table (logical, table) =
   require_known_fields ("actions." ^ logical)
@@ -396,7 +444,8 @@ fun validate_manifest_table table =
               (table_field table ["build"])
     val _ = Option.app (require_known_fields "run" ["heap", "loads"])
               (table_field table ["run"])
-    val _ = List.app validate_dependency_table (named_table_entries table ["dependencies"])
+    val schema = schema_version table
+    val _ = List.app (validate_dependency_table schema) (named_table_entries table ["dependencies"])
     val _ = List.app validate_action_table (named_table_entries table ["actions"])
     val _ =
       case lookup table ["generate"] of
@@ -427,15 +476,44 @@ fun validate_local_config_table table =
    Option.app validate_local_build_table (table_field table ["build"]);
    List.app validate_override_table (named_table_entries table ["overrides"]))
 
-fun parse_dependency (name, table) =
-  Dependency
-    { name = name,
-      path = string_field table "path",
-      manifest = string_field table "manifest",
-      git = string_field table "git",
-      rev = string_field table "rev" }
+fun parse_dependency schema (name, table) =
+  let
+    val source =
+      if schema = 1 then
+        LegacyPathSource {path = string_field table "path", manifest = string_field table "manifest"}
+      else
+        case (string_field table "git", string_field table "rev", string_field table "from",
+              string_field table "path", string_field table "manifest") of
+            (SOME git, SOME rev, NONE, NONE, NONE) => GitSource {git = git, rev = rev}
+          | (NONE, NONE, SOME from, SOME path, SOME manifest) =>
+              FromSource {from = from, path = path, manifest = manifest}
+          | _ => die ("invalid dependency form for dependencies." ^ name)
+  in
+    Dependency {name = name, source = source}
+  end
 
-fun dependencies_at table = map parse_dependency (named_table_entries table ["dependencies"])
+fun dependencies_at table =
+  let val schema = schema_version table
+  in map (parse_dependency schema) (named_table_entries table ["dependencies"]) end
+
+fun dependency_name (Dependency {name, ...}) = name
+
+fun validate_schema2_dependency_refs deps =
+  let
+    fun source_for name =
+      Option.map (fn Dependency {source, ...} => source)
+        (List.find (fn dep => dependency_name dep = name) deps)
+    fun validate_one (Dependency {name, source = FromSource {from, ...}}) =
+          (case source_for from of
+               SOME (GitSource _) => ()
+             | SOME _ => die ("dependencies." ^ name ^ " from dependency must refer to a direct git dependency: " ^ from)
+             | NONE => die ("dependencies." ^ name ^ " from dependency is unknown: " ^ from))
+      | validate_one (Dependency {name, source = GitSource _, ...}) =
+          require_safe_materialized_dependency_name ("dependencies." ^ name) name
+      | validate_one _ = ()
+  in
+    List.app validate_one deps
+  end
 
 fun parse_action_policy root (logical, table) =
   let
@@ -520,7 +598,7 @@ fun parse_local_config root =
     else LocalConfig {overrides = [], build_excludes = [], build_jobs = NONE, build_tactic_timeout = NONE}
   end
 
-fun parse_table_at table {manifest, root, artifact_root, local_config} =
+fun parse_table_at table {manifest, root, artifact_root, graph_artifact_root, local_config} =
   let
     val _ = validate_manifest_table table
     val project = table_field table ["project"]
@@ -538,17 +616,26 @@ fun parse_table_at table {manifest, root, artifact_root, local_config} =
     val root_tactic_timeouts = root_tactic_timeouts_from_manifest build
     val _ = validate_root_tactic_timeouts roots root_tactic_timeouts
     val manifest_timeout = build_tactic_timeout_from_manifest build
+    val schema = schema_version table
+    val dependencies = dependencies_at table
+    val _ =
+      if schema = 2 andalso not (null overrides) then
+        die "local dependency overrides are not supported in schema 2"
+      else ()
+    val _ = if schema = 2 then validate_schema2_dependency_refs dependencies else ()
   in
     { root = root,
       artifact_root = artifact_root,
+      graph_artifact_root = graph_artifact_root,
       manifest = manifest,
+      schema = schema,
       name = Option.mapPartial (fn t => string_field t "name") project,
       version = Option.mapPartial (fn t => string_field t "version") project,
       members = members,
       excludes = excludes,
       roots = roots,
       root_tactic_timeouts = root_tactic_timeouts,
-      dependencies = dependencies_at table,
+      dependencies = dependencies,
       overrides = overrides,
       local_build_excludes = build_excludes,
       local_build_jobs = build_jobs,
@@ -570,7 +657,7 @@ fun parse manifest =
     val root = manifest_root manifest
     val local_config = parse_local_config root
   in
-    parse_at {manifest = manifest, root = root, artifact_root = root, local_config = local_config}
+    parse_at {manifest = manifest, root = root, artifact_root = root, graph_artifact_root = root, local_config = local_config}
   end
 
 fun discover () =
@@ -583,7 +670,7 @@ fun discover () =
             val artifact_root' = if artifact_root = "" then root else artifact_root
             val local_config = parse_local_config root
           in
-            parse_at {manifest = manifest, root = root, artifact_root = artifact_root', local_config = local_config}
+            parse_at {manifest = manifest, root = root, artifact_root = artifact_root', graph_artifact_root = artifact_root', local_config = local_config}
           end
       | NONE => die "no holproject.toml found in --source-dir/current directory or parents"
   end
@@ -616,6 +703,17 @@ fun root_tactic_timeout_for ({root_tactic_timeouts, ...} : t) root =
   Option.map #timeout (List.find (fn entry => #root entry = root) root_tactic_timeouts)
 fun package_generators (Package {generators, ...}) = generators
 fun artifact_root ({artifact_root, ...} : t) = artifact_root
+fun schema ({schema, ...} : t) = schema
+fun hol_dependency ({dependencies, ...} : t) =
+  List.find (fn Dependency {name, ...} => name = "hol") dependencies
+
+fun project_hol_dir (project as {schema, ...} : t) =
+  if schema = 2 then
+    case hol_dependency project of
+        SOME (Dependency {source = GitSource {git, rev}, ...}) =>
+          SOME (HolbuildHolSharedCache.holdir_for {git = git, rev = rev})
+      | _ => NONE
+  else NONE
 fun build_roots ({roots, ...} : t) = roots
 fun package_action_policies (Package {action_policies, ...}) = action_policies
 
@@ -648,55 +746,81 @@ fun action_policy_for policies logical =
 fun dependency_path_context name = "dependencies." ^ name ^ ".path"
 fun dependency_manifest_context name = "dependencies." ^ name ^ ".manifest"
 
-fun dependency_local_path ({root, overrides, ...} : t) (Dependency {name, path, ...}) =
+fun dependency_local_path (project as {root, overrides, graph_artifact_root, ...} : t) (Dependency {name, source}) =
   Option.map (abs_under root)
     (case override_path overrides name of
          SOME override => SOME override
        | NONE =>
-           case path of
-               SOME p => SOME (expand_env (dependency_path_context name) p)
-             | NONE => if builtin_holdir_dependency name then !holdir_ref else NONE)
+           case source of
+               LegacyPathSource {path = SOME p, ...} => SOME (expand_env (dependency_path_context name) p)
+             | LegacyPathSource {path = NONE, ...} => if builtin_holdir_dependency name then !holdir_ref else NONE
+             | GitSource {git, rev} =>
+                 if name = "hol" then SOME (HolbuildHolSharedCache.holdir_for {git = git, rev = rev})
+                 else SOME (Path.concat(Path.concat(Path.concat(graph_artifact_root, ".holbuild"), "src"), name))
+             | FromSource {from, path, ...} =>
+                 (case hol_dependency project of
+                      SOME (Dependency {name = "hol", source = GitSource {git, rev}}) =>
+                        if from = "hol" then SOME (Path.concat(HolbuildHolSharedCache.holdir_for {git = git, rev = rev}, path))
+                        else SOME (Path.concat(Path.concat(Path.concat(Path.concat(graph_artifact_root, ".holbuild"), "src"), from), path))
+                    | _ => SOME (Path.concat(Path.concat(Path.concat(Path.concat(graph_artifact_root, ".holbuild"), "src"), from), path))))
 
-fun dependency_manifest (project as {manifest = project_manifest, ...} : t) dep =
+fun dependency_manifest (project as {manifest = project_manifest, graph_artifact_root, ...} : t) dep =
   case dep of
-      Dependency {name, manifest = SOME manifest, ...} =>
+      Dependency {name, source = LegacyPathSource {manifest = SOME manifest, ...}} =>
         SOME (abs_under (manifest_root project_manifest)
                 (expand_env (dependency_manifest_context name) manifest))
-    | Dependency {name, manifest = NONE, ...} =>
+    | Dependency {name, source = LegacyPathSource {manifest = NONE, ...}} =>
         if builtin_holdir_dependency name then SOME (builtin_holdir_manifest ())
         else
           Option.map (fn path => Path.concat(path, "holproject.toml"))
             (dependency_local_path project dep)
+    | dep as Dependency {name, source = GitSource _, ...} =>
+        if schema2_hol_dependency dep then SOME (builtin_holdir_manifest ())
+        else SOME (Path.concat(Path.concat(Path.concat(Path.concat(graph_artifact_root, ".holbuild"), "src"), name),
+                               "holproject.toml"))
+    | Dependency {source = FromSource {manifest, ...}, ...} =>
+        SOME (abs_under (manifest_root project_manifest) manifest)
 
 fun heap_to_string (Heap {name, output, objects}) =
   name ^ " -> " ^ output ^ " [" ^ String.concatWith ", " objects ^ "]"
 
-fun dependency_to_string project (dep as Dependency {name, path, manifest, git, rev}) =
+fun dependency_to_string project (dep as Dependency {name, source}) =
   let
     fun field label value =
       case value of NONE => [] | SOME s => [label ^ "=" ^ s]
     val override = override_path (#overrides project) name
     val local_path = dependency_local_path project dep
     val resolved_manifest = dependency_manifest project dep
+    val source_fields =
+      case source of
+          LegacyPathSource {path, manifest} => field "path" path @ field "manifest" manifest
+        | GitSource {git, rev} => ["git=" ^ git, "rev=" ^ rev]
+        | FromSource {from, path, manifest} => ["from=" ^ from, "path=" ^ path, "manifest=" ^ manifest]
     val fields =
-      field "path" path @ field "override" override @ field "local" local_path @
-      field "manifest" manifest @ field "resolved-manifest" resolved_manifest @
-      field "git" git @ field "rev" rev
+      source_fields @ field "override" override @ field "local" local_path @
+      field "resolved-manifest" resolved_manifest
   in
     name ^ " [" ^ String.concatWith ", " fields ^ "]"
   end
 
 fun override_to_string (Override {name, path}) = name ^ " -> " ^ path
 
-fun project_package ({root, artifact_root, manifest, name, members, excludes, roots, action_policies, generators, ...} : t) =
+fun project_package ({root, artifact_root, graph_artifact_root, manifest, name, members, excludes, roots, action_policies, generators, ...} : t) =
   Package {name = Option.getOpt(name, "root"), root = root, manifest = manifest,
            members = members, excludes = excludes, roots = roots,
-           artifact_root = Path.concat(artifact_root, ".holbuild"),
+           artifact_root = if artifact_root = graph_artifact_root then Path.concat(artifact_root, ".holbuild") else artifact_root,
            action_policies = action_policies,
            generators = generators}
 
-fun dependency_project (project : t) (dep as Dependency {name, ...}) =
+fun dependency_project (project : t) (dep as Dependency {name, source}) =
   let
+    val _ =
+      case source of
+          GitSource {git, rev} =>
+            if schema2_hol_dependency dep then ()
+            else ignore (HolbuildGitCache.materialize {name = name, git = git, rev = rev,
+                                                       artifact_root = #graph_artifact_root project})
+        | _ => ()
     val dep_root =
       case dependency_local_path project dep of
           SOME path => path
@@ -706,14 +830,19 @@ fun dependency_project (project : t) (dep as Dependency {name, ...}) =
           SOME manifest => manifest
         | NONE => die ("dependency " ^ name ^ " has no manifest")
     val parse_dep =
-      if uses_builtin_holdir_manifest dep then parse_builtin_holdir_at
+      if uses_builtin_holdir_manifest dep orelse schema2_hol_dependency dep then parse_builtin_holdir_at
       else
         (if readable dep_manifest then ()
          else die ("dependency " ^ name ^ " manifest not found: " ^ dep_manifest);
          parse_at)
-    val dep_project = parse_dep {manifest = dep_manifest, root = dep_root, artifact_root = dep_root,
+    val dep_artifact_root =
+      case source of
+          LegacyPathSource _ => dep_root
+        | _ => Path.concat(Path.concat(Path.concat(#graph_artifact_root project, ".holbuild"), "packages"), name)
+    val dep_project = parse_dep {manifest = dep_manifest, root = dep_root, artifact_root = dep_artifact_root,
+                                 graph_artifact_root = #graph_artifact_root project,
                                  local_config = LocalConfig {overrides = #overrides project,
-                                                             build_excludes = #local_build_excludes project,
+                                                                build_excludes = #local_build_excludes project,
                                                              build_jobs = #local_build_jobs project,
                                                              build_tactic_timeout = #build_tactic_timeout project}}
     val declared_name = #name dep_project
@@ -721,10 +850,30 @@ fun dependency_project (project : t) (dep as Dependency {name, ...}) =
       case declared_name of
           NONE => ()
         | SOME actual =>
-            if actual = name then ()
+            if actual = name orelse schema2_hol_dependency dep then ()
             else die ("dependency " ^ name ^ " manifest declares project.name = " ^ actual)
   in
     dep_project
+  end
+
+fun resolved_hol_dependency project =
+  let
+    fun seen name names = List.exists (fn n => n = name) names
+    fun search_project names p =
+      case hol_dependency p of
+          SOME dep => SOME dep
+        | NONE => search_deps names p (#dependencies p)
+    and search_deps names parent deps =
+      case deps of
+          [] => NONE
+        | (dep as Dependency {name, ...}) :: rest =>
+            if seen name names then search_deps names parent rest
+            else
+              (case search_project (name :: names) (dependency_project parent dep) of
+                   SOME hol => SOME hol
+                 | NONE => search_deps (name :: names) parent rest)
+  in
+    search_project [] project
   end
 
 fun dependency_package artifact_parent project (dep as Dependency {name, ...}) =
@@ -732,7 +881,10 @@ fun dependency_package artifact_parent project (dep as Dependency {name, ...}) =
     val dep_project = dependency_project project dep
     val dep_root = valOf (dependency_local_path project dep)
     val dep_manifest = valOf (dependency_manifest project dep)
-    val artifact_root = Path.concat(Path.concat(artifact_parent, ".holbuild/deps"), name)
+    val artifact_root =
+      case dep of
+          Dependency {source = LegacyPathSource _, ...} => Path.concat(Path.concat(artifact_parent, ".holbuild/deps"), name)
+        | _ => Path.concat(Path.concat(Path.concat(artifact_parent, ".holbuild"), "packages"), name)
   in
     (Package {name = name, root = dep_root, manifest = dep_manifest,
               members = #members dep_project, excludes = #excludes dep_project,
@@ -742,36 +894,52 @@ fun dependency_package artifact_parent project (dep as Dependency {name, ...}) =
      dep_project)
   end
 
+fun same_dependency_source (GitSource a, GitSource b) = #git a = #git b andalso #rev a = #rev b
+  | same_dependency_source (FromSource a, FromSource b) =
+      #from a = #from b andalso #path a = #path b andalso #manifest a = #manifest b
+  | same_dependency_source (LegacyPathSource a, LegacyPathSource b) = #path a = #path b andalso #manifest a = #manifest b
+  | same_dependency_source _ = false
+
 fun packages (project : t) =
   let
-    val artifact_parent = artifact_root project
-    fun seen name names = List.exists (fn n => n = name) names
-    fun add_dependency parent_project (dep, (names, packages)) =
-      let val name = dependency_name dep
-      in
-        if seen name names then (names, packages)
-        else
-          let
-            val (package, dep_project) = dependency_package artifact_parent parent_project dep
-            val (names', packages') = add_project dep_project (name :: names, package :: packages)
-          in
-            (names', packages')
-          end
-      end
+    val artifact_parent = #graph_artifact_root project
+    fun seen_source name seen =
+      Option.map #2 (List.find (fn (n, _) => n = name) seen)
+    fun add_dependency parent_project (dep as Dependency {name, source}, (seen, packages)) =
+      case seen_source name seen of
+          SOME previous =>
+            if same_dependency_source (previous, source) then (seen, packages)
+            else die ("conflicting dependency " ^ name)
+        | NONE =>
+            let
+              val (package, dep_project) = dependency_package artifact_parent parent_project dep
+              val (seen', packages') = add_project dep_project ((name, source) :: seen, package :: packages)
+            in
+              (seen', packages')
+            end
     and add_project current_project state =
       List.foldl (add_dependency current_project) state (#dependencies current_project)
     val root_package = project_package project
-    val (_, packages) = add_project project ([package_name root_package], [root_package])
+    val (_, packages) = add_project project ([], [root_package])
+    val result = rev packages
+    val hol_count = length (List.filter (fn package => package_name package = "hol") result)
+    val _ =
+      if #schema project = 2 andalso hol_count <> 1 then
+        die ("schema 2 dependency graph must contain exactly one hol dependency")
+      else ()
   in
-    rev packages
+    result
   end
 
 fun describe (project : t) =
   let
     val {root, artifact_root, manifest, name, version, members, excludes, roots, root_tactic_timeouts, dependencies,
-         overrides, local_build_excludes, local_build_jobs, build_tactic_timeout, run_heap, run_loads, heaps, action_policies, generators} = project
+         overrides, local_build_excludes, local_build_jobs, build_tactic_timeout, run_heap, run_loads, heaps, action_policies, generators, ...} = project
     fun opt label value =
       case value of NONE => () | SOME s => print (label ^ s ^ "\n")
+    fun describe_package (Package {name, root, manifest, artifact_root, ...}) =
+      print ("package: " ^ name ^ " [root=" ^ root ^ ", manifest=" ^ manifest ^
+             ", artifact-root=" ^ artifact_root ^ "]\n")
   in
     print ("manifest: " ^ manifest ^ "\n");
     print ("root: " ^ root ^ "\n");
@@ -785,6 +953,7 @@ fun describe (project : t) =
                 print ("root tactic_timeout: " ^ root ^ " = " ^
                        (case timeout of NONE => "none" | SOME t => Real.toString t) ^ "\n"))
              root_tactic_timeouts;
+    List.app describe_package (packages project);
     List.app (fn dep => print ("dependency: " ^ dependency_to_string project dep ^ "\n")) dependencies;
     List.app (fn override => print ("override: " ^ override_to_string override ^ "\n")) overrides;
     Option.app (fn jobs => print ("local build.jobs: " ^ Int.toString jobs ^ "\n")) local_build_jobs;

@@ -70,8 +70,9 @@ make HOLDIR=/path/to/HOL install
 ```
 
 This installs only the `holbuild` executable to `$HOME/.local/bin/holbuild` by
-default. Override with `PREFIX`, `BINDIR`, or `DESTDIR` if needed. Runtime HOL
-selection still uses `--holdir PATH`, `HOLBUILD_HOLDIR`, or `HOLDIR`.
+default. Override with `PREFIX`, `BINDIR`, or `DESTDIR` if needed. Schema 1
+projects select runtime HOL with `--holdir PATH`, `HOLBUILD_HOLDIR`, or `HOLDIR`.
+Schema 2 projects select HOL from `dependencies.hol`; `--holdir` is rejected.
 
 The compiler loads HOL's existing SML TOML parser from `$(HOLDIR)` and embeds it
 in `bin/holbuild`. Tests live under `tests/cases/*/test.sh` so they can move into
@@ -119,8 +120,13 @@ bin/holbuild repl
 bin/holbuild heap main
 ```
 
-`--holdir PATH` can be used instead of `HOLBUILD_HOLDIR` at runtime for HOL
-commands. `--source-dir PATH` or `HOLBUILD_SOURCE_DIR` selects the project source
+For schema 1 projects, `--holdir PATH` can be used instead of `HOLBUILD_HOLDIR`
+at runtime for HOL commands. For schema 2 projects, HOL is resolved from the
+reserved `dependencies.hol` package, `--holdir` is rejected, and built HOL trees
+are shared under `$HOLBUILD_CACHE/hol-toolchains`. `${HOLBUILD_POLY:-poly}` is
+used to configure/build HOL on demand. `holbuild context` may
+materialize dependency sources but does not build HOL. `--source-dir PATH` or
+`HOLBUILD_SOURCE_DIR` selects the project source
 root for manifest discovery while `.holbuild` artifacts are written under the shell's
 current directory. `-jN`, `-j N`, or `--jobs N` controls build parallelism for `build`
 and for the build phase of `heap` targets; the default comes from local
@@ -185,7 +191,62 @@ root-HOL migration through an explicit/default HOL manifest, and an optional
 global cache that can share validated dependency state without changing build
 semantics. A root-HOL manifest sketch lives under `examples/root-hol/`.
 
-## Example `holproject.toml`
+## Schema 2 dependency-managed projects
+
+Schema 2 makes HOL itself an exact git dependency. Every resolved schema 2 graph
+must contain exactly one package named `hol`; that dependency is materialized and
+built under `$HOLBUILD_CACHE/hol-toolchains/<key>/hol` and used as `HOLDIR`.
+Upstream HOL does not need a `holproject.toml`; holbuild uses a built-in manifest
+for the reserved `hol` package.
+
+```toml
+[holbuild]
+schema = 2
+
+[project]
+name = "example"
+
+[dependencies.hol]
+git = "https://github.com/HOL-Theorem-Prover/HOL.git"
+rev = "0123456789abcdef0123456789abcdef01234567"
+
+[dependencies.verifereum]
+git = "https://github.com/example/verifereum.git"
+rev = "89abcdef0123456789abcdef0123456789abcdef"
+
+[dependencies.holexamples]
+from = "hol"
+path = "."
+manifest = "holexamples.manifest.toml"
+```
+
+Schema 2 currently supports only exact lowercase 40-character git commit hashes.
+There are no branches, tags, version ranges, registry, solver, lockfile, local
+overrides, or multiple versions of one package yet. Git dependencies use `git` +
+`rev`; `manifest` is not allowed on git dependencies. `from` dependencies use
+`from` + `path` + `manifest`; `from` must refer to a direct git dependency in the
+same manifest. The `path` selects a source subtree inside the `from` checkout,
+while `manifest` is a shim manifest path relative to the declaring package's
+manifest root. Both paths must be relative and contain no `..`.
+
+For each root project graph, sources and build artifacts are separated:
+
+```text
+.holbuild/src/<package>       # materialized source checkout
+.holbuild/packages/<package>  # package build artifacts
+```
+
+The reserved `hol` source checkout is special in v1: it is shared globally under
+`$HOLBUILD_CACHE/hol-toolchains/<key>/hol` and built there by running
+`${HOLBUILD_POLY:-poly} --script tools/smart-configure.sml` and then `bin/build`.
+A dirty or incomplete cached HOL checkout is rejected until the user removes that
+cache entry. Use `holbuild buildhol` to warm this cache explicitly, for example in
+CI; normal HOL-using commands do this automatically.
+
+`[holbuild].required_version` is recognized but not implemented; non-empty values
+are currently rejected.
+
+## Example schema 1 `holproject.toml`
 
 ```toml
 [holbuild]

@@ -78,6 +78,76 @@ through holbuild's built-in root-HOL manifest plus the configured --holdir path
 This keeps resolution explicit without requiring `holbuild` to understand every
 legacy `Holmakefile`, while avoiding per-consumer HOLDIR shim manifests.
 
+## Schema 2 dependency-managed mode
+
+Schema 2 is the first dependency-managed manifest format. It has intentionally no
+solver: dependencies are exact git commits, and duplicate package names must
+resolve to the same source or resolution fails. A resolved schema 2 graph must
+contain exactly one package named `hol`.
+
+```toml
+[holbuild]
+schema = 2
+
+[dependencies.hol]
+git = "https://github.com/HOL-Theorem-Prover/HOL.git"
+rev = "0123456789abcdef0123456789abcdef01234567"
+
+[dependencies.examples]
+from = "hol"
+path = "."
+manifest = "holexamples.manifest.toml"
+```
+
+Supported dependency forms are deliberately narrow:
+
+- `git` + `rev`, where `rev` is a lowercase 40-character commit hash
+- `from` + `path` + `manifest`, where `from` names a direct git dependency in
+  the same manifest, `path` selects a source subtree inside that checkout, and
+  `manifest` is a shim manifest relative to the declaring package's manifest
+  root. Both paths are relative and cannot contain `..`.
+
+Schema 2 rejects path dependencies, local overrides, git manifests, branches,
+tags, ranges, registry names, and multiple versions. `[holbuild].required_version`
+is reserved and currently rejected when non-empty.
+
+For a root project, all dependency source checkouts are materialized once under:
+
+```text
+<root>/.holbuild/src/<package>
+```
+
+Dependency package build artifacts live separately under:
+
+```text
+<root>/.holbuild/packages/<package>
+```
+
+Nested dependency source checkouts use the root graph materialization directory,
+not the parent package artifact directory, so resolving `a -> b` creates
+`<root>/.holbuild/src/b`, never `<root>/.holbuild/packages/a/.holbuild/src/b`.
+For `from` dependencies, the source root is under `.holbuild/src/<from>/<path>`,
+but the shim manifest is read from the package that declares the dependency.
+
+The reserved schema 2 `hol` package is the project HOL toolchain. It is
+materialized and built at a canonical shared cache path
+`$HOLBUILD_CACHE/hol-toolchains/<key>/hol`; upstream HOL does not need a
+`holproject.toml`, because holbuild uses its built-in HOL manifest for package
+metadata. `context` resolves the path but does not build HOL. Commands that need
+HOL reject `--holdir`, use the shared cached tree as `HOLDIR`, and build it on
+demand with:
+
+```sh
+${HOLBUILD_POLY:-poly} --script tools/smart-configure.sml
+bin/build
+```
+
+A built HOL checkout is expected to contain `bin/hol`, `bin/build`, and
+`bin/hol.state`, and must be git-clean ignoring ignored build products. If a
+shared cache entry is dirty or incomplete, holbuild refuses to use it until the
+user removes it manually. The cache key includes the canonical HOL repository,
+revision, Poly/ML command/version, build arguments, and cache format version.
+
 ## Root HOL
 
 Root HOL should be built through holbuild's own model, using an in-tree or

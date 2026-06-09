@@ -44,15 +44,59 @@ TOML
 require_grep "name: valid" "$tmpdir/valid.log"
 require_grep "roots: src/MainScript.sml" "$tmpdir/valid.log"
 
-make_project bad_schema
-cat > "$tmpdir/bad_schema/holproject.toml" <<'TOML'
+schema2_repo=$tmpdir/schema2-repo
+mkdir -p "$schema2_repo"
+git -C "$schema2_repo" init -q
+git -C "$schema2_repo" config user.email test@example.com
+git -C "$schema2_repo" config user.name 'Holbuild Test'
+git -C "$schema2_repo" config commit.gpgsign false
+cat > "$schema2_repo/holproject.toml" <<'TOML'
+[project]
+name = "hol"
+TOML
+git -C "$schema2_repo" add .
+git -C "$schema2_repo" commit -q -m initial
+schema2_rev=$(git -C "$schema2_repo" rev-parse HEAD)
+export HOLBUILD_CANONICAL_HOL_GIT="$schema2_repo"
+
+make_project valid_schema2_git
+cat > "$tmpdir/valid_schema2_git/holproject.toml" <<TOML
 [holbuild]
 schema = 2
 
 [project]
-name = "bad_schema"
+name = "valid_schema2_git"
+
+[dependencies.hol]
+git = "$schema2_repo"
+rev = "$schema2_rev"
 TOML
-expect_context_failure bad_schema "unsupported holproject schema: 2"
+(cd "$tmpdir/valid_schema2_git" && "$HOLBUILD_BIN" context) > "$tmpdir/valid_schema2_git.log"
+require_grep "dependency: hol \[git=$schema2_repo, rev=$schema2_rev" "$tmpdir/valid_schema2_git.log"
+
+make_project valid_schema2_from
+cat > "$tmpdir/valid_schema2_from/holexamples.manifest.toml" <<'TOML'
+[project]
+name = "holexamples"
+TOML
+cat > "$tmpdir/valid_schema2_from/holproject.toml" <<TOML
+[holbuild]
+schema = 2
+
+[project]
+name = "valid_schema2_from"
+
+[dependencies.hol]
+git = "$schema2_repo"
+rev = "$schema2_rev"
+
+[dependencies.holexamples]
+from = "hol"
+path = "."
+manifest = "holexamples.manifest.toml"
+TOML
+(cd "$tmpdir/valid_schema2_from" && "$HOLBUILD_BIN" context) > "$tmpdir/valid_schema2_from.log"
+require_grep "dependency: holexamples \[from=hol, path=., manifest=holexamples.manifest.toml" "$tmpdir/valid_schema2_from.log"
 
 make_project unknown_top
 cat > "$tmpdir/unknown_top/holproject.toml" <<'TOML'
@@ -154,6 +198,72 @@ path = "../dep"
 branch = "main"
 TOML
 expect_context_failure bad_dependency "unknown field in dependencies.dep: branch"
+
+make_project required_version_unimplemented
+cat > "$tmpdir/required_version_unimplemented/holproject.toml" <<'TOML'
+[holbuild]
+schema = 2
+required_version = ">=0.2"
+
+[project]
+name = "required_version_unimplemented"
+TOML
+expect_context_failure required_version_unimplemented "holbuild.required_version is recognized but not implemented yet"
+
+make_project schema2_missing_rev
+cat > "$tmpdir/schema2_missing_rev/holproject.toml" <<'TOML'
+[holbuild]
+schema = 2
+
+[project]
+name = "schema2_missing_rev"
+
+[dependencies.dep]
+git = "https://example.com/dep.git"
+TOML
+expect_context_failure schema2_missing_rev "dependencies.dep with git requires rev"
+
+make_project schema2_path_dep
+cat > "$tmpdir/schema2_path_dep/holproject.toml" <<'TOML'
+[holbuild]
+schema = 2
+
+[project]
+name = "schema2_path_dep"
+
+[dependencies.dep]
+path = "../dep"
+TOML
+expect_context_failure schema2_path_dep "dependencies.dep path dependencies are not supported in schema 2"
+
+make_project schema2_git_manifest
+cat > "$tmpdir/schema2_git_manifest/holproject.toml" <<'TOML'
+[holbuild]
+schema = 2
+
+[project]
+name = "schema2_git_manifest"
+
+[dependencies.dep]
+git = "https://example.com/dep.git"
+rev = "abcdef"
+manifest = "dep.manifest.toml"
+TOML
+expect_context_failure schema2_git_manifest "dependencies.dep git dependency may only contain git and rev"
+
+make_project schema2_override
+cat > "$tmpdir/schema2_override/holproject.toml" <<'TOML'
+[holbuild]
+schema = 2
+
+[project]
+name = "schema2_override"
+TOML
+cat > "$tmpdir/schema2_override/.holconfig.toml" <<'TOML'
+[overrides.dep]
+path = "../dep"
+TOML
+expect_context_failure schema2_override "local dependency overrides are not supported in schema 2"
 
 make_project bad_action_field
 cat > "$tmpdir/bad_action_field/holproject.toml" <<'TOML'
