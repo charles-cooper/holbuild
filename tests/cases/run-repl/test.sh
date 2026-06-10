@@ -10,11 +10,18 @@ source "$SCRIPT_DIR/../../lib.sh"
 tmpdir=$(make_temp_dir)
 cleanup() { rm -rf "$tmpdir"; }
 trap cleanup EXIT
-export HOLBUILD_CACHE="$tmpdir/cache"
+use_case_cache "$tmpdir/cache"
 
 project=$tmpdir/project
 mkdir -p "$project/src"
 cat > "$project/holproject.toml" <<'TOML'
+[holbuild]
+schema = 2
+
+[dependencies.hol]
+git = "https://github.com/HOL-Theorem-Prover/HOL.git"
+rev = "bf0dec986904cecbd1a1c6bce62ccf1c256eaca1"
+
 [project]
 name = "runrepl"
 
@@ -31,12 +38,12 @@ val repl_smoke_thm = store_thm("repl_smoke_thm", ``T``, ACCEPT_TAC TRUTH);
 val _ = export_theory();
 SML
 
-(cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$tmpdir/build.log" 2>&1
+(cd "$project" && "$HOLBUILD_BIN" build ATheory) > "$tmpdir/build.log" 2>&1
 
 repl_log=$tmpdir/repl.log
 (
   printf 'val _ = (ATheory.repl_smoke_thm; print "REPL_SMOKE_OK\\n");\n'
-) | (cd "$project" && timeout 20 "$HOLBUILD_BIN" --holdir "$HOLDIR" repl) > "$repl_log" 2>&1
+) | (cd "$project" && timeout 20 "$HOLBUILD_BIN" repl) > "$repl_log" 2>&1
 require_grep "REPL_SMOKE_OK" "$repl_log"
 
 context="$project/.holbuild/holbuild-run-context.sml"
@@ -49,7 +56,7 @@ cat > "$run_script" <<'SML'
 val _ = (ATheory.repl_smoke_thm; print "RUN_SMOKE_OK\n");
 SML
 run_log=$tmpdir/run.log
-(cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" run "$run_script") > "$run_log" 2>&1
+(cd "$project" && "$HOLBUILD_BIN" run "$run_script") > "$run_log" 2>&1
 require_grep "RUN_SMOKE_OK" "$run_log"
 
 no_run_loads=$tmpdir/no-run-loads
@@ -65,5 +72,5 @@ manual_repl_log=$tmpdir/manual-repl.log
 (
   printf 'load "ATheory";\n'
   printf 'val _ = (ATheory.repl_smoke_thm; print "MANUAL_REPL_LOAD_OK\\n");\n'
-) | (cd "$no_run_loads" && timeout 20 "$HOLBUILD_BIN" --holdir "$HOLDIR" repl) > "$manual_repl_log" 2>&1
+) | (cd "$no_run_loads" && timeout 20 "$HOLBUILD_BIN" repl) > "$manual_repl_log" 2>&1
 require_grep "MANUAL_REPL_LOAD_OK" "$manual_repl_log"

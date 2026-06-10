@@ -2,7 +2,7 @@
 set -euo pipefail
 
 HOLBUILD_BIN=$1
-HOLDIR=$2
+_HOLDIR=$2
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck source=../../lib.sh
 source "$SCRIPT_DIR/../../lib.sh"
@@ -10,18 +10,31 @@ source "$SCRIPT_DIR/../../lib.sh"
 tmpdir=$(make_temp_dir)
 cleanup() { rm -rf "$tmpdir"; }
 trap cleanup EXIT
-export HOLBUILD_CACHE="$tmpdir/cache"
+use_case_cache "$tmpdir/cache"
 
 make_project() {
   local name=$1
   mkdir -p "$tmpdir/$name/src"
 }
 
+write_manifest() {
+  local name=$1
+  shift
+  {
+    write_schema2_prelude
+    cat <<TOML
+[project]
+name = "$name"
+TOML
+    cat
+  } > "$tmpdir/$name/holproject.toml"
+}
+
 expect_context_failure() {
   local project=$1
   local pattern=$2
   local log=$tmpdir/$project.log
-  if (cd "$tmpdir/$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" context) > "$log" 2>&1; then
+  if (cd "$tmpdir/$project" && "$HOLBUILD_BIN" context) > "$log" 2>&1; then
     echo "manifest unexpectedly accepted: $project" >&2
     exit 1
   fi
@@ -29,34 +42,43 @@ expect_context_failure() {
 }
 
 make_project valid
-cat > "$tmpdir/valid/holproject.toml" <<'TOML'
-[holbuild]
-schema = 1
-
-[project]
-name = "valid"
+write_manifest valid <<'TOML'
 
 [build]
 members = ["src"]
 roots = ["src/MainScript.sml"]
 TOML
-(cd "$tmpdir/valid" && "$HOLBUILD_BIN" --holdir "$HOLDIR" context) > "$tmpdir/valid.log"
+(cd "$tmpdir/valid" && "$HOLBUILD_BIN" context) > "$tmpdir/valid.log"
 require_grep "name: valid" "$tmpdir/valid.log"
 require_grep "roots: src/MainScript.sml" "$tmpdir/valid.log"
 
+make_project schema1_rejected
+cat > "$tmpdir/schema1_rejected/holproject.toml" <<'TOML'
+[holbuild]
+schema = 1
+
+[project]
+name = "schema1_rejected"
+TOML
+expect_context_failure schema1_rejected "only holproject schema 2 is supported"
+
+make_project missing_schema_rejected
+cat > "$tmpdir/missing_schema_rejected/holproject.toml" <<'TOML'
+[project]
+name = "missing_schema_rejected"
+TOML
+expect_context_failure missing_schema_rejected "holproject.toml must declare \[holbuild\] schema = 2"
+
 schema2_repo=$tmpdir/schema2-repo
 mkdir -p "$schema2_repo"
-git -C "$schema2_repo" init -q
-git -C "$schema2_repo" config user.email test@example.com
-git -C "$schema2_repo" config user.name 'Holbuild Test'
-git -C "$schema2_repo" config commit.gpgsign false
-cat > "$schema2_repo/holproject.toml" <<'TOML'
+{
+  write_schema2_prelude
+  cat <<'TOML'
 [project]
 name = "hol"
 TOML
-git -C "$schema2_repo" add .
-git -C "$schema2_repo" commit -q -m initial
-schema2_rev=$(git -C "$schema2_repo" rev-parse HEAD)
+} > "$schema2_repo/holproject.toml"
+schema2_rev=$(init_git_repo "$schema2_repo")
 export HOLBUILD_CANONICAL_HOL_GIT="$schema2_repo"
 
 make_project valid_schema2_git
@@ -76,6 +98,9 @@ require_grep "dependency: hol \[git=$schema2_repo, rev=$schema2_rev" "$tmpdir/va
 
 make_project valid_schema2_from
 cat > "$tmpdir/valid_schema2_from/holexamples.manifest.toml" <<'TOML'
+[holbuild]
+schema = 2
+
 [project]
 name = "holexamples"
 TOML
@@ -98,50 +123,39 @@ TOML
 (cd "$tmpdir/valid_schema2_from" && "$HOLBUILD_BIN" context) > "$tmpdir/valid_schema2_from.log"
 require_grep "dependency: holexamples \[from=hol, path=., manifest=holexamples.manifest.toml" "$tmpdir/valid_schema2_from.log"
 
-make_project unknown_top
-cat > "$tmpdir/unknown_top/holproject.toml" <<'TOML'
-[project]
-name = "unknown_top"
+for case in unknown_top typo_build bad_exclude_type bad_roots_type bad_root_timeout absolute_member parent_exclude no_paths_includes bad_type bad_action_field bad_action_type bad_action_deps_type bad_action_loads_type bad_action_abs_input bad_action_abs_dep bad_generate_field bad_generate_command_type bad_generate_abs_output; do
+  make_project "$case"
+done
+
+write_manifest unknown_top <<'TOML'
 
 [mystery]
 value = "nope"
 TOML
 expect_context_failure unknown_top "unknown field in holproject.toml: mystery"
 
-make_project typo_build
-cat > "$tmpdir/typo_build/holproject.toml" <<'TOML'
-[project]
-name = "typo_build"
+write_manifest typo_build <<'TOML'
 
 [build]
 member = ["src"]
 TOML
 expect_context_failure typo_build "unknown field in build: member"
 
-make_project bad_exclude_type
-cat > "$tmpdir/bad_exclude_type/holproject.toml" <<'TOML'
-[project]
-name = "bad_exclude_type"
+write_manifest bad_exclude_type <<'TOML'
 
 [build]
 exclude = "selftest.sml"
 TOML
 expect_context_failure bad_exclude_type "exclude must be a string array"
 
-make_project bad_roots_type
-cat > "$tmpdir/bad_roots_type/holproject.toml" <<'TOML'
-[project]
-name = "bad_roots_type"
+write_manifest bad_roots_type <<'TOML'
 
 [build]
 roots = "MainTheory"
 TOML
 expect_context_failure bad_roots_type "roots must be a string array"
 
-make_project bad_root_timeout
-cat > "$tmpdir/bad_root_timeout/holproject.toml" <<'TOML'
-[project]
-name = "bad_root_timeout"
+write_manifest bad_root_timeout <<'TOML'
 
 [build]
 roots = ["src/MainScript.sml"]
@@ -151,50 +165,46 @@ roots = ["src/MainScript.sml"]
 TOML
 expect_context_failure bad_root_timeout "build.root_tactic_timeouts references unknown root: src/OtherScript.sml"
 
-make_project absolute_member
-cat > "$tmpdir/absolute_member/holproject.toml" <<'TOML'
-[project]
-name = "absolute_member"
+write_manifest absolute_member <<'TOML'
 
 [build]
 members = ["/tmp/src"]
 TOML
 expect_context_failure absolute_member "build.members must be package-root-relative: /tmp/src"
 
-make_project parent_exclude
-cat > "$tmpdir/parent_exclude/holproject.toml" <<'TOML'
-[project]
-name = "parent_exclude"
+write_manifest parent_exclude <<'TOML'
 
 [build]
 exclude = ["../generated/*"]
 TOML
 expect_context_failure parent_exclude "build.exclude must be package-root-relative: ../generated/\*"
 
-make_project no_paths_includes
-cat > "$tmpdir/no_paths_includes/holproject.toml" <<'TOML'
-[project]
-name = "no_paths_includes"
+write_manifest no_paths_includes <<'TOML'
 
 [paths]
 includes = ["src"]
 TOML
 expect_context_failure no_paths_includes "unknown field in holproject.toml: paths"
 
-make_project bad_type
 cat > "$tmpdir/bad_type/holproject.toml" <<'TOML'
+[holbuild]
+schema = 2
+
+[dependencies.hol]
+git = "https://github.com/HOL-Theorem-Prover/HOL.git"
+rev = "bf0dec986904cecbd1a1c6bce62ccf1c256eaca1"
+
 [project]
 name = 123
 TOML
 expect_context_failure bad_type "name must be a string"
 
 make_project bad_dependency
-cat > "$tmpdir/bad_dependency/holproject.toml" <<'TOML'
-[project]
-name = "bad_dependency"
+write_manifest bad_dependency <<'TOML'
 
 [dependencies.dep]
-path = "../dep"
+git = "https://example.com/dep.git"
+rev = "abcdef"
 branch = "main"
 TOML
 expect_context_failure bad_dependency "unknown field in dependencies.dep: branch"
@@ -205,18 +215,17 @@ cat > "$tmpdir/required_version_unimplemented/holproject.toml" <<'TOML'
 schema = 2
 required_version = ">=0.2"
 
+[dependencies.hol]
+git = "https://github.com/HOL-Theorem-Prover/HOL.git"
+rev = "bf0dec986904cecbd1a1c6bce62ccf1c256eaca1"
+
 [project]
 name = "required_version_unimplemented"
 TOML
 expect_context_failure required_version_unimplemented "holbuild.required_version is recognized but not implemented yet"
 
 make_project schema2_missing_rev
-cat > "$tmpdir/schema2_missing_rev/holproject.toml" <<'TOML'
-[holbuild]
-schema = 2
-
-[project]
-name = "schema2_missing_rev"
+write_manifest schema2_missing_rev <<'TOML'
 
 [dependencies.dep]
 git = "https://example.com/dep.git"
@@ -224,12 +233,7 @@ TOML
 expect_context_failure schema2_missing_rev "dependencies.dep with git requires rev"
 
 make_project schema2_path_dep
-cat > "$tmpdir/schema2_path_dep/holproject.toml" <<'TOML'
-[holbuild]
-schema = 2
-
-[project]
-name = "schema2_path_dep"
+write_manifest schema2_path_dep <<'TOML'
 
 [dependencies.dep]
 path = "../dep"
@@ -237,12 +241,7 @@ TOML
 expect_context_failure schema2_path_dep "dependencies.dep path dependencies are not supported in schema 2"
 
 make_project schema2_git_manifest
-cat > "$tmpdir/schema2_git_manifest/holproject.toml" <<'TOML'
-[holbuild]
-schema = 2
-
-[project]
-name = "schema2_git_manifest"
+write_manifest schema2_git_manifest <<'TOML'
 
 [dependencies.dep]
 git = "https://example.com/dep.git"
@@ -252,83 +251,57 @@ TOML
 expect_context_failure schema2_git_manifest "dependencies.dep git dependency may only contain git and rev"
 
 make_project schema2_override
-cat > "$tmpdir/schema2_override/holproject.toml" <<'TOML'
-[holbuild]
-schema = 2
-
-[project]
-name = "schema2_override"
+write_manifest schema2_override <<'TOML'
 TOML
 cat > "$tmpdir/schema2_override/.holconfig.toml" <<'TOML'
 [overrides.dep]
 path = "../dep"
 TOML
-expect_context_failure schema2_override "local dependency overrides are not supported in schema 2"
+expect_context_failure schema2_override "local dependency overrides are not supported"
 
-make_project bad_action_field
-cat > "$tmpdir/bad_action_field/holproject.toml" <<'TOML'
-[project]
-name = "bad_action_field"
+write_manifest bad_action_field <<'TOML'
 
 [actions.FooTheory]
 extra_input = ["foo.dat"]
 TOML
 expect_context_failure bad_action_field "unknown field in actions.FooTheory: extra_input"
 
-make_project bad_action_type
-cat > "$tmpdir/bad_action_type/holproject.toml" <<'TOML'
-[project]
-name = "bad_action_type"
+write_manifest bad_action_type <<'TOML'
 
 [actions.FooTheory]
 cache = "no"
 TOML
 expect_context_failure bad_action_type "cache must be a boolean"
 
-make_project bad_action_deps_type
-cat > "$tmpdir/bad_action_deps_type/holproject.toml" <<'TOML'
-[project]
-name = "bad_action_deps_type"
+write_manifest bad_action_deps_type <<'TOML'
 
 [actions.FooTheory]
 deps = "Foo"
 TOML
 expect_context_failure bad_action_deps_type "deps must be a string array"
 
-make_project bad_action_loads_type
-cat > "$tmpdir/bad_action_loads_type/holproject.toml" <<'TOML'
-[project]
-name = "bad_action_loads_type"
+write_manifest bad_action_loads_type <<'TOML'
 
 [actions.FooTheory]
 loads = "FooLib"
 TOML
 expect_context_failure bad_action_loads_type "loads must be a string array"
 
-make_project bad_action_abs_input
-cat > "$tmpdir/bad_action_abs_input/holproject.toml" <<'TOML'
-[project]
-name = "bad_action_abs_input"
+write_manifest bad_action_abs_input <<'TOML'
 
 [actions.FooTheory]
 extra_inputs = ["/tmp/generated.dat"]
 TOML
 expect_context_failure bad_action_abs_input "extra_inputs must be package-root-relative"
 
-make_project bad_action_abs_dep
-cat > "$tmpdir/bad_action_abs_dep/holproject.toml" <<'TOML'
-[project]
-name = "bad_action_abs_dep"
+write_manifest bad_action_abs_dep <<'TOML'
 
 [actions.FooTheory]
 extra_deps = ["/tmp/generated.dat"]
 TOML
 expect_context_failure bad_action_abs_dep "extra_deps must be package-root-relative"
 
-make_project bad_generate_field
-cat > "$tmpdir/bad_generate_field/holproject.toml" <<'TOML'
-[project]
-name = "bad_generate_field"
+write_manifest bad_generate_field <<'TOML'
 
 [[generate]]
 name = "gen"
@@ -338,10 +311,7 @@ extra = true
 TOML
 expect_context_failure bad_generate_field "unknown field in generate: extra"
 
-make_project bad_generate_command_type
-cat > "$tmpdir/bad_generate_command_type/holproject.toml" <<'TOML'
-[project]
-name = "bad_generate_command_type"
+write_manifest bad_generate_command_type <<'TOML'
 
 [[generate]]
 name = "gen"
@@ -350,10 +320,7 @@ outputs = ["gen/AScript.sml"]
 TOML
 expect_context_failure bad_generate_command_type "generate.gen.command must be a string array"
 
-make_project bad_generate_abs_output
-cat > "$tmpdir/bad_generate_abs_output/holproject.toml" <<'TOML'
-[project]
-name = "bad_generate_abs_output"
+write_manifest bad_generate_abs_output <<'TOML'
 
 [[generate]]
 name = "gen"
@@ -362,22 +329,8 @@ outputs = ["/tmp/AScript.sml"]
 TOML
 expect_context_failure bad_generate_abs_output "generate.gen.outputs must be package-root-relative"
 
-make_project bad_config
-cat > "$tmpdir/bad_config/holproject.toml" <<'TOML'
-[project]
-name = "bad_config"
-TOML
-cat > "$tmpdir/bad_config/.holconfig.toml" <<'TOML'
-[overrides.dep]
-path = "../dep"
-branch = "main"
-TOML
-expect_context_failure bad_config "unknown field in overrides.dep: branch"
-
 make_project bad_local_build
-cat > "$tmpdir/bad_local_build/holproject.toml" <<'TOML'
-[project]
-name = "bad_local_build"
+write_manifest bad_local_build <<'TOML'
 TOML
 cat > "$tmpdir/bad_local_build/.holconfig.toml" <<'TOML'
 [build]
@@ -386,9 +339,7 @@ TOML
 expect_context_failure bad_local_build "unknown field in .holconfig.toml build: members"
 
 make_project bad_local_jobs_type
-cat > "$tmpdir/bad_local_jobs_type/holproject.toml" <<'TOML'
-[project]
-name = "bad_local_jobs_type"
+write_manifest bad_local_jobs_type <<'TOML'
 TOML
 cat > "$tmpdir/bad_local_jobs_type/.holconfig.toml" <<'TOML'
 [build]
@@ -397,9 +348,7 @@ TOML
 expect_context_failure bad_local_jobs_type "jobs must be an integer"
 
 make_project bad_local_jobs_value
-cat > "$tmpdir/bad_local_jobs_value/holproject.toml" <<'TOML'
-[project]
-name = "bad_local_jobs_value"
+write_manifest bad_local_jobs_value <<'TOML'
 TOML
 cat > "$tmpdir/bad_local_jobs_value/.holconfig.toml" <<'TOML'
 [build]

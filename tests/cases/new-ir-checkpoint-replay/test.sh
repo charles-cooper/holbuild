@@ -10,13 +10,20 @@ source "$SCRIPT_DIR/../../lib.sh"
 tmpdir=$(make_temp_dir)
 cleanup() { rm -rf "$tmpdir"; }
 trap cleanup EXIT
-export HOLBUILD_CACHE="$tmpdir/cache"
+use_case_cache "$tmpdir/cache"
 
 project=$tmpdir/project
 counter=$tmpdir/slow-prefix-count.txt
 mkdir -p "$project/src"
 touch "$counter"
 cat > "$project/holproject.toml" <<'TOML'
+[holbuild]
+schema = 2
+
+[dependencies.hol]
+git = "https://github.com/HOL-Theorem-Prover/HOL.git"
+rev = "bf0dec986904cecbd1a1c6bce62ccf1c256eaca1"
+
 [project]
 name = "new-ir-replay"
 
@@ -40,7 +47,7 @@ val _ = export_theory();
 SML
 
 first_log=$tmpdir/first.log
-if (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$first_log" 2>&1; then
+if (cd "$project" && "$HOLBUILD_BIN" build ATheory) > "$first_log" 2>&1; then
   echo "expected first new-ir proof to fail" >&2
   exit 1
 fi
@@ -58,7 +65,7 @@ path = Path("$project/src/AScript.sml")
 path.write_text(path.read_text().replace('FAIL_TAC "first suffix failure"', 'FAIL_TAC "edited suffix failure"'))
 PY
 edited_log=$tmpdir/edited.log
-if (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$edited_log" 2>&1; then
+if (cd "$project" && "$HOLBUILD_BIN" build ATheory) > "$edited_log" 2>&1; then
   echo "expected edited suffix new-ir proof to fail" >&2
   exit 1
 fi
@@ -75,7 +82,7 @@ path = Path("$project/src/AScript.sml")
 path.write_text(path.read_text().replace('FAIL_TAC "edited suffix failure"', 'ACCEPT_TAC TRUTH'))
 PY
 fixed_log=$tmpdir/fixed.log
-(cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$fixed_log" 2>&1
+(cd "$project" && "$HOLBUILD_BIN" build ATheory) > "$fixed_log" 2>&1
 fixed_count=$(wc -c < "$counter" | tr -d ' ')
 [[ "$fixed_count" = "2" ]] || { echo "new-ir failed-prefix replay reran unchanged slow prefix after suffix fix; count $fixed_count" >&2; exit 1; }
 require_grep "from: failed-prefix checkpoint in slow_prefix_failure" "$fixed_log"
@@ -103,7 +110,7 @@ val _ = export_theory();
 SML
 
 prefix_edit_first_log=$tmpdir/prefix-edit-first.log
-if (cd "$prefix_edit_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$prefix_edit_first_log" 2>&1; then
+if (cd "$prefix_edit_project" && "$HOLBUILD_BIN" build ATheory) > "$prefix_edit_first_log" 2>&1; then
   echo "expected prefix-edit replay seed to fail" >&2
   exit 1
 fi
@@ -116,7 +123,7 @@ path = Path("$prefix_edit_project/src/AScript.sml")
 path.write_text(path.read_text().replace('strip_tac >>', 'ALL_TAC >> strip_tac >>'))
 PY
 prefix_edit_second_log=$tmpdir/prefix-edit-second.log
-if (cd "$prefix_edit_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$prefix_edit_second_log" 2>&1; then
+if (cd "$prefix_edit_project" && "$HOLBUILD_BIN" build ATheory) > "$prefix_edit_second_log" 2>&1; then
   echo "expected edited prefix proof still to fail at NO_TAC" >&2
   exit 1
 fi
@@ -158,7 +165,7 @@ val _ = export_theory();
 SML
 
 resume_first_log=$tmpdir/resume-first.log
-if (cd "$resume_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$resume_first_log" 2>&1; then
+if (cd "$resume_project" && "$HOLBUILD_BIN" build ATheory) > "$resume_first_log" 2>&1; then
   echo "expected first Resume proof to fail" >&2
   exit 1
 fi
@@ -173,7 +180,7 @@ path = Path("$resume_project/src/AScript.sml")
 path.write_text(path.read_text().replace('FAIL_TAC "resume suffix failure"', 'ACCEPT_TAC TRUTH'))
 PY
 resume_fixed_log=$tmpdir/resume-fixed.log
-(cd "$resume_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$resume_fixed_log" 2>&1
+(cd "$resume_project" && "$HOLBUILD_BIN" build ATheory) > "$resume_fixed_log" 2>&1
 resume_fixed_count=$(wc -c < "$resume_counter" | tr -d ' ')
 [[ "$resume_fixed_count" = "2" ]] || { echo "Resume failed-prefix replay reran unchanged slow prefix after suffix fix; count $resume_fixed_count" >&2; exit 1; }
 require_grep "from: failed-prefix checkpoint in partial_right_" "$resume_fixed_log"
@@ -207,7 +214,7 @@ val _ = export_theory();
 PY
 
 shorten_first_log=$tmpdir/shorten-first.log
-if (cd "$shorten_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$shorten_first_log" 2>&1; then
+if (cd "$shorten_project" && "$HOLBUILD_BIN" build ATheory) > "$shorten_first_log" 2>&1; then
   echo "expected shortened replay first build to fail" >&2
   exit 1
 fi
@@ -225,7 +232,7 @@ end = text.index('QED', start)
 path.write_text(text[:start] + 'slow_tac >> FAIL_TAC "short suffix failure"\n' + text[end:])
 PY
 shorten_edit_log=$tmpdir/shorten-edit.log
-if (cd "$shorten_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$shorten_edit_log" 2>&1; then
+if (cd "$shorten_project" && "$HOLBUILD_BIN" build ATheory) > "$shorten_edit_log" 2>&1; then
   echo "expected shortened replay edited build to fail" >&2
   exit 1
 fi
@@ -251,7 +258,7 @@ val _ = export_theory();
 SML
 
 unsolved_first_log=$tmpdir/unsolved-first.log
-if (cd "$unsolved_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$unsolved_first_log" 2>&1; then
+if (cd "$unsolved_project" && "$HOLBUILD_BIN" build ATheory) > "$unsolved_first_log" 2>&1; then
   echo "expected unsolved replay seed to fail" >&2
   exit 1
 fi
@@ -263,7 +270,7 @@ path = Path("$unsolved_project/src/AScript.sml")
 path.write_text(path.read_text().replace('FAIL_TAC "saved failed-prefix before unsolved suffix"', 'ALL_TAC'))
 PY
 unsolved_edit_log=$tmpdir/unsolved-edit.log
-if (cd "$unsolved_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$unsolved_edit_log" 2>&1; then
+if (cd "$unsolved_project" && "$HOLBUILD_BIN" build ATheory) > "$unsolved_edit_log" 2>&1; then
   echo "expected failed-prefix replay with unsolved suffix to fail" >&2
   exit 1
 fi
@@ -294,7 +301,7 @@ val _ = raise Fail "late non-proof failure";
 SML
 
 stale_first_log=$tmpdir/stale-first.log
-if (cd "$stale_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$stale_first_log" 2>&1; then
+if (cd "$stale_project" && "$HOLBUILD_BIN" build ATheory) > "$stale_first_log" 2>&1; then
   echo "expected stale-prefix seed to fail" >&2
   exit 1
 fi
@@ -306,7 +313,7 @@ path = Path("$stale_project/src/AScript.sml")
 path.write_text(path.read_text().replace('FAIL_TAC "seed stale failed prefix"', 'ACCEPT_TAC TRUTH'))
 PY
 stale_second_log=$tmpdir/stale-second.log
-if (cd "$stale_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$stale_second_log" 2>&1; then
+if (cd "$stale_project" && "$HOLBUILD_BIN" build ATheory) > "$stale_second_log" 2>&1; then
   echo "expected late non-proof failure after stale-prefix replay" >&2
   exit 1
 fi
@@ -319,7 +326,7 @@ path = Path("$stale_project/src/AScript.sml")
 path.write_text(path.read_text().replace('late non-proof failure', 'late non-proof failure edited'))
 PY
 stale_third_log=$tmpdir/stale-third.log
-if (cd "$stale_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$stale_third_log" 2>&1; then
+if (cd "$stale_project" && "$HOLBUILD_BIN" build ATheory) > "$stale_third_log" 2>&1; then
   echo "expected edited late non-proof failure" >&2
   exit 1
 fi

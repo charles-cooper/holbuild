@@ -10,13 +10,20 @@ source "$SCRIPT_DIR/../../lib.sh"
 tmpdir=$(make_temp_dir)
 cleanup() { rm -rf "$tmpdir"; }
 trap cleanup EXIT
-export HOLBUILD_CACHE="$tmpdir/cache"
+use_case_cache "$tmpdir/cache"
 
 make_theory_project() {
   local project=$1
   local action_stanza=$2
   mkdir -p "$project/src"
   cat > "$project/holproject.toml" <<TOML
+[holbuild]
+schema = 2
+
+[dependencies.hol]
+git = "https://github.com/HOL-Theorem-Prover/HOL.git"
+rev = "bf0dec986904cecbd1a1c6bce62ccf1c256eaca1"
+
 [project]
 name = "$(basename "$project")"
 
@@ -45,12 +52,12 @@ extra_project="$tmpdir/extra_policy"
 make_theory_project "$extra_project" '[actions.ATheory]
 extra_deps = ["extra.txt"]'
 echo one > "$extra_project/extra.txt"
-(cd "$extra_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$tmpdir/extra1.log" 2>&1
+(cd "$extra_project" && "$HOLBUILD_BIN" build ATheory) > "$tmpdir/extra1.log" 2>&1
 key1=$(metadata_key "$extra_project")
-(cd "$extra_project" && "$HOLBUILD_BIN" --verbose --holdir "$HOLDIR" build ATheory) > "$tmpdir/extra2.log" 2>&1
+(cd "$extra_project" && "$HOLBUILD_BIN" --verbose build ATheory) > "$tmpdir/extra2.log" 2>&1
 require_grep "ATheory is up to date" "$tmpdir/extra2.log"
 echo two > "$extra_project/extra.txt"
-(cd "$extra_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$tmpdir/extra3.log" 2>&1
+(cd "$extra_project" && "$HOLBUILD_BIN" build ATheory) > "$tmpdir/extra3.log" 2>&1
 key2=$(metadata_key "$extra_project")
 if [[ "$key1" == "$key2" ]]; then
   echo "extra dependency edit did not change action key" >&2
@@ -66,12 +73,19 @@ compat_project="$tmpdir/extra_inputs_compat"
 make_theory_project "$compat_project" '[actions.ATheory]
 extra_inputs = ["extra.txt"]'
 echo compat > "$compat_project/extra.txt"
-(cd "$compat_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$tmpdir/compat.log" 2>&1
+(cd "$compat_project" && "$HOLBUILD_BIN" build ATheory) > "$tmpdir/compat.log" 2>&1
 require_grep "extra_dep=extra.txt@" "$compat_project/.holbuild/dep/extra_inputs_compat/src/AScript.sml.key"
 
 source_extra_project="$tmpdir/source_extra_policy"
 mkdir -p "$source_extra_project/src" "$source_extra_project/data"
 cat > "$source_extra_project/holproject.toml" <<'TOML'
+[holbuild]
+schema = 2
+
+[dependencies.hol]
+git = "https://github.com/HOL-Theorem-Prover/HOL.git"
+rev = "bf0dec986904cecbd1a1c6bce62ccf1c256eaca1"
+
 [project]
 name = "source_extra_policy"
 
@@ -94,11 +108,11 @@ Proof
 QED
 val _ = export_theory();
 SML
-(cd "$source_extra_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$tmpdir/source-extra1.log" 2>&1
+(cd "$source_extra_project" && "$HOLBUILD_BIN" build ATheory) > "$tmpdir/source-extra1.log" 2>&1
 source_key1=$(metadata_key "$source_extra_project")
 require_grep "source_extra_dep=../data/message.txt@" "$source_extra_project/.holbuild/dep/source_extra_policy/src/AScript.sml.key"
 echo two > "$source_extra_project/data/message.txt"
-(cd "$source_extra_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$tmpdir/source-extra2.log" 2>&1
+(cd "$source_extra_project" && "$HOLBUILD_BIN" build ATheory) > "$tmpdir/source-extra2.log" 2>&1
 source_key2=$(metadata_key "$source_extra_project")
 if [[ "$source_key1" == "$source_key2" ]]; then
   echo "source extra dependency edit did not change action key" >&2
@@ -112,8 +126,8 @@ fi
 always_project="$tmpdir/always_policy"
 make_theory_project "$always_project" '[actions.ATheory]
 always_reexecute = true'
-(cd "$always_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$tmpdir/always1.log" 2>&1
-(cd "$always_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$tmpdir/always2.log" 2>&1
+(cd "$always_project" && "$HOLBUILD_BIN" build ATheory) > "$tmpdir/always1.log" 2>&1
+(cd "$always_project" && "$HOLBUILD_BIN" build ATheory) > "$tmpdir/always2.log" 2>&1
 if grep -q "ATheory is up to date" "$tmpdir/always2.log"; then
   echo "always_reexecute action was skipped" >&2
   exit 1
@@ -123,9 +137,9 @@ require_file "$always_project/.holbuild/obj/src/ATheory.dat"
 no_cache_project="$tmpdir/no_cache_policy"
 make_theory_project "$no_cache_project" '[actions.ATheory]
 cache = false'
-(cd "$no_cache_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$tmpdir/no_cache1.log" 2>&1
+(cd "$no_cache_project" && "$HOLBUILD_BIN" build ATheory) > "$tmpdir/no_cache1.log" 2>&1
 rm -rf "$no_cache_project/.holbuild"
-(cd "$no_cache_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$tmpdir/no_cache2.log" 2>&1
+(cd "$no_cache_project" && "$HOLBUILD_BIN" build ATheory) > "$tmpdir/no_cache2.log" 2>&1
 if grep -q "restored from cache" "$tmpdir/no_cache2.log"; then
   echo "cache=false action restored from cache" >&2
   exit 1
@@ -135,7 +149,7 @@ require_file "$no_cache_project/.holbuild/obj/src/ATheory.dat"
 unknown_project="$tmpdir/unknown_policy"
 make_theory_project "$unknown_project" '[actions.MissingTheory]
 cache = false'
-if (cd "$unknown_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$tmpdir/unknown.log" 2>&1; then
+if (cd "$unknown_project" && "$HOLBUILD_BIN" build ATheory) > "$tmpdir/unknown.log" 2>&1; then
   echo "unknown action policy target was accepted" >&2
   exit 1
 fi
@@ -144,7 +158,7 @@ require_grep "action policy references unknown target unknown_policy:MissingTheo
 missing_dep_project="$tmpdir/missing_declared_dep"
 make_theory_project "$missing_dep_project" '[actions.ATheory]
 deps = ["Missing"]'
-if (cd "$missing_dep_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$tmpdir/missing-dep.log" 2>&1; then
+if (cd "$missing_dep_project" && "$HOLBUILD_BIN" build ATheory) > "$tmpdir/missing-dep.log" 2>&1; then
   echo "unresolved action dependency was accepted" >&2
   exit 1
 fi

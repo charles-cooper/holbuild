@@ -10,7 +10,7 @@ source "$SCRIPT_DIR/../../lib.sh"
 tmpdir=$(make_temp_dir)
 cleanup() { rm -rf "$tmpdir"; }
 trap cleanup EXIT
-export HOLBUILD_CACHE="$tmpdir/cache"
+use_case_cache "$tmpdir/cache"
 export HOLBUILD_FORCE_COUNTER_DIR="$tmpdir/counters"
 mkdir -p "$HOLBUILD_FORCE_COUNTER_DIR"
 
@@ -34,6 +34,13 @@ mkdir -p "$dep/src" "$project/src"
 export HOLBUILD_FORCE_DEP="$dep"
 
 cat > "$dep/holproject.toml" <<'TOML'
+[holbuild]
+schema = 2
+
+[dependencies.hol]
+git = "https://github.com/HOL-Theorem-Prover/HOL.git"
+rev = "bf0dec986904cecbd1a1c6bce62ccf1c256eaca1"
+
 [project]
 name = "dep"
 
@@ -57,7 +64,10 @@ val c_thm = store_thm("c_thm", ``T``, ACCEPT_TAC TRUTH);
 val _ = export_theory();
 SML
 
-cat > "$project/holproject.toml" <<'TOML'
+dep_rev=$(init_git_repo "$dep")
+{
+  write_schema2_prelude
+  cat <<TOML
 [project]
 name = "force-levels"
 
@@ -65,7 +75,8 @@ name = "force-levels"
 members = ["src"]
 
 [dependencies.dep]
-path = "$HOLBUILD_FORCE_DEP"
+git = "$dep"
+rev = "$dep_rev"
 
 [actions.ATheory]
 cache = false
@@ -73,6 +84,7 @@ cache = false
 [actions.BTheory]
 cache = false
 TOML
+} > "$project/holproject.toml"
 cat > "$project/src/BScript.sml" <<'SML'
 open HolKernel Parse boolLib bossLib;
 open CTheory;
@@ -102,23 +114,23 @@ val a_thm = store_thm("a_thm", ``T``, ACCEPT_TAC BTheory.b_thm);
 val _ = export_theory();
 SML
 
-(cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$tmpdir/initial.log" 2>&1
+(cd "$project" && "$HOLBUILD_BIN" build ATheory) > "$tmpdir/initial.log" 2>&1
 require_counts 1 1 1 initial
 
-(cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --force=theory ATheory) > "$tmpdir/force-theory.log" 2>&1
+(cd "$project" && "$HOLBUILD_BIN" build --force=theory ATheory) > "$tmpdir/force-theory.log" 2>&1
 require_counts 1 1 2 force-theory
 require_grep "ATheory built" "$tmpdir/force-theory.log"
 
-(cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --force-project ATheory) > "$tmpdir/force-project.log" 2>&1
+(cd "$project" && "$HOLBUILD_BIN" build --force-project ATheory) > "$tmpdir/force-project.log" 2>&1
 require_counts 1 2 3 force-project
 require_grep "BTheory built" "$tmpdir/force-project.log"
 require_grep "ATheory built" "$tmpdir/force-project.log"
 
-(cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --force=full ATheory) > "$tmpdir/force-full.log" 2>&1
+(cd "$project" && "$HOLBUILD_BIN" build --force=full ATheory) > "$tmpdir/force-full.log" 2>&1
 require_counts 2 3 4 force-full
 require_grep "CTheory built" "$tmpdir/force-full.log"
 require_grep "BTheory built" "$tmpdir/force-full.log"
 require_grep "ATheory built" "$tmpdir/force-full.log"
 
-(cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --force ATheory) > "$tmpdir/bare-force.log" 2>&1
+(cd "$project" && "$HOLBUILD_BIN" build --force ATheory) > "$tmpdir/bare-force.log" 2>&1
 require_counts 3 4 5 bare-force

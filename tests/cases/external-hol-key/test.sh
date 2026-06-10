@@ -12,7 +12,7 @@ unused_real_holdir=$HOLDIR
 tmpdir=$(make_temp_dir)
 cleanup() { rm -rf "$tmpdir"; }
 trap cleanup EXIT
-export HOLBUILD_CACHE="$tmpdir/cache"
+use_case_cache "$tmpdir/cache"
 
 fake_holdir=$tmpdir/fake-hol
 mkdir -p "$fake_holdir/bin" "$fake_holdir/sigobj" "$fake_holdir/src/ext/.hol/objs"
@@ -38,6 +38,13 @@ ln -s "$fake_holdir/src/ext/.hol/objs/ExtDep2Theory.uo" "$fake_holdir/sigobj/Ext
 project=$tmpdir/project
 mkdir -p "$project/src"
 cat > "$project/holproject.toml" <<'TOML'
+[holbuild]
+schema = 2
+
+[dependencies.hol]
+git = "https://github.com/HOL-Theorem-Prover/HOL.git"
+rev = "bf0dec986904cecbd1a1c6bce62ccf1c256eaca1"
+
 [project]
 name = "external-key-test"
 
@@ -52,7 +59,7 @@ val _ = export_theory();
 SML
 
 input_key() {
-  (cd "$project" && "$HOLBUILD_BIN" --holdir "$fake_holdir" build --dry-run BTheory) |
+  (cd "$project" && "$HOLBUILD_BIN" build --dry-run BTheory) |
     awk '/input_key:/ {print $2; exit}'
 }
 

@@ -10,11 +10,18 @@ source "$SCRIPT_DIR/../../lib.sh"
 tmpdir=$(make_temp_dir)
 cleanup() { rm -rf "$tmpdir"; }
 trap cleanup EXIT
-export HOLBUILD_CACHE="$tmpdir/cache"
+use_case_cache "$tmpdir/cache"
 
 project=$tmpdir/project
 mkdir -p "$project/src"
 cat > "$project/holproject.toml" <<'TOML'
+[holbuild]
+schema = 2
+
+[dependencies.hol]
+git = "https://github.com/HOL-Theorem-Prover/HOL.git"
+rev = "bf0dec986904cecbd1a1c6bce62ccf1c256eaca1"
+
 [project]
 name = "loadmods"
 
@@ -81,7 +88,7 @@ val _ = export_theory();
 SML
 
 dry_log=$tmpdir/dry.log
-(cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --dry-run ATheory) > "$dry_log"
+(cd "$project" && "$HOLBUILD_BIN" build --dry-run ATheory) > "$dry_log"
 require_grep "Foo (sig" "$dry_log"
 require_grep "Foo (sml" "$dry_log"
 require_grep "Bar (sml" "$dry_log"
@@ -90,7 +97,7 @@ require_grep "Quux (sml" "$dry_log"
 require_grep "RawLoad (sml" "$dry_log"
 require_grep "ATheory" "$dry_log"
 
-(cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory)
+(cd "$project" && "$HOLBUILD_BIN" build ATheory)
 require_file "$project/.holbuild/obj/src/Foo.ui"
 require_file "$project/.holbuild/obj/src/Foo.uo"
 require_file "$project/.holbuild/obj/src/Bar.uo"
@@ -122,5 +129,5 @@ SML
 "$HOLDIR/bin/hol" run --noconfig --holstate "$HOLDIR/bin/hol.state" "$tmpdir/load-internal-theory.sml"
 
 second_log=$tmpdir/second.log
-(cd "$project" && "$HOLBUILD_BIN" --verbose --holdir "$HOLDIR" build ATheory) > "$second_log"
+(cd "$project" && "$HOLBUILD_BIN" --verbose build ATheory) > "$second_log"
 require_grep "ATheory is up to date" "$second_log"

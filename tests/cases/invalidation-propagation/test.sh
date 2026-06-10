@@ -10,11 +10,18 @@ source "$SCRIPT_DIR/../../lib.sh"
 tmpdir=$(make_temp_dir)
 cleanup() { rm -rf "$tmpdir"; }
 trap cleanup EXIT
-export HOLBUILD_CACHE="$tmpdir/cache"
+use_case_cache "$tmpdir/cache"
 
 project=$tmpdir/project
 mkdir -p "$project/src"
 cat > "$project/holproject.toml" <<'TOML'
+[holbuild]
+schema = 2
+
+[dependencies.hol]
+git = "https://github.com/HOL-Theorem-Prover/HOL.git"
+rev = "bf0dec986904cecbd1a1c6bce62ccf1c256eaca1"
+
 [project]
 name = "invalidate"
 
@@ -35,14 +42,14 @@ val b_thm = store_thm("b_thm", ``T``, ACCEPT_TAC ATheory.a_thm);
 val _ = export_theory();
 SML
 
-(cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build BTheory)
+(cd "$project" && "$HOLBUILD_BIN" build BTheory)
 
 akey_before=$(grep '^input_key=' "$project/.holbuild/dep/invalidate/src/AScript.sml.key")
 bkey_before=$(grep '^input_key=' "$project/.holbuild/dep/invalidate/src/BScript.sml.key")
 
 printf '\n(* comment-only edit still invalidates v1 input key *)\n' >> "$project/src/AScript.sml"
 rebuild_log=$tmpdir/rebuild.log
-(cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build BTheory) > "$rebuild_log"
+(cd "$project" && "$HOLBUILD_BIN" build BTheory) > "$rebuild_log"
 
 akey_after=$(grep '^input_key=' "$project/.holbuild/dep/invalidate/src/AScript.sml.key")
 bkey_after=$(grep '^input_key=' "$project/.holbuild/dep/invalidate/src/BScript.sml.key")

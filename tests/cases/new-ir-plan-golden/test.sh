@@ -10,11 +10,18 @@ source "$SCRIPT_DIR/../../lib.sh"
 tmpdir=$(make_temp_dir)
 cleanup() { rm -rf "$tmpdir"; }
 trap cleanup EXIT
-export HOLBUILD_CACHE="$tmpdir/cache"
+use_case_cache "$tmpdir/cache"
 
 project=$tmpdir/project
 mkdir -p "$project/src"
 cat > "$project/holproject.toml" <<'TOML'
+[holbuild]
+schema = 2
+
+[dependencies.hol]
+git = "https://github.com/HOL-Theorem-Prover/HOL.git"
+rev = "bf0dec986904cecbd1a1c6bce62ccf1c256eaca1"
+
 [project]
 name = "new-ir-plan"
 
@@ -31,7 +38,7 @@ check_plan() {
   local expected=$tmpdir/$theorem.expected
   local actual=$tmpdir/$theorem.actual
   cat > "$expected"
-  (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" execution-plan ATheory:"$theorem") > "$actual" 2>&1
+  (cd "$project" && "$HOLBUILD_BIN" execution-plan ATheory:"$theorem") > "$actual" 2>&1
   if ! diff -u "$expected" "$actual"; then
     echo "new-ir plan mismatch for $theorem" >&2
     exit 1
@@ -52,7 +59,7 @@ holbuild proof-ir plan ATheory:thenl_literal_plan source=src/AScript.sml (2 step
 EXPECTED
 
 deprecated_plan_alias_log=$tmpdir/deprecated-plan-alias.log
-(cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" goalfrag-plan --new-ir ATheory:thenl_literal_plan) > "$deprecated_plan_alias_log" 2>&1
+(cd "$project" && "$HOLBUILD_BIN" goalfrag-plan --new-ir ATheory:thenl_literal_plan) > "$deprecated_plan_alias_log" 2>&1
 require_grep "goalfrag-plan --new-ir is deprecated; use holbuild execution-plan THEORY:THEOREM" "$deprecated_plan_alias_log"
 require_grep "holbuild proof-ir plan ATheory:thenl_literal_plan source=src/AScript.sml" "$deprecated_plan_alias_log"
 

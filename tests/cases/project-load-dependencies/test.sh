@@ -10,28 +10,21 @@ source "$SCRIPT_DIR/../../lib.sh"
 tmpdir=$(make_temp_dir)
 cleanup() { rm -rf "$tmpdir"; }
 trap cleanup EXIT
-export HOLBUILD_CACHE="$tmpdir/cache"
+use_case_cache "$tmpdir/cache"
 
 project=$tmpdir/project
 dep=$tmpdir/lib
 mkdir -p "$project/src" "$dep/src"
-cat > "$project/holproject.toml" <<'TOML'
-[project]
-name = "app"
-
-[build]
-members = ["src"]
-
-[dependencies.lib]
-path = "../lib"
-TOML
-cat > "$dep/holproject.toml" <<'TOML'
+{
+  write_schema2_prelude
+  cat <<'TOML'
 [project]
 name = "lib"
 
 [build]
 members = ["src"]
 TOML
+} > "$dep/holproject.toml"
 cat > "$dep/src/Foo.sig" <<'SML'
 signature FOO = sig
   val value : bool
@@ -42,6 +35,21 @@ structure Foo : FOO = struct
   val value = true
 end
 SML
+dep_rev=$(init_git_repo "$dep")
+{
+  write_schema2_prelude
+  cat <<TOML
+[project]
+name = "app"
+
+[build]
+members = ["src"]
+
+[dependencies.lib]
+git = "$dep"
+rev = "$dep_rev"
+TOML
+} > "$project/holproject.toml"
 cat > "$project/src/Bar.sml" <<'SML'
 load "Foo";
 
@@ -61,18 +69,18 @@ val _ = export_theory();
 SML
 
 dry_log=$tmpdir/dry.log
-(cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --dry-run ATheory) > "$dry_log"
+(cd "$project" && "$HOLBUILD_BIN" build --dry-run ATheory) > "$dry_log"
 require_grep "Foo (sig, package lib)" "$dry_log"
 require_grep "Foo (sml, package lib)" "$dry_log"
 require_grep "Bar (sml, package app)" "$dry_log"
 require_grep "ATheory (theory, package app)" "$dry_log"
 
-(cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory)
-require_file "$project/.holbuild/deps/lib/obj/src/Foo.ui"
-require_file "$project/.holbuild/deps/lib/obj/src/Foo.uo"
+(cd "$project" && "$HOLBUILD_BIN" build ATheory)
+require_file "$project/.holbuild/packages/lib/obj/src/Foo.ui"
+require_file "$project/.holbuild/packages/lib/obj/src/Foo.uo"
 require_file "$project/.holbuild/obj/src/Bar.uo"
 require_file "$project/.holbuild/obj/src/ATheory.dat"
-require_grep ".holbuild/deps/lib/obj/src/Foo" "$project/.holbuild/obj/src/Bar.uo"
+require_grep ".holbuild/packages/lib/obj/src/Foo" "$project/.holbuild/obj/src/Bar.uo"
 require_grep ".holbuild/obj/src/Bar" "$project/.holbuild/obj/src/AScript.uo"
 if grep -q ".holbuild/obj/src/Bar" "$project/.holbuild/obj/src/ATheory.uo"; then
   echo "source-only cross-package load leaked into generated theory load manifest" >&2
@@ -87,6 +95,6 @@ SML
 
 rm -rf "$project/.holbuild"
 restore_log=$tmpdir/restore.log
-(cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$restore_log"
+(cd "$project" && "$HOLBUILD_BIN" build ATheory) > "$restore_log"
 require_grep "ATheory restored from cache" "$restore_log"
-require_grep ".holbuild/deps/lib/obj/src/Foo" "$project/.holbuild/obj/src/Bar.uo"
+require_grep ".holbuild/packages/lib/obj/src/Foo" "$project/.holbuild/obj/src/Bar.uo"

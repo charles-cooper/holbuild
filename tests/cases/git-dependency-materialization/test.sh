@@ -10,7 +10,7 @@ source "$SCRIPT_DIR/../../lib.sh"
 tmpdir=$(make_temp_dir)
 cleanup() { rm -rf "$tmpdir"; }
 trap cleanup EXIT
-export HOLBUILD_CACHE="$tmpdir/cache"
+use_case_cache "$tmpdir/cache"
 
 git_identity() {
   git -C "$1" config user.email test@example.com
@@ -23,11 +23,25 @@ mkdir -p "$repo"
 git -C "$repo" init -q
 git_identity "$repo"
 cat > "$repo/holproject.toml" <<'TOML'
+[holbuild]
+schema = 2
+
+[dependencies.hol]
+git = "https://github.com/HOL-Theorem-Prover/HOL.git"
+rev = "bf0dec986904cecbd1a1c6bce62ccf1c256eaca1"
+
 [project]
 name = "dep"
 TOML
 mkdir -p "$repo/subdir"
 cat > "$repo/subdir/sub.manifest.toml" <<'TOML'
+[holbuild]
+schema = 2
+
+[dependencies.hol]
+git = "https://github.com/HOL-Theorem-Prover/HOL.git"
+rev = "bf0dec986904cecbd1a1c6bce62ccf1c256eaca1"
+
 [project]
 name = "subdep"
 TOML
@@ -52,6 +66,13 @@ export HOLBUILD_CANONICAL_HOL_GIT="$hol_repo"
 project=$tmpdir/project
 mkdir -p "$project"
 cat > "$project/sub.manifest.toml" <<'TOML'
+[holbuild]
+schema = 2
+
+[dependencies.hol]
+git = "https://github.com/HOL-Theorem-Prover/HOL.git"
+rev = "bf0dec986904cecbd1a1c6bce62ccf1c256eaca1"
+
 [project]
 name = "subdep"
 TOML

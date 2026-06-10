@@ -13,11 +13,18 @@ cleanup() {
   rm -rf "$tmpdir"
 }
 trap cleanup EXIT
-export HOLBUILD_CACHE="$tmpdir/cache"
+use_case_cache "$tmpdir/cache"
 
 project=$tmpdir/project
 mkdir -p "$project/src"
 cat > "$project/holproject.toml" <<'TOML'
+[holbuild]
+schema = 2
+
+[dependencies.hol]
+git = "https://github.com/HOL-Theorem-Prover/HOL.git"
+rev = "bf0dec986904cecbd1a1c6bce62ccf1c256eaca1"
+
 [project]
 name = "build-roots"
 
@@ -56,12 +63,19 @@ val _ = raise Fail "default build should not build ExtraTheory";
 val _ = export_theory();
 SML
 
-(cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" context) > "$tmpdir/context.log"
+(cd "$project" && "$HOLBUILD_BIN" context) > "$tmpdir/context.log"
 require_grep "roots: src/MainScript.sml" "$tmpdir/context.log"
 
 missing_root=$tmpdir/missing-root
 mkdir -p "$missing_root/src"
 cat > "$missing_root/holproject.toml" <<'TOML'
+[holbuild]
+schema = 2
+
+[dependencies.hol]
+git = "https://github.com/HOL-Theorem-Prover/HOL.git"
+rev = "bf0dec986904cecbd1a1c6bce62ccf1c256eaca1"
+
 [project]
 name = "missing-root"
 
@@ -71,13 +85,13 @@ roots = ["src/MainScript.sml"]
 TOML
 cp "$project/src/DepScript.sml" "$missing_root/src/DepScript.sml"
 cp "$project/src/MainScript.sml" "$missing_root/src/MainScript.sml"
-if (cd "$missing_root" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --dry-run) > "$tmpdir/missing-root.log" 2>&1; then
+if (cd "$missing_root" && "$HOLBUILD_BIN" build --dry-run) > "$tmpdir/missing-root.log" 2>&1; then
   echo "root outside members unexpectedly succeeded" >&2
   exit 1
 fi
 require_grep "unknown build root: missing-root:src/MainScript.sml" "$tmpdir/missing-root.log"
 
-(cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build) > "$tmpdir/default.log" 2> "$tmpdir/default.err"
+(cd "$project" && "$HOLBUILD_BIN" build) > "$tmpdir/default.log" 2> "$tmpdir/default.err"
 require_grep "discoverable theory script(s) are not reachable from build.roots" "$tmpdir/default.err"
 require_grep "unreachable: build-roots:src/ExtraScript.sml (ExtraTheory)" "$tmpdir/default.err"
 require_file "$project/.holbuild/obj/src/DepTheory.dat"
@@ -87,7 +101,7 @@ if [[ -e "$project/.holbuild/obj/src/ExtraTheory.dat" ]]; then
   exit 1
 fi
 
-if (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ExtraTheory) > "$tmpdir/extra.log" 2>&1; then
+if (cd "$project" && "$HOLBUILD_BIN" build ExtraTheory) > "$tmpdir/extra.log" 2>&1; then
   echo "explicit ExtraTheory unexpectedly succeeded" >&2
   exit 1
 fi
@@ -101,6 +115,13 @@ mkdir -p "$dot/.hidden" "$dot/noaccess" "$symlink_target"
 ln -s "$symlink_target" "$dot/linked-dir"
 chmod 000 "$dot/noaccess"
 cat > "$dot/holproject.toml" <<'TOML'
+[holbuild]
+schema = 2
+
+[dependencies.hol]
+git = "https://github.com/HOL-Theorem-Prover/HOL.git"
+rev = "bf0dec986904cecbd1a1c6bce62ccf1c256eaca1"
+
 [project]
 name = "build-roots-dot"
 
@@ -128,5 +149,5 @@ cat > "$symlink_target/BadScript.sml" <<'SML'
 this symlink directory should not be scanned
 SML
 
-(cd "$dot" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build) > "$tmpdir/dot.log"
+(cd "$dot" && "$HOLBUILD_BIN" build) > "$tmpdir/dot.log"
 require_file "$dot/.holbuild/obj/MainTheory.dat"

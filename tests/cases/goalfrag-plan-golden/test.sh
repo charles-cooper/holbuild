@@ -10,11 +10,18 @@ source "$SCRIPT_DIR/../../lib.sh"
 tmpdir=$(make_temp_dir)
 cleanup() { rm -rf "$tmpdir"; }
 trap cleanup EXIT
-export HOLBUILD_CACHE="$tmpdir/cache"
+use_case_cache "$tmpdir/cache"
 
 project=$tmpdir/project
 mkdir -p "$project/src"
 cat > "$project/holproject.toml" <<'TOML'
+[holbuild]
+schema = 2
+
+[dependencies.hol]
+git = "https://github.com/HOL-Theorem-Prover/HOL.git"
+rev = "bf0dec986904cecbd1a1c6bce62ccf1c256eaca1"
+
 [project]
 name = "golden"
 
@@ -31,7 +38,7 @@ check_plan() {
   local expected=$tmpdir/$theorem.expected
   local actual=$tmpdir/$theorem.actual
   cat > "$expected"
-  (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" goalfrag-plan "ATheory:$theorem") > "$actual"
+  (cd "$project" && "$HOLBUILD_BIN" goalfrag-plan "ATheory:$theorem") > "$actual"
   diff -u "$expected" "$actual"
 }
 
@@ -39,7 +46,7 @@ check_plan_file() {
   local theorem=$1
   local expected=$2
   local actual=$tmpdir/$theorem.actual
-  (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" goalfrag-plan "ATheory:$theorem") > "$actual"
+  (cd "$project" && "$HOLBUILD_BIN" goalfrag-plan "ATheory:$theorem") > "$actual"
   diff -u "$expected" "$actual"
 }
 

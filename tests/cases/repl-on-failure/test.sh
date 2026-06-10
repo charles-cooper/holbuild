@@ -10,11 +10,18 @@ source "$SCRIPT_DIR/../../lib.sh"
 tmpdir=$(make_temp_dir)
 cleanup() { rm -rf "$tmpdir"; }
 trap cleanup EXIT
-export HOLBUILD_CACHE="$tmpdir/cache"
+use_case_cache "$tmpdir/cache"
 
 project=$tmpdir/project
 mkdir -p "$project/src"
 cat > "$project/holproject.toml" <<'TOML'
+[holbuild]
+schema = 2
+
+[dependencies.hol]
+git = "https://github.com/HOL-Theorem-Prover/HOL.git"
+rev = "bf0dec986904cecbd1a1c6bce62ccf1c256eaca1"
+
 [project]
 name = "replfail"
 
@@ -38,7 +45,7 @@ SML
 cd "$project"
 
 skip_log=$tmpdir/skip-checkpoints.log
-if "$HOLBUILD_BIN" --holdir "$HOLDIR" build --repl-on-failure --skip-checkpoints ATheory >"$skip_log" 2>&1; then
+if "$HOLBUILD_BIN" build --repl-on-failure --skip-checkpoints ATheory >"$skip_log" 2>&1; then
   echo "expected --repl-on-failure --skip-checkpoints to fail" >&2
   exit 1
 fi
@@ -49,7 +56,7 @@ if ! grep -q -- "--repl-on-failure requires checkpoints" "$skip_log"; then
 fi
 
 json_log=$tmpdir/json.log
-if "$HOLBUILD_BIN" --json --holdir "$HOLDIR" build --repl-on-failure ATheory >"$json_log" 2>&1; then
+if "$HOLBUILD_BIN" --json build --repl-on-failure ATheory >"$json_log" 2>&1; then
   echo "expected --json --repl-on-failure to fail" >&2
   exit 1
 fi
@@ -61,7 +68,7 @@ fi
 
 repl_log=$tmpdir/repl.log
 if printf 'val _ = (proofManagerLib.p(); print "P_OK\\n"); val _ = OS.Process.exit OS.Process.success;\n' |
-   "$HOLBUILD_BIN" --holdir "$HOLDIR" build --repl-on-failure --force --no-cache ATheory >"$repl_log" 2>&1; then
+   "$HOLBUILD_BIN" build --repl-on-failure --force --no-cache ATheory >"$repl_log" 2>&1; then
   echo "expected failing proof to keep build exit status failed after repl exits" >&2
   exit 1
 fi

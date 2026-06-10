@@ -10,11 +10,18 @@ source "$SCRIPT_DIR/../../lib.sh"
 tmpdir=$(make_temp_dir)
 cleanup() { rm -rf "$tmpdir"; }
 trap cleanup EXIT
-export HOLBUILD_CACHE="$tmpdir/cache"
+use_case_cache "$tmpdir/cache"
 
 project=$tmpdir/project
 mkdir -p "$project/src"
 cat > "$project/holproject.toml" <<'TOML'
+[holbuild]
+schema = 2
+
+[dependencies.hol]
+git = "https://github.com/HOL-Theorem-Prover/HOL.git"
+rev = "bf0dec986904cecbd1a1c6bce62ccf1c256eaca1"
+
 [project]
 name = "parallel_subprocesses"
 
@@ -39,7 +46,7 @@ val _ = export_theory();
 SML
 done
 
-(cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" -j3 build --skip-checkpoints --skip-goalfrag) > "$tmpdir/build.log"
+(cd "$project" && "$HOLBUILD_BIN" -j3 build --skip-checkpoints --skip-goalfrag) > "$tmpdir/build.log"
 
 start_before_first_end=$(awk '
   /^END / { print starts; exit }
@@ -61,6 +68,13 @@ done
 fail_project=$tmpdir/fail-project
 mkdir -p "$fail_project/src"
 cat > "$fail_project/holproject.toml" <<'TOML'
+[holbuild]
+schema = 2
+
+[dependencies.hol]
+git = "https://github.com/HOL-Theorem-Prover/HOL.git"
+rev = "bf0dec986904cecbd1a1c6bce62ccf1c256eaca1"
+
 [project]
 name = "parallel_failure_cleanup"
 
@@ -89,7 +103,7 @@ val _ = export_theory();
 SML
 
 start_seconds=$SECONDS
-if (cd "$fail_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" -j2 build --skip-checkpoints --skip-goalfrag) > "$tmpdir/fail-build.log" 2>&1; then
+if (cd "$fail_project" && "$HOLBUILD_BIN" -j2 build --skip-checkpoints --skip-goalfrag) > "$tmpdir/fail-build.log" 2>&1; then
   echo "expected parallel build failure" >&2
   exit 1
 fi

@@ -10,12 +10,19 @@ source "$SCRIPT_DIR/../../lib.sh"
 tmpdir=$(make_temp_dir)
 cleanup() { rm -rf "$tmpdir"; }
 trap cleanup EXIT
-export HOLBUILD_CACHE="$tmpdir/cache"
+use_case_cache "$tmpdir/cache"
 
 write_project() {
   local project=$1
   mkdir -p "$project/src"
   cat > "$project/holproject.toml" <<'TOML'
+[holbuild]
+schema = 2
+
+[dependencies.hol]
+git = "https://github.com/HOL-Theorem-Prover/HOL.git"
+rev = "bf0dec986904cecbd1a1c6bce62ccf1c256eaca1"
+
 [project]
 name = "cache-cross-artifact-root"
 
@@ -50,12 +57,12 @@ write_project "$first"
 cp -R "$first" "$second"
 
 first_log=$tmpdir/first.log
-(cd "$first" && HOLBUILD_CACHE_TRACE=1 "$HOLBUILD_BIN" --holdir "$HOLDIR" build BTheory) > "$first_log" 2>&1
+(cd "$first" && HOLBUILD_CACHE_TRACE=1 "$HOLBUILD_BIN" build BTheory) > "$first_log" 2>&1
 require_grep "ATheory built" "$first_log"
 require_grep "BTheory built" "$first_log"
 
 second_log=$tmpdir/second.log
-(cd "$second" && HOLBUILD_CACHE_TRACE=1 "$HOLBUILD_BIN" --holdir "$HOLDIR" build BTheory) > "$second_log" 2>&1
+(cd "$second" && HOLBUILD_CACHE_TRACE=1 "$HOLBUILD_BIN" build BTheory) > "$second_log" 2>&1
 require_grep "cache hit: ATheory source/dependency key=" "$second_log"
 require_grep "cache hit: BTheory parent-output key=" "$second_log"
 require_grep "ATheory restored from cache" "$second_log"

@@ -10,11 +10,18 @@ source "$SCRIPT_DIR/../../lib.sh"
 tmpdir=$(make_temp_dir)
 cleanup() { rm -rf "$tmpdir"; }
 trap cleanup EXIT
-export HOLBUILD_CACHE="$tmpdir/cache"
+use_case_cache "$tmpdir/cache"
 
 project=$tmpdir/project
 mkdir -p "$project/src/a" "$project/src/b"
 cat > "$project/holproject.toml" <<'TOML'
+[holbuild]
+schema = 2
+
+[dependencies.hol]
+git = "https://github.com/HOL-Theorem-Prover/HOL.git"
+rev = "bf0dec986904cecbd1a1c6bce62ccf1c256eaca1"
+
 [project]
 name = "exclude"
 
@@ -44,9 +51,9 @@ cat > "$project/.holconfig.toml" <<'TOML'
 exclude = ["src/local/*"]
 TOML
 
-(cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" context) > "$tmpdir/context.log"
+(cd "$project" && "$HOLBUILD_BIN" context) > "$tmpdir/context.log"
 require_grep "exclude: \*/selftest.sml, src/generated/\*, src/local/\*" "$tmpdir/context.log"
-(cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --dry-run) > "$tmpdir/dry.log"
+(cd "$project" && "$HOLBUILD_BIN" build --dry-run) > "$tmpdir/dry.log"
 require_grep "Keep (sml, package exclude)" "$tmpdir/dry.log"
 if grep -q "selftest\|Generated\|MachineOnly" "$tmpdir/dry.log"; then
   echo "excluded source appeared in dry-run plan" >&2

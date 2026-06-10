@@ -10,11 +10,18 @@ source "$SCRIPT_DIR/../../lib.sh"
 tmpdir=$(make_temp_dir)
 cleanup() { rm -rf "$tmpdir"; }
 trap cleanup EXIT
-export HOLBUILD_CACHE="$tmpdir/cache"
+use_case_cache "$tmpdir/cache"
 
 project=$tmpdir/project
 mkdir -p "$project/src"
 cat > "$project/holproject.toml" <<'TOML'
+[holbuild]
+schema = 2
+
+[dependencies.hol]
+git = "https://github.com/HOL-Theorem-Prover/HOL.git"
+rev = "bf0dec986904cecbd1a1c6bce62ccf1c256eaca1"
+
 [project]
 name = "termination-diagnostics"
 
@@ -35,7 +42,7 @@ val _ = export_theory();
 SML
 
 failure_log=$tmpdir/failure.log
-if (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$failure_log" 2>&1; then
+if (cd "$project" && "$HOLBUILD_BIN" build ATheory) > "$failure_log" 2>&1; then
   echo "expected termination proof failure" >&2
   exit 1
 fi
@@ -51,6 +58,13 @@ require_grep "instrumented log:" "$failure_log"
 success_project=$tmpdir/success-project
 mkdir -p "$success_project/src"
 cat > "$success_project/holproject.toml" <<'TOML'
+[holbuild]
+schema = 2
+
+[dependencies.hol]
+git = "https://github.com/HOL-Theorem-Prover/HOL.git"
+rev = "bf0dec986904cecbd1a1c6bce62ccf1c256eaca1"
+
 [project]
 name = "termination-success"
 
@@ -75,7 +89,7 @@ val _ = export_theory();
 SML
 
 success_log=$tmpdir/success.log
-(cd "$success_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$success_log" 2>&1
+(cd "$success_project" && "$HOLBUILD_BIN" build ATheory) > "$success_log" 2>&1
 require_grep "ATheory built" "$success_log"
 require_file "$success_project/.holbuild/obj/src/AScript.uo"
 require_file "$success_project/.holbuild/obj/src/ATheory.uo"
@@ -112,7 +126,7 @@ val _ = export_theory();
 SML
 
 resume_first_log=$tmpdir/resume-first.log
-if (cd "$resume_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$resume_first_log" 2>&1; then
+if (cd "$resume_project" && "$HOLBUILD_BIN" build ATheory) > "$resume_first_log" 2>&1; then
   echo "expected second termination proof failure" >&2
   exit 1
 fi
@@ -122,7 +136,7 @@ require_file "$(find "$resume_project/.holbuild/checkpoints" -path '*.decls/*/pr
 rm -rf "$resume_project/.holbuild/checkpoints/termination-diagnostics/src/AScript.sml.decls"
 
 resume_missing_decl_log=$tmpdir/resume-missing-decl-dir.log
-if (cd "$resume_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$resume_missing_decl_log" 2>&1; then
+if (cd "$resume_project" && "$HOLBUILD_BIN" build ATheory) > "$resume_missing_decl_log" 2>&1; then
   echo "expected second termination proof failure after removing definition checkpoint dirs" >&2
   exit 1
 fi
@@ -135,7 +149,7 @@ fi
 require_file "$(find "$resume_project/.holbuild/checkpoints" -path '*.decls/*/proof_ir_v3*/*/first_def_context.save' -print -quit)"
 
 resume_second_log=$tmpdir/resume-second.log
-if (cd "$resume_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$resume_second_log" 2>&1; then
+if (cd "$resume_project" && "$HOLBUILD_BIN" build ATheory) > "$resume_second_log" 2>&1; then
   echo "expected repeated second termination proof failure" >&2
   exit 1
 fi
