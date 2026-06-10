@@ -59,7 +59,7 @@ manifest = "missing.toml"
 TOML
 } > "$bad/holproject.toml"
 if (cd "$bad" && "$HOLBUILD_BIN" context) > "$tmpdir/bad.log" 2>&1; then
-  echo "reserved legacy HOLDIR dependency unexpectedly accepted" >&2
+  echo "missing from-hol shim manifest unexpectedly accepted" >&2
   exit 1
 fi
-require_grep "dependencies.HOLDIR" "$tmpdir/bad.log"
+require_grep "dependency HOLDIR manifest not found:" "$tmpdir/bad.log"

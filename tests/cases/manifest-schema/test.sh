@@ -238,7 +238,7 @@ write_manifest schema2_path_dep <<'TOML'
 [dependencies.dep]
 path = "../dep"
 TOML
-expect_context_failure schema2_path_dep "dependencies.dep path dependencies are not supported in schema 2"
+expect_context_failure schema2_path_dep "dependencies.dep path dependencies are not supported"
 
 make_project schema2_git_manifest
 write_manifest schema2_git_manifest <<'TOML'

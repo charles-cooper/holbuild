@@ -18,29 +18,39 @@ git_identity() {
   git -C "$1" config commit.gpgsign false
 }
 
+hol_repo=$tmpdir/hol-repo
+mkdir -p "$hol_repo"
+git -C "$hol_repo" init -q
+git_identity "$hol_repo"
+echo upstream-hol-without-holproject > "$hol_repo/README"
+git -C "$hol_repo" add .
+git -C "$hol_repo" commit -q -m hol
+hol_rev=$(git -C "$hol_repo" rev-parse HEAD)
+export HOLBUILD_CANONICAL_HOL_GIT="$hol_repo"
+
 repo=$tmpdir/dep-repo
 mkdir -p "$repo"
 git -C "$repo" init -q
 git_identity "$repo"
-cat > "$repo/holproject.toml" <<'TOML'
+cat > "$repo/holproject.toml" <<TOML
 [holbuild]
 schema = 2
 
 [dependencies.hol]
-git = "https://github.com/HOL-Theorem-Prover/HOL.git"
-rev = "bf0dec986904cecbd1a1c6bce62ccf1c256eaca1"
+git = "$hol_repo"
+rev = "$hol_rev"
 
 [project]
 name = "dep"
 TOML
 mkdir -p "$repo/subdir"
-cat > "$repo/subdir/sub.manifest.toml" <<'TOML'
+cat > "$repo/subdir/sub.manifest.toml" <<TOML
 [holbuild]
 schema = 2
 
 [dependencies.hol]
-git = "https://github.com/HOL-Theorem-Prover/HOL.git"
-rev = "bf0dec986904cecbd1a1c6bce62ccf1c256eaca1"
+git = "$hol_repo"
+rev = "$hol_rev"
 
 [project]
 name = "subdep"
@@ -53,25 +63,15 @@ echo two > "$repo/value.txt"
 git -C "$repo" commit -q -am two
 rev2=$(git -C "$repo" rev-parse HEAD)
 
-hol_repo=$tmpdir/hol-repo
-mkdir -p "$hol_repo"
-git -C "$hol_repo" init -q
-git_identity "$hol_repo"
-echo upstream-hol-without-holproject > "$hol_repo/README"
-git -C "$hol_repo" add .
-git -C "$hol_repo" commit -q -m hol
-hol_rev=$(git -C "$hol_repo" rev-parse HEAD)
-export HOLBUILD_CANONICAL_HOL_GIT="$hol_repo"
-
 project=$tmpdir/project
 mkdir -p "$project"
-cat > "$project/sub.manifest.toml" <<'TOML'
+cat > "$project/sub.manifest.toml" <<TOML
 [holbuild]
 schema = 2
 
 [dependencies.hol]
-git = "https://github.com/HOL-Theorem-Prover/HOL.git"
-rev = "bf0dec986904cecbd1a1c6bce62ccf1c256eaca1"
+git = "$hol_repo"
+rev = "$hol_rev"
 
 [project]
 name = "subdep"
