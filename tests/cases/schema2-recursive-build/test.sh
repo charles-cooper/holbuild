@@ -120,7 +120,7 @@ TOML
 context_log=$tmpdir/context.log
 (cd "$root" && env -u HOLDIR -u HOLBUILD_HOLDIR HOLBUILD_POLY="$fakebin/poly" "$HOLBUILD_BIN" context) > "$context_log"
 require_grep "package: hol \[root=$HOLBUILD_CACHE/hol-toolchains/" "$context_log"
-if find "$HOLBUILD_CACHE/hol-toolchains" -name configured -o -name built 2>/dev/null | grep -q .; then
+if find -L "$HOLBUILD_CACHE/hol-toolchains" \( -name configured -o -name built \) 2>/dev/null | grep -q .; then
   echo "schema 2 context unexpectedly built HOL" >&2
   exit 1
 fi
@@ -145,7 +145,7 @@ require_grep 'no longer supported' "$tmpdir/heap-holdir.log"
 dry_log=$tmpdir/dry.log
 (cd "$root" && env -u HOLDIR -u HOLBUILD_HOLDIR HOLBUILD_POLY="$fakebin/poly" "$HOLBUILD_BIN" build --dry-run Foo) > "$dry_log"
 require_grep "Foo (sml, package b)" "$dry_log"
-configured_marker=$(find "$HOLBUILD_CACHE/hol-toolchains" -path '*/hol/configured' -type f -print -quit)
+configured_marker=$(find -L "$HOLBUILD_CACHE/hol-toolchains" -path '*/hol/configured' -type f -print -quit)
 if [[ -z "$configured_marker" ]]; then
   echo "fake HOL configure marker was not created" >&2
   exit 1
