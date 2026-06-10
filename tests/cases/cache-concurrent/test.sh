@@ -10,12 +10,19 @@ source "$SCRIPT_DIR/../../lib.sh"
 tmpdir=$(make_temp_dir)
 cleanup() { rm -rf "$tmpdir"; }
 trap cleanup EXIT
-export HOLBUILD_CACHE="$tmpdir/cache"
+use_case_cache "$tmpdir/cache"
 
 make_project() {
   local project=$1
   mkdir -p "$project/src"
   cat > "$project/holproject.toml" <<'TOML'
+[holbuild]
+schema = 2
+
+[dependencies.hol]
+git = "https://github.com/HOL-Theorem-Prover/HOL.git"
+rev = "bf0dec986904cecbd1a1c6bce62ccf1c256eaca1"
+
 [project]
 name = "concurrent"
 
@@ -42,7 +49,7 @@ run_parallel_builds() {
     name=$(basename "$project")
     local log="$tmpdir/$phase-$name.log"
     logs+=("$log")
-    (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$log" 2>&1 &
+    (cd "$project" && "$HOLBUILD_BIN" build ATheory) > "$log" 2>&1 &
     pids+=("$!")
   done
 
@@ -94,6 +101,13 @@ parent_sensitive_a1=$tmpdir/parent-sensitive-a1
 parent_sensitive_a2=$tmpdir/parent-sensitive-a2
 mkdir -p "$parent_sensitive_source/src" "$parent_sensitive_a1" "$parent_sensitive_a2"
 cat > "$parent_sensitive_source/holproject.toml" <<'TOML'
+[holbuild]
+schema = 2
+
+[dependencies.hol]
+git = "https://github.com/HOL-Theorem-Prover/HOL.git"
+rev = "bf0dec986904cecbd1a1c6bce62ccf1c256eaca1"
+
 [project]
 name = "parentsensitive"
 
@@ -119,8 +133,8 @@ Ancestors A
 val _ = export_theory();
 SML
 
-(cd "$parent_sensitive_a1" && "$HOLBUILD_BIN" --source-dir "$parent_sensitive_source" --holdir "$HOLDIR" build BTheory) > "$tmpdir/parent-sensitive-a1.log" 2>&1
-(cd "$parent_sensitive_a2" && "$HOLBUILD_BIN" --source-dir "$parent_sensitive_source" --holdir "$HOLDIR" build BTheory) > "$tmpdir/parent-sensitive-a2.log" 2>&1
+(cd "$parent_sensitive_a1" && "$HOLBUILD_BIN" --source-dir "$parent_sensitive_source" build BTheory) > "$tmpdir/parent-sensitive-a1.log" 2>&1
+(cd "$parent_sensitive_a2" && "$HOLBUILD_BIN" --source-dir "$parent_sensitive_source" build BTheory) > "$tmpdir/parent-sensitive-a2.log" 2>&1
 if grep -q "cache entry already exists with different outputs" "$tmpdir/parent-sensitive-a2.log"; then
   cat "$tmpdir/parent-sensitive-a2.log" >&2
   echo "cache key ignored local parent theory output hash" >&2
@@ -142,7 +156,7 @@ path.write_text(text.replace("blob sig $sig_hash", "blob sig $dat_hash"))
 PY
 
 conflict_log="$tmpdir/cache-conflict.log"
-(cd "${projects[0]}" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --force ATheory) > "$conflict_log" 2>&1
+(cd "${projects[0]}" && "$HOLBUILD_BIN" build --force ATheory) > "$conflict_log" 2>&1
 require_grep "cache entry already exists with different outputs for ATheory" "$conflict_log"
 require_grep "existing cache entry: .*manifest" "$conflict_log"
 require_grep "existing outputs: sig=$dat_hash" "$conflict_log"

@@ -10,12 +10,19 @@ source "$SCRIPT_DIR/../../lib.sh"
 tmpdir=$(make_temp_dir)
 cleanup() { rm -rf "$tmpdir"; }
 trap cleanup EXIT
-export HOLBUILD_CACHE="$tmpdir/cache"
+use_case_cache "$tmpdir/cache"
 
 project=$tmpdir/project
 mkdir -p "$project/src"
 
 cat > "$project/holproject.toml" <<'TOML'
+[holbuild]
+schema = 2
+
+[dependencies.hol]
+git = "https://github.com/HOL-Theorem-Prover/HOL.git"
+rev = "bf0dec986904cecbd1a1c6bce62ccf1c256eaca1"
+
 [project]
 name = "entry-timeouts"
 
@@ -64,27 +71,27 @@ QED
 val _ = export_theory();
 SML
 
-(cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" context) > "$tmpdir/context.log"
+(cd "$project" && "$HOLBUILD_BIN" context) > "$tmpdir/context.log"
 require_grep "root tactic_timeout: src/AScript.sml = 0.1" "$tmpdir/context.log"
 require_grep "root tactic_timeout: src/BScript.sml = 1" "$tmpdir/context.log"
 
-if (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build BTheory) > "$tmpdir/b.log" 2>&1; then
+if (cd "$project" && "$HOLBUILD_BIN" build BTheory) > "$tmpdir/b.log" 2>&1; then
   echo "direct BTheory build ignored stricter entry point reaching shared dependency" >&2
   exit 1
 fi
 require_grep "tactic timed out after 0.1s while building DepTheory: slow_tac" "$tmpdir/b.log"
 
-(cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --tactic-timeout 1.0 BTheory) > "$tmpdir/b-cli.log" 2>&1
+(cd "$project" && "$HOLBUILD_BIN" build --tactic-timeout 1.0 BTheory) > "$tmpdir/b-cli.log" 2>&1
 require_file "$project/.holbuild/obj/src/DepTheory.dat"
 require_file "$project/.holbuild/obj/src/BTheory.dat"
 require_grep "proof_timeout=1.0" "$project/.holbuild/dep/entry-timeouts/src/DepScript.sml.key"
 
-if (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build BTheory) > "$tmpdir/b-after-cli.log" 2>&1; then
+if (cd "$project" && "$HOLBUILD_BIN" build BTheory) > "$tmpdir/b-after-cli.log" 2>&1; then
   echo "lax cached success satisfied stricter entry-point timeout" >&2
   exit 1
 fi
 require_grep "tactic timed out after 0.1s while building DepTheory: slow_tac" "$tmpdir/b-after-cli.log"
 
-(cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --tactic-timeout 1.0 ATheory BTheory) > "$tmpdir/cli-override.log" 2>&1
+(cd "$project" && "$HOLBUILD_BIN" build --tactic-timeout 1.0 ATheory BTheory) > "$tmpdir/cli-override.log" 2>&1
 require_file "$project/.holbuild/obj/src/ATheory.dat"
 require_file "$project/.holbuild/obj/src/BTheory.dat"

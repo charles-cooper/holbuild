@@ -10,12 +10,19 @@ source "$SCRIPT_DIR/../../lib.sh"
 tmpdir=$(make_temp_dir)
 cleanup() { rm -rf "$tmpdir"; }
 trap cleanup EXIT
-export HOLBUILD_CACHE="$tmpdir/cache"
+use_case_cache "$tmpdir/cache"
 
 project=$tmpdir/project
 mkdir -p "$project/src"
 printf 'HEADERDEPS\n' > "$project/.holpath"
 cat > "$project/holproject.toml" <<'TOML'
+[holbuild]
+schema = 2
+
+[dependencies.hol]
+git = "https://github.com/HOL-Theorem-Prover/HOL.git"
+rev = "bf0dec986904cecbd1a1c6bce62ccf1c256eaca1"
+
 [project]
 name = "headerdeps"
 
@@ -56,7 +63,7 @@ QED
 val _ = export_theory();
 SML
 
-(cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --dry-run ATheory) > "$tmpdir/dry.log"
+(cd "$project" && "$HOLBUILD_BIN" build --dry-run ATheory) > "$tmpdir/dry.log"
 require_grep "external theories: .*arithmeticTheory" "$tmpdir/dry.log"
 require_grep "external theories: .*stringTheory" "$tmpdir/dry.log"
 require_grep "external libs: .*cv_transLib" "$tmpdir/dry.log"
@@ -67,7 +74,7 @@ if grep -q "ignore_grammar\|qualified\|identifier" "$tmpdir/dry.log"; then
   exit 1
 fi
 
-(cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build BTheory) > "$tmpdir/build.log"
+(cd "$project" && "$HOLBUILD_BIN" build BTheory) > "$tmpdir/build.log"
 require_file "$project/.holbuild/obj/src/ATheory.sml"
 require_file "$project/.holbuild/obj/src/ATheory.dat"
 require_file "$project/.holbuild/obj/src/BTheory.dat"
@@ -99,7 +106,7 @@ fi
 require_grep "dependency_context_key=" "$project/.holbuild/dep/headerdeps/src/AScript.sml.key"
 
 rm -rf "$project/.holbuild"
-(cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build BTheory) > "$tmpdir/cache.log"
+(cd "$project" && "$HOLBUILD_BIN" build BTheory) > "$tmpdir/cache.log"
 # If HOL embeds transient stage/worktree strings into ATheory.dat, holbuild may
 # restore from a path-scoped cache key for the same project root, but must not
 # leak transient stage paths into generated sources/load manifests.

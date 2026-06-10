@@ -10,34 +10,13 @@ source "$SCRIPT_DIR/../../lib.sh"
 tmpdir=$(make_temp_dir)
 cleanup() { rm -rf "$tmpdir"; }
 trap cleanup EXIT
-export HOLBUILD_CACHE="$tmpdir/cache"
+use_case_cache "$tmpdir/cache"
 
 git_identity() {
   git -C "$1" config user.email test@example.com
   git -C "$1" config user.name 'Holbuild Test'
   git -C "$1" config commit.gpgsign false
 }
-
-repo=$tmpdir/dep-repo
-mkdir -p "$repo"
-git -C "$repo" init -q
-git_identity "$repo"
-cat > "$repo/holproject.toml" <<'TOML'
-[project]
-name = "dep"
-TOML
-mkdir -p "$repo/subdir"
-cat > "$repo/subdir/sub.manifest.toml" <<'TOML'
-[project]
-name = "subdep"
-TOML
-echo one > "$repo/value.txt"
-git -C "$repo" add .
-git -C "$repo" commit -q -m one
-rev1=$(git -C "$repo" rev-parse HEAD)
-echo two > "$repo/value.txt"
-git -C "$repo" commit -q -am two
-rev2=$(git -C "$repo" rev-parse HEAD)
 
 hol_repo=$tmpdir/hol-repo
 mkdir -p "$hol_repo"
@@ -49,9 +28,51 @@ git -C "$hol_repo" commit -q -m hol
 hol_rev=$(git -C "$hol_repo" rev-parse HEAD)
 export HOLBUILD_CANONICAL_HOL_GIT="$hol_repo"
 
+repo=$tmpdir/dep-repo
+mkdir -p "$repo"
+git -C "$repo" init -q
+git_identity "$repo"
+cat > "$repo/holproject.toml" <<TOML
+[holbuild]
+schema = 2
+
+[dependencies.hol]
+git = "$hol_repo"
+rev = "$hol_rev"
+
+[project]
+name = "dep"
+TOML
+mkdir -p "$repo/subdir"
+cat > "$repo/subdir/sub.manifest.toml" <<TOML
+[holbuild]
+schema = 2
+
+[dependencies.hol]
+git = "$hol_repo"
+rev = "$hol_rev"
+
+[project]
+name = "subdep"
+TOML
+echo one > "$repo/value.txt"
+git -C "$repo" add .
+git -C "$repo" commit -q -m one
+rev1=$(git -C "$repo" rev-parse HEAD)
+echo two > "$repo/value.txt"
+git -C "$repo" commit -q -am two
+rev2=$(git -C "$repo" rev-parse HEAD)
+
 project=$tmpdir/project
 mkdir -p "$project"
-cat > "$project/sub.manifest.toml" <<'TOML'
+cat > "$project/sub.manifest.toml" <<TOML
+[holbuild]
+schema = 2
+
+[dependencies.hol]
+git = "$hol_repo"
+rev = "$hol_rev"
+
 [project]
 name = "subdep"
 TOML

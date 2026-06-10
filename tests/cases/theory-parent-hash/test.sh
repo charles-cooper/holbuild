@@ -10,11 +10,18 @@ source "$SCRIPT_DIR/../../lib.sh"
 tmpdir=$(make_temp_dir)
 cleanup() { rm -rf "$tmpdir"; }
 trap cleanup EXIT
-export HOLBUILD_CACHE="$tmpdir/cache"
+use_case_cache "$tmpdir/cache"
 
 project=$tmpdir/project
 mkdir -p "$project/src"
 cat > "$project/holproject.toml" <<'TOML'
+[holbuild]
+schema = 2
+
+[dependencies.hol]
+git = "https://github.com/HOL-Theorem-Prover/HOL.git"
+rev = "bf0dec986904cecbd1a1c6bce62ccf1c256eaca1"
+
 [project]
 name = "parenthash"
 
@@ -46,7 +53,7 @@ QED
 val _ = export_theory();
 SML
 
-(cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build BTheory) > "$tmpdir/initial.log" 2>&1
+(cd "$project" && "$HOLBUILD_BIN" build BTheory) > "$tmpdir/initial.log" 2>&1
 require_file "$project/.holbuild/obj/src/ATheory.dat"
 require_file "$project/.holbuild/obj/src/BTheory.dat"
 
@@ -62,7 +69,7 @@ path.write_text(changed)
 PY
 
 stale_log=$tmpdir/stale.log
-(cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --no-cache BTheory) > "$stale_log" 2>&1
+(cd "$project" && "$HOLBUILD_BIN" build --no-cache BTheory) > "$stale_log" 2>&1
 require_grep "BTheory built" "$stale_log"
 if grep -q "BTheory is up to date\|link_parents" "$stale_log"; then
   echo "stale local theory parent hash was accepted" >&2
@@ -81,7 +88,7 @@ path.write_text(changed)
 PY
 
 rebuild_log=$tmpdir/rebuild.log
-(cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --no-cache BTheory) > "$rebuild_log" 2>&1
+(cd "$project" && "$HOLBUILD_BIN" build --no-cache BTheory) > "$rebuild_log" 2>&1
 require_grep "BTheory built" "$rebuild_log"
 if grep -q "BTheory is up to date\|link_parents" "$rebuild_log"; then
   echo "stale theory parent hash was accepted" >&2

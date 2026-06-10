@@ -22,6 +22,13 @@ mkdir -p \
   "$cache/blobs"
 
 cat > "$project/holproject.toml" <<'TOML'
+[holbuild]
+schema = 2
+
+[dependencies.hol]
+git = "https://github.com/HOL-Theorem-Prover/HOL.git"
+rev = "bf0dec986904cecbd1a1c6bce62ccf1c256eaca1"
+
 [project]
 name = "gc"
 
@@ -64,6 +71,13 @@ clean_only_project=$tmpdir/clean-only-project
 clean_only_cache=$tmpdir/clean-only-cache
 mkdir -p "$clean_only_project/.holbuild/stage/old" "$clean_only_cache/tmp/old"
 cat > "$clean_only_project/holproject.toml" <<'TOML'
+[holbuild]
+schema = 2
+
+[dependencies.hol]
+git = "https://github.com/HOL-Theorem-Prover/HOL.git"
+rev = "bf0dec986904cecbd1a1c6bce62ccf1c256eaca1"
+
 [project]
 name = "gc-clean-only"
 
@@ -90,6 +104,13 @@ mkdir -p \
   "$budget_family.deps/old-deps-key" \
   "$budget_family.theorems/old-deps-key/proof_ir_v3/old-prefix"
 cat > "$budget_project/holproject.toml" <<'TOML'
+[holbuild]
+schema = 2
+
+[dependencies.hol]
+git = "https://github.com/HOL-Theorem-Prover/HOL.git"
+rev = "bf0dec986904cecbd1a1c6bce62ccf1c256eaca1"
+
 [project]
 name = "checkpoint-budget"
 
@@ -110,7 +131,7 @@ touch -d '2 days ago' \
   "$budget_family.deps/old-deps-key/deps_loaded.save.ok" \
   "$budget_family.theorems/old-deps-key/proof_ir_v3/old-prefix/first_context.save" \
   "$budget_family.theorems/old-deps-key/proof_ir_v3/old-prefix/first_context.save.ok"
-if (cd "$budget_project" && "$HOLBUILD_BIN" --holdir "$_HOLDIR" build BadTheory) > "$tmpdir/budget.log" 2>&1; then
+if (cd "$budget_project" && "$HOLBUILD_BIN" build BadTheory) > "$tmpdir/budget.log" 2>&1; then
   echo "checkpoint budget failure fixture unexpectedly succeeded" >&2
   exit 1
 fi

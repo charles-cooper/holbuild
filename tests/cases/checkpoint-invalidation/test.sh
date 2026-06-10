@@ -10,11 +10,18 @@ source "$SCRIPT_DIR/../../lib.sh"
 tmpdir=$(make_temp_dir)
 cleanup() { rm -rf "$tmpdir"; }
 trap cleanup EXIT
-export HOLBUILD_CACHE="$tmpdir/cache"
+use_case_cache "$tmpdir/cache"
 
 project=$tmpdir/project
 mkdir -p "$project/src"
 cat > "$project/holproject.toml" <<'TOML'
+[holbuild]
+schema = 2
+
+[dependencies.hol]
+git = "https://github.com/HOL-Theorem-Prover/HOL.git"
+rev = "bf0dec986904cecbd1a1c6bce62ccf1c256eaca1"
+
 [project]
 name = "checkpointinvalid"
 
@@ -34,7 +41,7 @@ QED
 val _ = export_theory();
 SML
 
-(cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory)
+(cd "$project" && "$HOLBUILD_BIN" build ATheory)
 
 metadata="$project/.holbuild/dep/checkpointinvalid/src/AScript.sml.key"
 require_file "$metadata"
@@ -78,7 +85,7 @@ printf '
 ' >> "$project/src/AScript.sml"
 
 rebuild_log=$tmpdir/rebuild.log
-(cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$rebuild_log" 2>&1
+(cd "$project" && "$HOLBUILD_BIN" build ATheory) > "$rebuild_log" 2>&1
 new_input_key=$(grep '^input_key=' "$metadata")
 [[ "$old_input_key" != "$new_input_key" ]] || { echo "source edit did not change input key" >&2; exit 1; }
 # The rebuild should succeed; the planted old-format invalid checkpoints
@@ -96,6 +103,6 @@ printf 'holbuild-checkpoint-ok-v1
 ' > "$context_path.ok"
 rm -rf "$project/.holbuild/gen" "$project/.holbuild/obj" "$project/.holbuild/dep"
 cache_restore_log=$tmpdir/cache-restore.log
-(cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$cache_restore_log" 2>&1
+(cd "$project" && "$HOLBUILD_BIN" build ATheory) > "$cache_restore_log" 2>&1
 require_file "$project/.holbuild/obj/src/ATheory.dat"
 # Old-format checkpoint files should not prevent cache restore

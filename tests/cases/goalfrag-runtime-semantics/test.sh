@@ -10,12 +10,19 @@ source "$SCRIPT_DIR/../../lib.sh"
 tmpdir=$(make_temp_dir)
 cleanup() { rm -rf "$tmpdir"; }
 trap cleanup EXIT
-export HOLBUILD_CACHE="$tmpdir/cache"
+use_case_cache "$tmpdir/cache"
 
 make_project() {
   local project=$1
   mkdir -p "$project/src"
   cat > "$project/holproject.toml" <<'TOML'
+[holbuild]
+schema = 2
+
+[dependencies.hol]
+git = "https://github.com/HOL-Theorem-Prover/HOL.git"
+rev = "bf0dec986904cecbd1a1c6bce62ccf1c256eaca1"
+
 [project]
 name = "goalfrag-runtime"
 
@@ -45,7 +52,7 @@ QED
 
 val _ = export_theory();
 SML
-  (cd "$project" && HOLBUILD_ECHO_CHILD_LOGS=1 "$HOLBUILD_BIN" --holdir "$HOLDIR" build --skip-checkpoints --tactic-timeout 60) > "$tmpdir/new-ir.out" 2>&1
+  (cd "$project" && HOLBUILD_ECHO_CHILD_LOGS=1 "$HOLBUILD_BIN" build --skip-checkpoints --tactic-timeout 60) > "$tmpdir/new-ir.out" 2>&1
   require_file "$project/.holbuild/obj/src/ATheory.dat"
 }
 
@@ -133,15 +140,15 @@ QED
 
 val _ = export_theory();
 SML
-  (cd "$project" && HOLBUILD_ECHO_CHILD_LOGS=1 "$HOLBUILD_BIN" --holdir "$HOLDIR" build --goalfrag --skip-checkpoints --tactic-timeout 60) > "$tmpdir/success.goalfrag.out" 2>&1
+  (cd "$project" && HOLBUILD_ECHO_CHILD_LOGS=1 "$HOLBUILD_BIN" build --goalfrag --skip-checkpoints --tactic-timeout 60) > "$tmpdir/success.goalfrag.out" 2>&1
   require_file "$project/.holbuild/obj/src/ATheory.sig"
   require_file "$project/.holbuild/obj/src/ATheory.sml"
   require_file "$project/.holbuild/obj/src/ATheory.dat"
   require_file "$project/.holbuild/obj/src/ATheory.ui"
   require_file "$project/.holbuild/obj/src/ATheory.uo"
-  (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" goalfrag-plan ATheory:chained_then1_plain) > "$tmpdir/chained_then1.plan.out" 2>&1
+  (cd "$project" && "$HOLBUILD_BIN" goalfrag-plan ATheory:chained_then1_plain) > "$tmpdir/chained_then1.plan.out" 2>&1
   require_grep 'plain rpt CONJ_TAC' "$tmpdir/chained_then1.plan.out"
-  (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --force --skip-goalfrag --skip-checkpoints) > "$tmpdir/success.plain.out" 2>&1
+  (cd "$project" && "$HOLBUILD_BIN" build --force --skip-goalfrag --skip-checkpoints) > "$tmpdir/success.plain.out" 2>&1
 }
 
 expect_parse_recovery_fails() {
@@ -163,13 +170,13 @@ val _ = export_theory();
 SML
   case "$mode" in
     new-ir)
-      if (cd "$project" && HOLBUILD_ECHO_CHILD_LOGS=1 "$HOLBUILD_BIN" --holdir "$HOLDIR" build --skip-checkpoints --tactic-timeout 60) > "$tmpdir/$name.out" 2>&1; then
+      if (cd "$project" && HOLBUILD_ECHO_CHILD_LOGS=1 "$HOLBUILD_BIN" build --skip-checkpoints --tactic-timeout 60) > "$tmpdir/$name.out" 2>&1; then
         echo "expected parser recovery build to fail for $name" >&2
         exit 1
       fi
       ;;
     goalfrag)
-      if (cd "$project" && HOLBUILD_ECHO_CHILD_LOGS=1 "$HOLBUILD_BIN" --holdir "$HOLDIR" build --goalfrag --skip-checkpoints --tactic-timeout 60) > "$tmpdir/$name.out" 2>&1; then
+      if (cd "$project" && HOLBUILD_ECHO_CHILD_LOGS=1 "$HOLBUILD_BIN" build --goalfrag --skip-checkpoints --tactic-timeout 60) > "$tmpdir/$name.out" 2>&1; then
         echo "expected GoalFrag parser recovery build to fail for $name" >&2
         exit 1
       fi
@@ -199,11 +206,11 @@ $proof
 
 val _ = export_theory();
 SML
-  if (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --goalfrag --skip-checkpoints --tactic-timeout 60) > "$tmpdir/$name.goalfrag.out" 2>&1; then
+  if (cd "$project" && "$HOLBUILD_BIN" build --goalfrag --skip-checkpoints --tactic-timeout 60) > "$tmpdir/$name.goalfrag.out" 2>&1; then
     echo "expected goalfrag build to fail for $name" >&2
     exit 1
   fi
-  if (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --force --skip-goalfrag --skip-checkpoints) > "$tmpdir/$name.plain.out" 2>&1; then
+  if (cd "$project" && "$HOLBUILD_BIN" build --force --skip-goalfrag --skip-checkpoints) > "$tmpdir/$name.plain.out" 2>&1; then
     echo "expected plain build to fail for $name" >&2
     exit 1
   fi
@@ -224,7 +231,7 @@ QED
 
 val _ = export_theory();
 SML
-  if (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --goalfrag --skip-checkpoints --tactic-timeout 60) > "$tmpdir/repeated-label.goalfrag.out" 2>&1; then
+  if (cd "$project" && "$HOLBUILD_BIN" build --goalfrag --skip-checkpoints --tactic-timeout 60) > "$tmpdir/repeated-label.goalfrag.out" 2>&1; then
     echo "expected repeated-label GoalFrag build to fail" >&2
     exit 1
   fi
@@ -236,7 +243,7 @@ SML
   fi
 
   rm -rf "$project/.holbuild"
-  if (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --skip-checkpoints --tactic-timeout 60) > "$tmpdir/repeated-label.new-ir.out" 2>&1; then
+  if (cd "$project" && "$HOLBUILD_BIN" build --skip-checkpoints --tactic-timeout 60) > "$tmpdir/repeated-label.new-ir.out" 2>&1; then
     echo "expected repeated-label new-IR build to fail" >&2
     exit 1
   fi

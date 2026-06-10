@@ -10,11 +10,18 @@ source "$SCRIPT_DIR/../../lib.sh"
 tmpdir=$(make_temp_dir)
 cleanup() { rm -rf "$tmpdir"; }
 trap cleanup EXIT
-export HOLBUILD_CACHE="$tmpdir/cache"
+use_case_cache "$tmpdir/cache"
 
 project=$tmpdir/project
 mkdir -p "$project/src"
 cat > "$project/holproject.toml" <<'TOML'
+[holbuild]
+schema = 2
+
+[dependencies.hol]
+git = "https://github.com/HOL-Theorem-Prover/HOL.git"
+rev = "bf0dec986904cecbd1a1c6bce62ccf1c256eaca1"
+
 [project]
 name = "projectlock"
 
@@ -32,7 +39,7 @@ val _ = export_theory();
 SML
 
 first_log=$tmpdir/first.log
-(cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$first_log" 2>&1 &
+(cd "$project" && "$HOLBUILD_BIN" build ATheory) > "$first_log" 2>&1 &
 first_pid=$!
 
 lock="$project/.holbuild/locks/project.lock"
@@ -49,7 +56,7 @@ require_grep "pid_ns=" "$owner"
 require_grep "starttime=" "$owner"
 
 second_log=$tmpdir/second.log
-if (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$second_log" 2>&1; then
+if (cd "$project" && "$HOLBUILD_BIN" build ATheory) > "$second_log" 2>&1; then
   echo "concurrent same-project build unexpectedly succeeded" >&2
   wait "$first_pid" || true
   exit 1
@@ -64,6 +71,13 @@ fi
 locked_bad_project=$tmpdir/locked-bad-project
 mkdir -p "$locked_bad_project/.holbuild/locks"
 cat > "$locked_bad_project/holproject.toml" <<'TOML'
+[holbuild]
+schema = 2
+
+[dependencies.hol]
+git = "https://github.com/HOL-Theorem-Prover/HOL.git"
+rev = "bf0dec986904cecbd1a1c6bce62ccf1c256eaca1"
+
 [project]
 name = "locked-bad-project"
 
@@ -93,7 +107,7 @@ for _ in $(seq 1 100); do
   sleep 0.05
 done
 locked_bad_log=$tmpdir/locked-bad.log
-if (cd "$locked_bad_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build) > "$locked_bad_log" 2>&1; then
+if (cd "$locked_bad_project" && "$HOLBUILD_BIN" build) > "$locked_bad_log" 2>&1; then
   echo "locked project with missing member unexpectedly succeeded" >&2
   kill "$lock_holder" 2>/dev/null || true
   wait "$lock_holder" 2>/dev/null || true
@@ -115,19 +129,19 @@ wait "$first_pid"
 require_file "$project/.holbuild/obj/src/ATheory.dat"
 
 third_log=$tmpdir/third.log
-(cd "$project" && "$HOLBUILD_BIN" --verbose --holdir "$HOLDIR" build ATheory) > "$third_log" 2>&1
+(cd "$project" && "$HOLBUILD_BIN" --verbose build ATheory) > "$third_log" 2>&1
 require_grep "ATheory is up to date" "$third_log"
 
 rm -f "$lock" "$owner"
 mkdir -p "$lock"
 obsolete_dir_log=$tmpdir/obsolete-dir.log
-(cd "$project" && "$HOLBUILD_BIN" --verbose --holdir "$HOLDIR" build ATheory) > "$obsolete_dir_log" 2>&1
+(cd "$project" && "$HOLBUILD_BIN" --verbose build ATheory) > "$obsolete_dir_log" 2>&1
 require_grep "removing obsolete directory project lock" "$obsolete_dir_log"
 require_grep "ATheory is up to date" "$obsolete_dir_log"
 [[ -f "$lock" ]] || { echo "obsolete directory lock was not replaced by lock file" >&2; exit 1; }
 
 rm -f "$owner"
 missing_owner_log=$tmpdir/missing-owner.log
-(cd "$project" && "$HOLBUILD_BIN" --verbose --holdir "$HOLDIR" build ATheory) > "$missing_owner_log" 2>&1
+(cd "$project" && "$HOLBUILD_BIN" --verbose build ATheory) > "$missing_owner_log" 2>&1
 require_grep "ATheory is up to date" "$missing_owner_log"
 [[ ! -e "$owner" ]] || { echo "project lock owner survived missing-owner recovery build" >&2; exit 1; }

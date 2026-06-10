@@ -10,13 +10,20 @@ source "$SCRIPT_DIR/../../lib.sh"
 tmpdir=$(make_temp_dir)
 cleanup() { rm -rf "$tmpdir"; }
 trap cleanup EXIT
-export HOLBUILD_CACHE="$tmpdir/cache"
+use_case_cache "$tmpdir/cache"
 
 make_project() {
   local project=$1
   local body=$2
   mkdir -p "$project/src"
   cat > "$project/holproject.toml" <<'TOML'
+[holbuild]
+schema = 2
+
+[dependencies.hol]
+git = "https://github.com/HOL-Theorem-Prover/HOL.git"
+rev = "bf0dec986904cecbd1a1c6bce62ccf1c256eaca1"
+
 [project]
 name = "diff"
 
@@ -40,7 +47,7 @@ run_hol_run() {
 run_new_ir() {
   local project=$1
   local log=$2
-  (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --force --no-cache --skip-checkpoints --tactic-timeout 60 ATheory) > "$log" 2>&1
+  (cd "$project" && "$HOLBUILD_BIN" build --force --no-cache --skip-checkpoints --tactic-timeout 60 ATheory) > "$log" 2>&1
 }
 
 copy_hol_run_artifacts() {

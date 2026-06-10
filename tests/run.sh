@@ -5,9 +5,18 @@ ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 HOLBUILD_BIN=${HOLBUILD_BIN:-"$ROOT/bin/holbuild"}
 HOLDIR=${HOLDIR:-${HOLBUILD_HOLDIR:-}}
 HOLBUILD_TEST_JOBS=${HOLBUILD_TEST_JOBS:-1}
+export HOLBUILD_ROOT="$ROOT"
+export HOLBUILD_TEST_GLOBAL_CACHE="${HOLBUILD_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/holbuild}"
 
 if [[ -z "$HOLDIR" ]]; then
   echo "Set HOLDIR=/path/to/HOL or HOLBUILD_HOLDIR" >&2
+  exit 2
+fi
+
+pinned_hol_rev=$(tr -d '[:space:]' < "$ROOT/PINS/hol.txt")
+holdir_rev=$(git -C "$HOLDIR" rev-parse HEAD)
+if [[ "$holdir_rev" != "$pinned_hol_rev" ]]; then
+  echo "HOLDIR rev $holdir_rev does not match PINS/hol.txt $pinned_hol_rev" >&2
   exit 2
 fi
 

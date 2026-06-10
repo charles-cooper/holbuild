@@ -8,7 +8,7 @@ source "$SCRIPT_DIR/../../lib.sh"
 
 tmpdir=$(make_temp_dir)
 trap 'rm -rf "$tmpdir"' EXIT
-export HOLBUILD_CACHE="$tmpdir/cache"
+use_case_cache "$tmpdir/cache"
 
 git_identity() { git -C "$1" config user.email test@example.com; git -C "$1" config user.name 'Holbuild Test'; git -C "$1" config commit.gpgsign false; }
 make_repo() {
@@ -97,7 +97,7 @@ if (cd "$nohol" && "$HOLBUILD_BIN" context) > "$tmpdir/nohol.log" 2>&1; then
   echo "missing hol unexpectedly accepted" >&2
   exit 1
 fi
-require_grep 'schema 2 dependency graph must contain exactly one hol dependency' "$tmpdir/nohol.log"
+require_grep 'dependency graph must contain exactly one hol dependency' "$tmpdir/nohol.log"
 
 # Conflicting same-name dependency is rejected.
 b2=$tmpdir/b2

@@ -10,13 +10,20 @@ source "$SCRIPT_DIR/../../lib.sh"
 tmpdir=$(make_temp_dir)
 cleanup() { rm -rf "$tmpdir"; }
 trap cleanup EXIT
-export HOLBUILD_CACHE="$tmpdir/cache"
+use_case_cache "$tmpdir/cache"
 
 dep=$tmpdir/dep
 project=$tmpdir/project
 mkdir -p "$dep/src" "$project/src"
 
 cat > "$dep/holproject.toml" <<'TOML'
+[holbuild]
+schema = 2
+
+[dependencies.hol]
+git = "https://github.com/HOL-Theorem-Prover/HOL.git"
+rev = "bf0dec986904cecbd1a1c6bce62ccf1c256eaca1"
+
 [project]
 name = "dep"
 
@@ -35,7 +42,10 @@ QED
 val _ = export_theory();
 SML
 
-cat > "$project/holproject.toml" <<'TOML'
+dep_rev=$(init_git_repo "$dep")
+{
+  write_schema2_prelude
+  cat <<TOML
 [project]
 name = "consumer"
 
@@ -43,8 +53,10 @@ name = "consumer"
 members = ["src"]
 
 [dependencies.dep]
-path = "../dep"
+git = "$dep"
+rev = "$dep_rev"
 TOML
+} > "$project/holproject.toml"
 cat > "$project/src/BScript.sml" <<'SML'
 open HolKernel Parse boolLib bossLib;
 open ATheory;
@@ -58,8 +70,8 @@ val _ = export_theory();
 SML
 
 build_log=$tmpdir/build.log
-(cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --tactic-timeout 0.1 BTheory) > "$build_log" 2>&1
-require_file "$project/.holbuild/deps/dep/obj/src/ATheory.dat"
+(cd "$project" && "$HOLBUILD_BIN" build --tactic-timeout 0.1 BTheory) > "$build_log" 2>&1
+require_file "$project/.holbuild/packages/dep/obj/src/ATheory.dat"
 require_file "$project/.holbuild/obj/src/BTheory.dat"
 if grep -q "tactic timed out while building ATheory" "$build_log"; then
   echo "dependency package used root tactic timeout" >&2
@@ -67,8 +79,8 @@ if grep -q "tactic timed out while building ATheory" "$build_log"; then
 fi
 
 passing_build_log=$tmpdir/passing-build.log
-(cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --tactic-timeout 1.0 BTheory) > "$passing_build_log" 2>&1
-require_file "$project/.holbuild/deps/dep/obj/src/ATheory.dat"
+(cd "$project" && "$HOLBUILD_BIN" build --tactic-timeout 1.0 BTheory) > "$passing_build_log" 2>&1
+require_file "$project/.holbuild/packages/dep/obj/src/ATheory.dat"
 require_file "$project/.holbuild/obj/src/BTheory.dat"
 if grep -q "tactic_timeout=\|goalfrag=" "$project/.holbuild/dep/dep/src/AScript.sml.key" "$project/.holbuild/dep/consumer/src/BScript.sml.key"; then
   echo "execution policy leaked into final action metadata" >&2
@@ -76,7 +88,7 @@ if grep -q "tactic_timeout=\|goalfrag=" "$project/.holbuild/dep/dep/src/AScript.
 fi
 
 changed_root_timeout_log=$tmpdir/changed-root-timeout.log
-(cd "$project" && "$HOLBUILD_BIN" --verbose --holdir "$HOLDIR" build --tactic-timeout 2.0 BTheory) > "$changed_root_timeout_log" 2>&1
+(cd "$project" && "$HOLBUILD_BIN" --verbose build --tactic-timeout 2.0 BTheory) > "$changed_root_timeout_log" 2>&1
 require_grep "ATheory is up to date" "$changed_root_timeout_log"
 require_grep "BTheory is up to date" "$changed_root_timeout_log"
 if grep -q "tactic_timeout=\|goalfrag=" "$project/.holbuild/dep/dep/src/AScript.sml.key" "$project/.holbuild/dep/consumer/src/BScript.sml.key"; then
@@ -93,8 +105,8 @@ for manifest in pathlib.Path(sys.argv[1]).glob('actions/*/manifest'):
 PY
 rm -rf "$project/.holbuild"
 legacy_cache_log=$tmpdir/legacy-cache.log
-(cd "$project" && HOLBUILD_CACHE_TRACE=1 "$HOLBUILD_BIN" --holdir "$HOLDIR" build --tactic-timeout 180 BTheory) > "$legacy_cache_log" 2>&1
-require_file "$project/.holbuild/deps/dep/obj/src/ATheory.dat"
+(cd "$project" && HOLBUILD_CACHE_TRACE=1 "$HOLBUILD_BIN" build --tactic-timeout 180 BTheory) > "$legacy_cache_log" 2>&1
+require_file "$project/.holbuild/packages/dep/obj/src/ATheory.dat"
 require_file "$project/.holbuild/obj/src/BTheory.dat"
 if grep -q "insufficient tactic-timeout contract" "$legacy_cache_log"; then
   echo "legacy cache manifest without proof-timeout did not satisfy larger timeout" >&2
@@ -104,6 +116,13 @@ fi
 root_timeout_project=$tmpdir/root-timeout
 mkdir -p "$root_timeout_project/src"
 cat > "$root_timeout_project/holproject.toml" <<'TOML'
+[holbuild]
+schema = 2
+
+[dependencies.hol]
+git = "https://github.com/HOL-Theorem-Prover/HOL.git"
+rev = "bf0dec986904cecbd1a1c6bce62ccf1c256eaca1"
+
 [project]
 name = "root-timeout"
 
@@ -123,7 +142,7 @@ val _ = export_theory();
 SML
 
 root_timeout_log=$tmpdir/root-timeout.log
-if (cd "$root_timeout_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --tactic-timeout 0.1 ATheory) > "$root_timeout_log" 2>&1; then
+if (cd "$root_timeout_project" && "$HOLBUILD_BIN" build --tactic-timeout 0.1 ATheory) > "$root_timeout_log" 2>&1; then
   echo "expected root project tactic to time out" >&2
   exit 1
 fi
@@ -134,7 +153,7 @@ require_grep "failed tactic top input goal:" "$root_timeout_log"
 require_grep "failed tactic input goals: 1" "$root_timeout_log"
 
 root_timeout_again_log=$tmpdir/root-timeout-again.log
-if (cd "$root_timeout_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --tactic-timeout 0.1 ATheory) > "$root_timeout_again_log" 2>&1; then
+if (cd "$root_timeout_project" && "$HOLBUILD_BIN" build --tactic-timeout 0.1 ATheory) > "$root_timeout_again_log" 2>&1; then
   echo "expected repeated root project tactic to time out" >&2
   exit 1
 fi
@@ -155,7 +174,7 @@ Proof
 QED
 val _ = export_theory();
 SML
-(cd "$root_default_project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$tmpdir/root-default.log" 2>&1
+(cd "$root_default_project" && "$HOLBUILD_BIN" build ATheory) > "$tmpdir/root-default.log" 2>&1
 require_file "$root_default_project/.holbuild/obj/src/ATheory.dat"
 if grep -q "tactic_timeout=\|goalfrag=" "$root_default_project/.holbuild/dep/root-timeout/src/AScript.sml.key"; then
   echo "default root execution policy leaked into final action metadata" >&2

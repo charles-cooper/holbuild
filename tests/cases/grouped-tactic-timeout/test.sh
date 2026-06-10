@@ -10,12 +10,19 @@ source "$SCRIPT_DIR/../../lib.sh"
 tmpdir=$(make_temp_dir)
 cleanup() { rm -rf "$tmpdir"; }
 trap cleanup EXIT
-export HOLBUILD_CACHE="$tmpdir/cache"
+use_case_cache "$tmpdir/cache"
 
 project=$tmpdir/project
 mkdir -p "$project/src"
 
 cat > "$project/holproject.toml" <<'TOML'
+[holbuild]
+schema = 2
+
+[dependencies.hol]
+git = "https://github.com/HOL-Theorem-Prover/HOL.git"
+rev = "bf0dec986904cecbd1a1c6bce62ccf1c256eaca1"
+
 [project]
 name = "grouped-tactic-timeout"
 
@@ -36,7 +43,7 @@ val _ = export_theory();
 SML
 
 build_log=$tmpdir/build.log
-(cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --tactic-timeout 0.8 ATheory) > "$build_log" 2>&1
+(cd "$project" && "$HOLBUILD_BIN" build --tactic-timeout 0.8 ATheory) > "$build_log" 2>&1
 require_file "$project/.holbuild/obj/src/ATheory.dat"
 if grep -q "tactic timed out while building ATheory" "$build_log"; then
   echo "grouped tactic was timed as one coarse step" >&2

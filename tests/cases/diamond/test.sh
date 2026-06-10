@@ -10,11 +10,18 @@ source "$SCRIPT_DIR/../../lib.sh"
 tmpdir=$(make_temp_dir)
 cleanup() { rm -rf "$tmpdir"; }
 trap cleanup EXIT
-export HOLBUILD_CACHE="$tmpdir/cache"
+use_case_cache "$tmpdir/cache"
 
 project=$tmpdir/project
 mkdir -p "$project/src"
 cat > "$project/holproject.toml" <<'TOML'
+[holbuild]
+schema = 2
+
+[dependencies.hol]
+git = "https://github.com/HOL-Theorem-Prover/HOL.git"
+rev = "bf0dec986904cecbd1a1c6bce62ccf1c256eaca1"
+
 [project]
 name = "diamond"
 
@@ -50,15 +57,15 @@ val _ = export_theory();
 SML
 
 dry_log=$tmpdir/dry.log
-(cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --dry-run DTheory) > "$dry_log"
+(cd "$project" && "$HOLBUILD_BIN" build --dry-run DTheory) > "$dry_log"
 require_grep "ATheory" "$dry_log"
 require_grep "BTheory" "$dry_log"
 require_grep "CTheory" "$dry_log"
 require_grep "DTheory" "$dry_log"
 
-(cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" -j2 build DTheory)
+(cd "$project" && "$HOLBUILD_BIN" -j2 build DTheory)
 # checkpoints persist after successful builds for incremental rebuilds
 
 second_log=$tmpdir/second.log
-(cd "$project" && "$HOLBUILD_BIN" --verbose --holdir "$HOLDIR" build DTheory) > "$second_log"
+(cd "$project" && "$HOLBUILD_BIN" --verbose build DTheory) > "$second_log"
 require_grep "DTheory is up to date" "$second_log"

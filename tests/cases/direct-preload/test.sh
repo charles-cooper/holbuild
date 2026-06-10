@@ -10,11 +10,18 @@ source "$SCRIPT_DIR/../../lib.sh"
 tmpdir=$(make_temp_dir)
 cleanup() { rm -rf "$tmpdir"; }
 trap cleanup EXIT
-export HOLBUILD_CACHE="$tmpdir/cache"
+use_case_cache "$tmpdir/cache"
 
 project=$tmpdir/project
 mkdir -p "$project/src"
 cat > "$project/holproject.toml" <<'TOML'
+[holbuild]
+schema = 2
+
+[dependencies.hol]
+git = "https://github.com/HOL-Theorem-Prover/HOL.git"
+rev = "bf0dec986904cecbd1a1c6bce62ccf1c256eaca1"
+
 [project]
 name = "direct-preload"
 
@@ -65,7 +72,7 @@ val _ = raise Fail "preserve D stage for preload inspection";
 val _ = export_theory();
 SML
 
-if (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --skip-checkpoints DTheory) > "$tmpdir/build.log" 2>&1; then
+if (cd "$project" && "$HOLBUILD_BIN" build --skip-checkpoints DTheory) > "$tmpdir/build.log" 2>&1; then
   echo "DTheory build unexpectedly succeeded" >&2
   exit 1
 fi

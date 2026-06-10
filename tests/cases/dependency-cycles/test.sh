@@ -10,14 +10,14 @@ source "$SCRIPT_DIR/../../lib.sh"
 tmpdir=$(make_temp_dir)
 cleanup() { rm -rf "$tmpdir"; }
 trap cleanup EXIT
-export HOLBUILD_CACHE="$tmpdir/cache"
+use_case_cache "$tmpdir/cache"
 
 expect_build_failure() {
   local project=$1
   local target=$2
   local pattern=$3
   local log=$tmpdir/$project.log
-  if (cd "$tmpdir/$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build --dry-run "$target") > "$log" 2>&1; then
+  if (cd "$tmpdir/$project" && "$HOLBUILD_BIN" build --dry-run "$target") > "$log" 2>&1; then
     echo "dependency cycle unexpectedly accepted: $project" >&2
     exit 1
   fi
@@ -28,6 +28,13 @@ make_project() {
   local project=$1
   mkdir -p "$tmpdir/$project/src"
   cat > "$tmpdir/$project/holproject.toml" <<'TOML'
+[holbuild]
+schema = 2
+
+[dependencies.hol]
+git = "https://github.com/HOL-Theorem-Prover/HOL.git"
+rev = "bf0dec986904cecbd1a1c6bce62ccf1c256eaca1"
+
 [project]
 name = "cycles"
 

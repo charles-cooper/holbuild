@@ -10,12 +10,19 @@ source "$SCRIPT_DIR/../../lib.sh"
 tmpdir=$(make_temp_dir)
 cleanup() { rm -rf "$tmpdir"; }
 trap cleanup EXIT
-export HOLBUILD_CACHE="$tmpdir/cache"
+use_case_cache "$tmpdir/cache"
 
 project=$tmpdir/project
 metadata="$project/.holbuild/dep/checkpointrecovery/src/AScript.sml.key"
 mkdir -p "$project/src"
 cat > "$project/holproject.toml" <<'TOML'
+[holbuild]
+schema = 2
+
+[dependencies.hol]
+git = "https://github.com/HOL-Theorem-Prover/HOL.git"
+rev = "bf0dec986904cecbd1a1c6bce62ccf1c256eaca1"
+
 [project]
 name = "checkpointrecovery"
 
@@ -223,7 +230,7 @@ run_expect_suffix_failure() {
   # an older prefix's checkpoint instead of the one this scenario corrupts.
   rm -rf "$project/.holbuild/checkpoints"
   write_bad_suffix_source
-  if (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$log" 2>&1; then
+  if (cd "$project" && "$HOLBUILD_BIN" build ATheory) > "$log" 2>&1; then
     echo "expected second theorem failure" >&2
     exit 1
   fi
@@ -245,7 +252,7 @@ run_expect_suffix_failure() {
 }
 
 write_good_source
-(cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$tmpdir/initial.log" 2>&1
+(cd "$project" && "$HOLBUILD_BIN" build ATheory) > "$tmpdir/initial.log" 2>&1
 require_file "$project/.holbuild/obj/src/ATheory.dat"
 # checkpoints persist after successful builds for incremental rebuilds
 if ! find "$project/.holbuild/checkpoints" \( -name '*.save' -o -name '*.save.ok' \) -print -quit 2>/dev/null | grep -q .; then
@@ -257,7 +264,7 @@ run_expect_suffix_failure "$tmpdir/failed.log"
 write_good_source
 force_rebuild
 fixed_log=$tmpdir/fixed.log
-(cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$fixed_log" 2>&1
+(cd "$project" && "$HOLBUILD_BIN" build ATheory) > "$fixed_log" 2>&1
 require_grep "from: failed-prefix checkpoint in second" "$fixed_log"
 if grep -q "parent for this saved state\|goalfrag/checkpoint run failed" "$fixed_log"; then
   echo "suffix recovery hit checkpoint parent mismatch/instrumentation failure" >&2
@@ -273,7 +280,7 @@ rm -f "$missing_context.ok" "$missing_failed_prefix" "$missing_failed_prefix.ok"
 write_good_source
 force_rebuild
 missing_ok_log=$tmpdir/missing-ok.log
-(cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$missing_ok_log" 2>&1
+(cd "$project" && "$HOLBUILD_BIN" build ATheory) > "$missing_ok_log" 2>&1
 require_grep "from: deps-loaded checkpoint" "$missing_ok_log"
 if grep -q "from: theorem-context checkpoint after first" "$missing_ok_log"; then
   echo "missing checkpoint .ok was treated as replayable" >&2
@@ -288,7 +295,7 @@ rm -f "$missing_save_context" "$missing_save_failed_prefix" "$missing_save_faile
 write_good_source
 force_rebuild
 missing_save_log=$tmpdir/missing-save.log
-(cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$missing_save_log" 2>&1
+(cd "$project" && "$HOLBUILD_BIN" build ATheory) > "$missing_save_log" 2>&1
 require_grep "checkpoint metadata exists without checkpoint file; discarding metadata:" "$missing_save_log"
 require_grep "from: deps-loaded checkpoint" "$missing_save_log"
 if grep -q "from: theorem-context checkpoint after first\|selected HOL base-state checkpoint is missing\|Couldn't load HOL base-state\|instrumented log:" "$missing_save_log"; then
@@ -303,7 +310,7 @@ rm -f "$missing_failed_prefix_save"
 write_good_source
 force_rebuild
 missing_failed_prefix_log=$tmpdir/missing-failed-prefix.log
-(cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$missing_failed_prefix_log" 2>&1
+(cd "$project" && "$HOLBUILD_BIN" build ATheory) > "$missing_failed_prefix_log" 2>&1
 require_grep "from: theorem-context checkpoint after first" "$missing_failed_prefix_log"
 if grep -q "from: failed-prefix checkpoint\|selected HOL base-state checkpoint is missing\|Couldn't load HOL base-state\|instrumented log:" "$missing_failed_prefix_log"; then
   echo "missing failed-prefix .save was treated as replayable" >&2
@@ -322,7 +329,7 @@ printf 'holbuild-checkpoint-ok-v2\nkind=theorem_context\n' > "$stale_descendant.
 rm -f "$fresh_deps" "$fresh_deps.ok" "$fresh_deps.meta" "$fresh_deps.prefix" "$fresh_failed_prefix" "$fresh_failed_prefix.ok" "$fresh_failed_prefix.meta" "$fresh_failed_prefix.prefix"
 force_rebuild
 fresh_deps_log=$tmpdir/fresh-deps-rebuild-failure.log
-if (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$fresh_deps_log" 2>&1; then
+if (cd "$project" && "$HOLBUILD_BIN" build ATheory) > "$fresh_deps_log" 2>&1; then
   echo "expected fresh deps rebuild to preserve suffix failure" >&2
   exit 1
 fi
@@ -342,7 +349,7 @@ printf 'partial interrupted checkpoint\n' > "$interrupted_context"
 write_good_source
 force_rebuild
 interrupted_log=$tmpdir/interrupted-save-rebuild.log
-(cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$interrupted_log" 2>&1
+(cd "$project" && "$HOLBUILD_BIN" build ATheory) > "$interrupted_log" 2>&1
 require_grep "from: deps-loaded checkpoint" "$interrupted_log"
 if grep -q "from: theorem-context checkpoint after first\|restoring previous checkpoint" "$interrupted_log"; then
   echo "interrupted checkpoint save was restored instead of ignored" >&2
@@ -358,7 +365,7 @@ rm -f "$orphan_ok_context"
 write_good_source
 force_rebuild
 orphan_ok_log=$tmpdir/orphan-ok-rebuild.log
-(cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$orphan_ok_log" 2>&1
+(cd "$project" && "$HOLBUILD_BIN" build ATheory) > "$orphan_ok_log" 2>&1
 require_grep "checkpoint metadata exists without checkpoint file; discarding metadata:" "$orphan_ok_log"
 require_grep "from: deps-loaded checkpoint" "$orphan_ok_log"
 if grep -q "from: theorem-context checkpoint after first\|restoring previous checkpoint" "$orphan_ok_log"; then
@@ -375,7 +382,7 @@ cp "$HOLDIR/bin/hol.state" "$parent_mismatch_deps"
 write_good_source
 force_rebuild
 parent_mismatch_log=$tmpdir/parent-mismatch.log
-(cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$parent_mismatch_log" 2>&1
+(cd "$project" && "$HOLBUILD_BIN" build ATheory) > "$parent_mismatch_log" 2>&1
 require_grep "discarding invalid checkpoint after HOL state load failure" "$parent_mismatch_log"
 if grep -q "Couldn't load HOL base-state\|parent for this saved state" "$parent_mismatch_log"; then
   echo "checkpoint parent mismatch leaked as a build failure" >&2
@@ -392,7 +399,7 @@ printf 'not a valid PolyML checkpoint\n' > "$corrupt_context"
 write_good_source
 force_rebuild
 corrupt_log=$tmpdir/corrupt.log
-(cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$corrupt_log" 2>&1
+(cd "$project" && "$HOLBUILD_BIN" build ATheory) > "$corrupt_log" 2>&1
 require_grep "from: theorem-context checkpoint after first" "$corrupt_log"
 require_grep "discarding invalid checkpoint after HOL state load failure" "$corrupt_log"
 if grep -q "Couldn't load HOL base-state\|Unable to load header" "$corrupt_log"; then
@@ -404,7 +411,7 @@ require_file "$project/.holbuild/obj/src/ATheory.dat"
 
 rm -rf "$project/.holbuild/checkpoints"
 write_bad_after_three_source
-if (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$tmpdir/multi-corrupt-seed.log" 2>&1; then
+if (cd "$project" && "$HOLBUILD_BIN" build ATheory) > "$tmpdir/multi-corrupt-seed.log" 2>&1; then
   echo "expected three-context seed failure" >&2
   exit 1
 fi
@@ -415,7 +422,7 @@ printf 'not a valid third checkpoint\n' > "$multi_corrupt_third"
 write_good_three_source
 force_rebuild
 multi_corrupt_log=$tmpdir/multi-corrupt.log
-(cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$multi_corrupt_log" 2>&1
+(cd "$project" && "$HOLBUILD_BIN" build ATheory) > "$multi_corrupt_log" 2>&1
 require_grep "from: theorem-context checkpoint after third" "$multi_corrupt_log"
 require_grep "from: deps-loaded checkpoint" "$multi_corrupt_log"
 if grep -q "from: theorem-context checkpoint after second" "$multi_corrupt_log"; then
@@ -441,7 +448,7 @@ printf 'not a valid PolyML deps checkpoint\n' > "$corrupt_deps"
 write_good_source
 force_rebuild
 corrupt_deps_log=$tmpdir/corrupt-deps.log
-(cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$corrupt_deps_log" 2>&1
+(cd "$project" && "$HOLBUILD_BIN" build ATheory) > "$corrupt_deps_log" 2>&1
 require_grep "from: deps-loaded checkpoint" "$corrupt_deps_log"
 require_grep "discarding invalid checkpoint after HOL state load failure" "$corrupt_deps_log"
 if grep -q "Couldn't load HOL base-state\|Unable to load header" "$corrupt_deps_log"; then
@@ -456,7 +463,7 @@ non_goal_replay_deps=$(first_deps_path)
 write_non_goal_failure_after_first_source
 force_rebuild
 non_goal_replay_log=$tmpdir/non-goal-replay.log
-if (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$non_goal_replay_log" 2>&1; then
+if (cd "$project" && "$HOLBUILD_BIN" build ATheory) > "$non_goal_replay_log" 2>&1; then
   echo "expected non-goal child failure after replay" >&2
   exit 1
 fi
@@ -480,7 +487,7 @@ run_expect_suffix_failure "$tmpdir/prefix-seed.log"
 write_changed_prefix_source
 force_rebuild
 prefix_log=$tmpdir/prefix-change.log
-(cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$prefix_log" 2>&1
+(cd "$project" && "$HOLBUILD_BIN" build ATheory) > "$prefix_log" 2>&1
 if grep -q "from: theorem-context checkpoint after first" "$prefix_log"; then
   echo "prefix-changing edit reused stale theorem checkpoint" >&2
   exit 1
@@ -492,7 +499,7 @@ printf 'stale residue\n' > "$project/.holbuild/checkpoints/checkpointrecovery/sr
 printf 'holbuild-checkpoint-ok-v2\nkind=manual\n' > "$project/.holbuild/checkpoints/checkpointrecovery/src/stale/manual.save.ok"
 residue_before_up_to_date=$(checkpoint_count)
 up_to_date_log=$tmpdir/up-to-date.log
-(cd "$project" && "$HOLBUILD_BIN" --verbose --holdir "$HOLDIR" build ATheory) > "$up_to_date_log" 2>&1
+(cd "$project" && "$HOLBUILD_BIN" --verbose build ATheory) > "$up_to_date_log" 2>&1
 require_grep "ATheory is up to date" "$up_to_date_log"
 residue_after_up_to_date=$(checkpoint_count)
 [[ "$residue_before_up_to_date" == "$residue_after_up_to_date" ]] || {
@@ -503,7 +510,7 @@ residue_after_up_to_date=$(checkpoint_count)
 rm -rf "$project/.holbuild"
 write_non_goal_failure_source
 non_goal_failure_log=$tmpdir/non-goal-failure.log
-if (cd "$project" && "$HOLBUILD_BIN" --holdir "$HOLDIR" build ATheory) > "$non_goal_failure_log" 2>&1; then
+if (cd "$project" && "$HOLBUILD_BIN" build ATheory) > "$non_goal_failure_log" 2>&1; then
   echo "expected non-goal child failure" >&2
   exit 1
 fi

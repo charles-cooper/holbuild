@@ -10,12 +10,19 @@ source "$SCRIPT_DIR/../../lib.sh"
 tmpdir=$(make_temp_dir)
 cleanup() { rm -rf "$tmpdir"; }
 trap cleanup EXIT
-export HOLBUILD_CACHE="$tmpdir/cache"
+use_case_cache "$tmpdir/cache"
 
 project=$tmpdir/project
 mkdir -p "$project/src"
 
 cat > "$project/holproject.toml" <<'TOML'
+[holbuild]
+schema = 2
+
+[dependencies.hol]
+git = "https://github.com/HOL-Theorem-Prover/HOL.git"
+rev = "bf0dec986904cecbd1a1c6bce62ccf1c256eaca1"
+
 [project]
 name = "json-output"
 
@@ -36,7 +43,7 @@ SML
 
 json_stdout=$tmpdir/json.stdout
 json_stderr=$tmpdir/json.stderr
-(cd "$project" && "$HOLBUILD_BIN" --json --holdir "$HOLDIR" build JTheory) > "$json_stdout" 2> "$json_stderr"
+(cd "$project" && "$HOLBUILD_BIN" --json build JTheory) > "$json_stdout" 2> "$json_stderr"
 require_file "$project/.holbuild/obj/src/JTheory.dat"
 if [[ -s "$json_stderr" ]]; then
   echo "json mode wrote to stderr" >&2
@@ -101,7 +108,7 @@ PY
 
 fail_stdout=$tmpdir/fail.stdout
 fail_stderr=$tmpdir/fail.stderr
-if (cd "$bad_project" && "$HOLBUILD_BIN" --json --holdir "$HOLDIR" build BadTheory) > "$fail_stdout" 2> "$fail_stderr"; then
+if (cd "$bad_project" && "$HOLBUILD_BIN" --json build BadTheory) > "$fail_stdout" 2> "$fail_stderr"; then
   echo "expected json failure build to fail" >&2
   exit 1
 fi
@@ -171,7 +178,7 @@ PY
 
 retain_stdout=$tmpdir/retain.stdout
 retain_stderr=$tmpdir/retain.stderr
-if (cd "$bad_project" && "$HOLBUILD_BIN" --json --holdir "$HOLDIR" build --retain-debug-artifacts BadTheory) > "$retain_stdout" 2> "$retain_stderr"; then
+if (cd "$bad_project" && "$HOLBUILD_BIN" --json build --retain-debug-artifacts BadTheory) > "$retain_stdout" 2> "$retain_stderr"; then
   echo "expected retained json failure build to fail" >&2
   exit 1
 fi
@@ -215,7 +222,7 @@ PY
 
 trace_stdout=$tmpdir/trace.stdout
 trace_stderr=$tmpdir/trace.stderr
-if (cd "$project" && "$HOLBUILD_BIN" --json --holdir "$HOLDIR" build --goalfrag-trace JTheory) > "$trace_stdout" 2> "$trace_stderr"; then
+if (cd "$project" && "$HOLBUILD_BIN" --json build --goalfrag-trace JTheory) > "$trace_stdout" 2> "$trace_stderr"; then
   echo "expected json trace stub to reject --goalfrag-trace" >&2
   exit 1
 fi
@@ -237,6 +244,13 @@ PY
 gen_fail_project=$tmpdir/gen-fail-project
 mkdir -p "$gen_fail_project"
 cat > "$gen_fail_project/holproject.toml" <<'TOML'
+[holbuild]
+schema = 2
+
+[dependencies.hol]
+git = "https://github.com/HOL-Theorem-Prover/HOL.git"
+rev = "bf0dec986904cecbd1a1c6bce62ccf1c256eaca1"
+
 [project]
 name = "json-generator-failure"
 
@@ -251,7 +265,7 @@ TOML
 
 gen_fail_stdout=$tmpdir/gen-fail.stdout
 gen_fail_stderr=$tmpdir/gen-fail.stderr
-if (cd "$gen_fail_project" && "$HOLBUILD_BIN" --json --holdir "$HOLDIR" build) > "$gen_fail_stdout" 2> "$gen_fail_stderr"; then
+if (cd "$gen_fail_project" && "$HOLBUILD_BIN" --json build) > "$gen_fail_stdout" 2> "$gen_fail_stderr"; then
   echo "expected json generator failure to fail" >&2
   exit 1
 fi
@@ -290,7 +304,7 @@ PY
 
 gen_retain_stdout=$tmpdir/gen-retain.stdout
 gen_retain_stderr=$tmpdir/gen-retain.stderr
-if (cd "$gen_fail_project" && "$HOLBUILD_BIN" --json --holdir "$HOLDIR" build --retain-debug-artifacts) > "$gen_retain_stdout" 2> "$gen_retain_stderr"; then
+if (cd "$gen_fail_project" && "$HOLBUILD_BIN" --json build --retain-debug-artifacts) > "$gen_retain_stdout" 2> "$gen_retain_stderr"; then
   echo "expected retained json generator failure to fail" >&2
   exit 1
 fi
