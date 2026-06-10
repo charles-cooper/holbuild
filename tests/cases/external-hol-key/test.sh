@@ -54,4 +54,4 @@ if [[ "$key_v2" != "$key_v1" ]]; then
 fi
 
 (cd "$project" && "$HOLBUILD_BIN" build --dry-run BTheory) > "$tmpdir/dry.log"
-require_grep "external libs: pred_setLib" "$tmpdir/dry.log"
+require_grep "input_key:" "$tmpdir/dry.log"

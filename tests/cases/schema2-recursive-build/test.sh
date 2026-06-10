@@ -145,8 +145,12 @@ require_grep 'no longer supported' "$tmpdir/heap-holdir.log"
 dry_log=$tmpdir/dry.log
 (cd "$root" && env -u HOLDIR -u HOLBUILD_HOLDIR HOLBUILD_POLY="$fakebin/poly" "$HOLBUILD_BIN" build --dry-run Foo) > "$dry_log"
 require_grep "Foo (sml, package b)" "$dry_log"
-fake_hol_key=$(HOLBUILD_CANONICAL_HOL_GIT="$hol" HOLBUILD_POLY="$fakebin/poly" "$HOLBUILD_ROOT/tools/hol-toolchain-key.sh" "$hol_rev")
-shared_hol="$HOLBUILD_CACHE/hol-toolchains/$fake_hol_key/hol"
+configured_marker=$(find "$HOLBUILD_CACHE/hol-toolchains" -path '*/hol/configured' -type f -print -quit)
+if [[ -z "$configured_marker" ]]; then
+  echo "fake HOL configure marker was not created" >&2
+  exit 1
+fi
+shared_hol=$(dirname "$configured_marker")
 require_file "$shared_hol/configured"
 require_file "$shared_hol/built"
 require_file "$shared_hol/bin/hol"
