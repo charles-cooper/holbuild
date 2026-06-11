@@ -472,18 +472,24 @@ fun run_hol tc subcommand user_args =
 fun repl_hol tc user_args =
   run_hol_with HolbuildToolchain.run_interactive tc "repl" user_args
 
-fun goalfrag_plan_command args =
-  case args of
-      [selector] => print_goalfrag_plan_selector false (load_project ()) selector
-    | ["--new-ir", selector] =>
-        (warn "goalfrag-plan --new-ir is deprecated; use holbuild execution-plan THEORY:THEOREM";
-         print_goalfrag_plan_selector true (load_project ()) selector)
-    | _ => raise Error "usage: holbuild goalfrag-plan [--new-ir] THEORY:THEOREM"
+fun configure_analyser_for_toolchain ({holdir, ...} : HolbuildToolchain.t) =
+  if holdir = "" then HolbuildDependencies.clear_analyser_path ()
+  else HolbuildDependencies.set_analyser_path (HolbuildHolSharedCache.analyser_path_for_holdir holdir)
 
-fun execution_plan_command args =
-  case args of
-      [selector] => print_goalfrag_plan_selector true (load_project ()) selector
-    | _ => raise Error "usage: holbuild execution-plan THEORY:THEOREM"
+fun goalfrag_plan_command tc args =
+  (configure_analyser_for_toolchain tc;
+   case args of
+       [selector] => print_goalfrag_plan_selector false (load_project ()) selector
+     | ["--new-ir", selector] =>
+         (warn "goalfrag-plan --new-ir is deprecated; use holbuild execution-plan THEORY:THEOREM";
+          print_goalfrag_plan_selector true (load_project ()) selector)
+     | _ => raise Error "usage: holbuild goalfrag-plan [--new-ir] THEORY:THEOREM")
+
+fun execution_plan_command tc args =
+  (configure_analyser_for_toolchain tc;
+   case args of
+       [selector] => print_goalfrag_plan_selector true (load_project ()) selector
+     | _ => raise Error "usage: holbuild execution-plan THEORY:THEOREM")
 
 fun reject_json command =
   if HolbuildStatus.json_mode () then
@@ -494,8 +500,8 @@ fun dispatch tc jobs args =
   case args of
       [] => (reject_json "context"; context ())
     | "context" :: [] => (reject_json "context"; context ())
-    | "execution-plan" :: rest => (reject_json "execution-plan"; execution_plan_command rest)
-    | "goalfrag-plan" :: rest => (reject_json "goalfrag-plan"; goalfrag_plan_command rest)
+    | "execution-plan" :: rest => (reject_json "execution-plan"; execution_plan_command tc rest)
+    | "goalfrag-plan" :: rest => (reject_json "goalfrag-plan"; goalfrag_plan_command tc rest)
     | "build" :: rest => build tc jobs rest
     | "heap" :: [target] => (reject_json "heap"; build_heap tc jobs target)
     | "heap" :: _ => raise Error "usage: holbuild heap NAME"
