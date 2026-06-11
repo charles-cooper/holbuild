@@ -330,6 +330,10 @@ fun context () = HolbuildProject.describe (load_project ())
 
 fun timed_phase name f = HolbuildToolchain.time_phase name f
 
+fun configure_analyser_for_toolchain ({holdir, ...} : HolbuildToolchain.t) =
+  if holdir = "" then HolbuildDependencies.clear_analyser_path ()
+  else HolbuildDependencies.set_analyser_path (HolbuildHolSharedCache.analyser_path_for_holdir holdir)
+
 fun build tc cli_jobs args =
   let
     val project = timed_phase "project.discover" load_project
@@ -409,7 +413,7 @@ fun build tc cli_jobs args =
       end
   in
     case goalfrag_plan of
-        SOME selector => print_goalfrag_plan_selector new_ir project selector
+        SOME selector => (configure_analyser_for_toolchain tc; print_goalfrag_plan_selector new_ir project selector)
       | _ =>
           if dry_run then describe_dry_run ()
           else HolbuildBuildExec.with_project_lock project "build" execute_build
@@ -471,10 +475,6 @@ fun run_hol tc subcommand user_args =
 
 fun repl_hol tc user_args =
   run_hol_with HolbuildToolchain.run_interactive tc "repl" user_args
-
-fun configure_analyser_for_toolchain ({holdir, ...} : HolbuildToolchain.t) =
-  if holdir = "" then HolbuildDependencies.clear_analyser_path ()
-  else HolbuildDependencies.set_analyser_path (HolbuildHolSharedCache.analyser_path_for_holdir holdir)
 
 fun goalfrag_plan_command tc args =
   (configure_analyser_for_toolchain tc;
