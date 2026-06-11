@@ -9,6 +9,13 @@ exception Error of string
 val format_version = "holbuild-hol-toolchain-v1"
 val default_canonical_git = "https://github.com/HOL-Theorem-Prover/HOL.git"
 val build_args = ""
+val analyser_format_version = "holbuild-hol-analyser-v1"
+val analyser_protocol_version = "1"
+val analyser_source_files =
+  ["analysis_protocol.sml",
+   "dependency_extract.sml",
+   "analyser_main.sml",
+   "holbuild-hol-analyser-script.sml"]
 
 fun die msg = raise Error msg
 fun quote s = HolbuildHash.quote s
@@ -89,6 +96,11 @@ fun entry_dir_for_key k = Path.concat(toolchains_dir (), k)
 fun holdir_for_key k = Path.concat(entry_dir_for_key k, "hol")
 fun manifest_for_key k = Path.concat(entry_dir_for_key k, "manifest")
 fun ok_for_key k = Path.concat(entry_dir_for_key k, "build.ok")
+fun analysers_dir_for_key k = Path.concat(entry_dir_for_key k, "analysers")
+fun analyser_dir_for_key k ak = Path.concat(analysers_dir_for_key k, ak)
+fun analyser_bin_for_key k ak = Path.concat(Path.concat(analyser_dir_for_key k ak, "bin"), "holbuild-hol-analyser")
+fun analyser_ok_for_key k ak = Path.concat(analyser_dir_for_key k ak, "build.ok")
+fun analyser_manifest_for_key k ak = Path.concat(analyser_dir_for_key k ak, "manifest")
 fun locks_dir () = Path.concat(cache_root (), "locks")
 fun lock_dir k = Path.concat(locks_dir (), "hol-toolchain-" ^ k ^ ".lock")
 
@@ -132,6 +144,57 @@ fun write_file path text =
   let val out = TextIO.openOut path
   in TextIO.output(out, text); TextIO.closeOut out end
 
+fun analyser_source_dir () =
+  case OS.Process.getEnv "HOLBUILD_ANALYSER_SRC" of
+      SOME path => path
+    | NONE => Path.concat(HolbuildRuntimePaths.source_root, "sml/analyser")
+
+fun analyser_source_path rel = Path.concat(analyser_source_dir (), rel)
+
+fun analyser_source_hash () =
+  HolbuildHash.string_sha1
+    (String.concatWith "\n"
+       (map (fn rel => rel ^ "=" ^ HolbuildHash.file_sha1 (analyser_source_path rel)) analyser_source_files))
+
+fun analyser_key_material () =
+  String.concatWith "\n"
+    [analyser_format_version,
+     "protocol=" ^ analyser_protocol_version,
+     "source_hash=" ^ analyser_source_hash ()]
+
+fun analyser_key () = HolbuildHash.string_sha1 (analyser_key_material ())
+fun analyser_path_for_toolchain_key k = analyser_bin_for_key k (analyser_key ())
+fun analyser_path_for_holdir holdir = analyser_path_for_toolchain_key (Path.file (Path.dir holdir))
+
+fun analyser_built k ak =
+  executable (analyser_bin_for_key k ak) andalso path_exists (analyser_ok_for_key k ak)
+
+fun polyc_command () = Option.getOpt(OS.Process.getEnv "HOLBUILD_POLYC", "polyc")
+
+fun build_analyser k =
+  let
+    val ak = analyser_key ()
+    val dir = analyser_dir_for_key k ak
+    val bindir = Path.concat(dir, "bin")
+    val out = analyser_bin_for_key k ak
+    val hol = holdir_for_key k
+    val src = analyser_source_dir ()
+    val material = analyser_key_material ()
+  in
+    if analyser_built k ak then out
+    else
+      (ensure_dir bindir;
+       run_in_dir hol
+         ("HOLBUILD_HOLDIR=" ^ quote hol ^ " " ^
+          "HOLBUILD_ANALYSER_SRC=" ^ quote src ^ " " ^
+          quote (polyc_command ()) ^ " -o " ^ quote out ^ " " ^
+          quote (Path.concat(src, "holbuild-hol-analyser-script.sml")));
+       if executable out then () else die ("analyser build did not produce executable: " ^ out);
+       write_file (analyser_manifest_for_key k ak) (material ^ "\nkey=" ^ ak ^ "\n");
+       write_file (analyser_ok_for_key k ak) "ok\n";
+       out)
+  end
+
 fun build_entry req k =
   let
     val final = entry_dir_for_key k
@@ -160,12 +223,15 @@ fun ensure_built req =
   let
     val material = key_material req
     val k = HolbuildHash.string_sha1 material
+    val ak = analyser_key ()
   in
-    if validate_entry req k then holdir_for_key k
+    if validate_entry req k andalso analyser_built k ak then holdir_for_key k
     else
       let val l = acquire_lock k
       in
-        ((if validate_entry req k then holdir_for_key k else build_entry req k)
+        ((if validate_entry req k then holdir_for_key k else build_entry req k;
+          ignore (build_analyser k);
+          holdir_for_key k)
          before release_lock l)
         handle e => (release_lock l; raise e)
       end

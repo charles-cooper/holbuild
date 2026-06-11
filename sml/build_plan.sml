@@ -405,6 +405,8 @@ fun make_node external_dirs source =
 
 fun plan holdir sources targets =
   let
+    val _ = if holdir = "" then HolbuildDependencies.clear_analyser_path ()
+            else HolbuildDependencies.set_analyser_path (HolbuildHolSharedCache.analyser_path_for_holdir holdir)
     val external_dirs = [normalize_path (Path.concat(holdir, "sigobj"))]
     val nodes = map (make_node external_dirs) sources
     val index = build_name_index nodes

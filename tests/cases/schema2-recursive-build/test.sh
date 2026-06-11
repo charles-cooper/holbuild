@@ -56,6 +56,42 @@ fi
 touch configured
 SH
 chmod +x "$fakebin/poly"
+cat > "$fakebin/polyc" <<'SH'
+#!/usr/bin/env sh
+set -eu
+out=
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -o) out=$2; shift 2 ;;
+    *) shift ;;
+  esac
+done
+if [ -z "$out" ]; then
+  echo "fake polyc missing -o" >&2
+  exit 1
+fi
+cat > "$out" <<'ANALYSER'
+#!/usr/bin/env sh
+set -eu
+resp=
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --response) resp=$2; shift 2 ;;
+    *) shift ;;
+  esac
+done
+cat > "$resp" <<'RESP'
+version 1
+ok
+begin-file 1
+end-file 1
+end
+RESP
+ANALYSER
+chmod +x "$out"
+SH
+chmod +x "$fakebin/polyc"
+export HOLBUILD_POLYC="$fakebin/polyc"
 
 b=$tmpdir/b
 mkdir -p "$b/src"

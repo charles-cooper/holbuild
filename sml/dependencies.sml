@@ -14,7 +14,11 @@ type t =
     holdep_mentions : string list }
 
 val cache_version = "holbuild-dependencies-cache-v2"
-val extractor_version = "holsource-fileToReader+holdep-tokens+extra-deps-v1"
+val extractor_version = "holbuild-hol-analyser-deps-v1"
+val analyser_path : string option ref = ref NONE
+
+fun set_analyser_path path = analyser_path := SOME path
+fun clear_analyser_path () = analyser_path := NONE
 
 fun has_suffix suffix s =
   let
@@ -184,7 +188,7 @@ fun extract_string_list_args keyword tokens =
     loop tokens []
   end
 
-fun extract_uncached path =
+fun extract_textual path =
   let
     val tokens = tokenize (read_all path)
     val loads = extract_string_args "load" tokens
@@ -195,6 +199,69 @@ fun extract_uncached path =
      extra_deps = sort_unique extra_deps,
      holdep_mentions = holdep_mentions path}
   end
+
+fun parse_analyser_response response_path source_path =
+  let
+    val lines = String.tokens (fn c => c = #"\n") (read_all response_path)
+    fun add field value ({loads, uses, extra_deps, holdep_mentions} : t) =
+      case field of
+          "load" => {loads = value :: loads, uses = uses, extra_deps = extra_deps, holdep_mentions = holdep_mentions}
+        | "use" => {loads = loads, uses = value :: uses, extra_deps = extra_deps, holdep_mentions = holdep_mentions}
+        | "extra-dep" => {loads = loads, uses = uses, extra_deps = value :: extra_deps, holdep_mentions = holdep_mentions}
+        | "mention" => {loads = loads, uses = uses, extra_deps = extra_deps, holdep_mentions = value :: holdep_mentions}
+        | _ => raise Error ("bad analyser response field for " ^ source_path ^ ": " ^ field)
+    fun loop rest in_file acc =
+      case rest of
+          [] => raise Error ("analyser response missing end for " ^ source_path)
+        | line :: more =>
+            (case HolbuildAnalysisProtocol.split line of
+                 ["version", v] =>
+                   if v = HolbuildAnalysisProtocol.protocol_version then loop more in_file acc
+                   else raise Error ("unsupported analyser protocol version: " ^ v)
+               | ["ok"] => loop more in_file acc
+               | ["begin-file", "1"] => loop more true acc
+               | ["end-file", "1"] => loop more false acc
+               | ["end"] => acc
+               | [field, value] => if in_file then loop more true (add field value acc) else loop more false acc
+               | _ => raise Error ("bad analyser response line for " ^ source_path ^ ": " ^ line))
+    val result = loop lines false {loads = [], uses = [], extra_deps = [], holdep_mentions = []}
+  in
+    {loads = sort_unique (#loads result), uses = sort_unique (#uses result),
+     extra_deps = sort_unique (#extra_deps result),
+     holdep_mentions = sort_unique (#holdep_mentions result)}
+  end
+
+fun extract_with_analyser analyser source_path =
+  let
+    val req = OS.FileSys.tmpName ()
+    val resp = OS.FileSys.tmpName ()
+    val request = String.concatWith "\n"
+      [HolbuildAnalysisProtocol.join ["version", HolbuildAnalysisProtocol.protocol_version],
+       HolbuildAnalysisProtocol.join ["command", "analyse"],
+       HolbuildAnalysisProtocol.join ["file", "1", source_path, "deps"],
+       HolbuildAnalysisProtocol.join ["end"]] ^ "\n"
+    val _ = write_file req request
+    val status = OS.Process.system (HolbuildHash.quote analyser ^ " --request " ^ HolbuildHash.quote req ^
+                                    " --response " ^ HolbuildHash.quote resp)
+    val _ = OS.FileSys.remove req handle OS.SysErr _ => ()
+  in
+    if OS.Process.isSuccess status then
+      let val deps = parse_analyser_response resp source_path
+          val _ = OS.FileSys.remove resp handle OS.SysErr _ => ()
+      in deps end
+    else
+      let val _ = OS.FileSys.remove resp handle OS.SysErr _ => ()
+      in raise Error ("holbuild-hol-analyser failed for " ^ source_path) end
+  end
+
+and write_file path text =
+  let val out = TextIO.openOut path
+  in TextIO.output(out, text); TextIO.closeOut out end
+
+fun extract_uncached path =
+  case !analyser_path of
+      SOME analyser => extract_with_analyser analyser path
+    | NONE => extract_textual path
 
 fun line_value prefix line =
   if String.isPrefix prefix line then SOME (String.extract(line, size prefix, NONE))
