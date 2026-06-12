@@ -216,13 +216,7 @@ fun write_text_file path text =
   let val out = TextIO.openOut path
   in TextIO.output(out, text); TextIO.closeOut out end
 
-val proof_ir_plan_cache_version = "holbuild-proof-ir-plan-cache-v1"
-
-fun proof_ir_cache_path project source =
-  OS.Path.concat(#artifact_root project,
-    OS.Path.concat("dep", OS.Path.concat("proof-ir", HolbuildHash.string_sha1 (#package source ^ ":" ^ #relative_path source) ^ ".resp")))
-
-fun run_analyser_for_proof_ir source_path =
+fun run_analyser_for_proof_ir_text {name, tactic_start, tactic_end, tactic_text} =
   case HolbuildDependencies.current_analyser_path () of
       NONE => raise Error "internal error: HOL analyser is not configured"
     | SOME analyser =>
@@ -231,8 +225,8 @@ fun run_analyser_for_proof_ir source_path =
           val resp = OS.FileSys.tmpName ()
           val request = String.concatWith "\n"
             [HolbuildAnalysisProtocol.join ["version", HolbuildAnalysisProtocol.protocol_version],
-             HolbuildAnalysisProtocol.join ["command", "analyse"],
-             HolbuildAnalysisProtocol.join ["file", "1", source_path, "proof-ir"],
+             HolbuildAnalysisProtocol.join ["command", "proof-ir-plan"],
+             HolbuildAnalysisProtocol.join ["theorem", "0", name, Int.toString tactic_start, Int.toString tactic_end, tactic_text],
              HolbuildAnalysisProtocol.join ["end"]] ^ "\n"
           val _ = write_text_file req request
           val status = OS.Process.system (HolbuildHash.quote analyser ^ " --request " ^ HolbuildHash.quote req ^
@@ -283,54 +277,32 @@ fun parse_proof_step fields =
         HolbuildProofIr.StepPlain {start_pos = int_field a, end_pos = int_field b, label = label, program = program}
     | _ => raise Error ("bad proof-ir step response")
 
-fun cached_proof_ir_response project source =
+fun analyser_proof_ir_plan_for_boundary (boundary : HolbuildTheoryCheckpoints.boundary) =
   let
-    val cache_path = proof_ir_cache_path project source
-    val source_hash = HolbuildHash.file_sha1 (#source_path source)
-    fun valid text =
-      case String.tokens (fn c => c = #"\n") text of
-          version :: hash_line :: rest =>
-            if version = proof_ir_plan_cache_version andalso hash_line = "source_sha1=" ^ source_hash then
-              SOME (String.concatWith "\n" rest ^ "\n")
-            else NONE
-        | _ => NONE
-  in
-    case valid (read_text cache_path) handle _ => NONE of
-        SOME text => text
-      | NONE =>
-          let
-            val text = run_analyser_for_proof_ir (#source_path source)
-            val cache_text = proof_ir_plan_cache_version ^ "\nsource_sha1=" ^ source_hash ^ "\n" ^ text
-            val _ = (HolbuildDependencies.ensure_parent cache_path; write_text_file cache_path cache_text) handle _ => ()
-          in text end
-  end
-
-fun analyser_proof_ir_plan project source theorem =
-  let
-    val lines = String.tokens (fn c => c = #"\n") (cached_proof_ir_response project source)
+    val {name, tactic_start, tactic_end, tactic_text, ...} = boundary
+    val lines = String.tokens (fn c => c = #"\n")
+      (run_analyser_for_proof_ir_text {name = name, tactic_start = tactic_start,
+                                       tactic_end = tactic_end, tactic_text = tactic_text})
     fun loop rest active acc found =
       case rest of
           [] => found
         | line :: more =>
             (case HolbuildAnalysisProtocol.split line of
-                 "begin-proof-ir" :: name :: _ => loop more (SOME name) [] found
-               | ["end-proof-ir", name] =>
-                   let val found' = if name = theorem then SOME (rev acc) else found
-                   in loop more NONE [] found' end
+                 ["begin-proof-ir", "0", _, _, _, _] => loop more true [] found
+               | ["end-proof-ir", "0"] => loop more false [] (SOME (rev acc))
                | fields as "proof-step" :: _ =>
-                   (case active of
-                        SOME _ => loop more active (parse_proof_step fields :: acc) found
-                      | NONE => loop more active acc found)
+                   if active then loop more active (parse_proof_step fields :: acc) found
+                   else loop more active acc found
                | _ => loop more active acc found)
   in
-    case loop lines NONE [] NONE of
+    case loop lines false [] NONE of
         SOME steps => steps
-      | NONE => raise Error ("theorem not found for execution-plan: " ^ #logical_name source ^ ":" ^ theorem)
+      | NONE => raise Error ("proof-IR plan missing for execution-plan theorem: " ^ name)
   end
 
 fun print_static_goalfrag_plan project new_ir source theorem boundary_opt =
   (print (if new_ir then
-            let val plan = analyser_proof_ir_plan project source theorem
+            let val plan = analyser_proof_ir_plan_for_boundary (case boundary_opt of SOME b => b | NONE => raise Error "internal error: missing proof-IR boundary")
             in
               "holbuild proof-ir plan " ^ #logical_name source ^ ":" ^ theorem ^ " source=" ^ #relative_path source ^
               " (" ^ Int.toString (HolbuildProofIr.display_step_count plan) ^ " steps)\n" ^
@@ -361,8 +333,7 @@ fun print_goalfrag_plan_selector new_ir project selector =
     val index = HolbuildSourceIndex.discover project
     val source = find_theory_source index theory
   in
-    if new_ir then print_static_goalfrag_plan project true source theorem NONE
-    else print_static_goalfrag_plan project false source theorem (SOME (find_theorem_in_source theorem source))
+    print_static_goalfrag_plan project new_ir source theorem (SOME (find_theorem_in_source theorem source))
   end
 
 fun positive_int label text =

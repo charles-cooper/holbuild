@@ -9,6 +9,8 @@ structure PI = HolbuildAnalyserProofIrExtract
 exception Error of string
 
 type file_req = {id : string, path : string, wants : string list}
+type proof_req = {id : string, name : string, tactic_start : int, tactic_end : int, tactic_text : string}
+datatype request = Analyse of file_req list | ProofIrPlan of proof_req list
 
 fun die msg = raise Error msg
 
@@ -22,22 +24,35 @@ fun write_file path text =
 
 fun member x xs = List.exists (fn y => x = y) xs
 
+fun parse_int field text =
+  case Int.fromString text of SOME n => n | NONE => die ("bad " ^ field ^ ": " ^ text)
+
 fun parse_request path =
   let
     val lines = String.tokens (fn c => c = #"\n") (read_all path)
-    fun loop lines files =
+    fun loop lines command files proofs =
       case lines of
           [] => die "request missing end"
         | line :: rest =>
             (case P.split line of
-                 ["version", v] => if v = P.protocol_version then loop rest files else die ("unsupported protocol version: " ^ v)
-               | ["command", "analyse"] => loop rest files
-               | "file" :: id :: file :: wants => loop rest ({id = id, path = file, wants = wants} :: files)
-               | ["end"] => rev files
-               | [] => loop rest files
+                 ["version", v] => if v = P.protocol_version then loop rest command files proofs else die ("unsupported protocol version: " ^ v)
+               | ["command", "analyse"] => loop rest (SOME "analyse") files proofs
+               | ["command", "proof-ir-plan"] => loop rest (SOME "proof-ir-plan") files proofs
+               | "file" :: id :: file :: wants => loop rest command ({id = id, path = file, wants = wants} :: files) proofs
+               | ["theorem", id, name, tactic_start, tactic_end, tactic_text] =>
+                   loop rest command files ({id = id, name = name,
+                                             tactic_start = parse_int "tactic_start" tactic_start,
+                                             tactic_end = parse_int "tactic_end" tactic_end,
+                                             tactic_text = tactic_text} :: proofs)
+               | ["end"] =>
+                   (case command of
+                        SOME "analyse" => Analyse (rev files)
+                      | SOME "proof-ir-plan" => ProofIrPlan (rev proofs)
+                      | _ => die "request missing command")
+               | [] => loop rest command files proofs
                | fields => die ("bad request line: " ^ line))
   in
-    loop lines []
+    loop lines NONE [] []
   end
 
 fun emit_deps ({loads, uses, extra_deps, holdep_mentions} : D.t) =
@@ -136,8 +151,10 @@ fun emit_proof_plan ({name, tactic_start, tactic_end, steps} : PI.theorem_plan) 
   map emit_step steps @
   [P.join ["end-proof-ir", name]]
 
-fun proof_ir_lines path wants =
-  if member "proof-ir" wants then List.concat (map emit_proof_plan (PI.plans path)) else []
+fun emit_proof_plan_with_id id ({name, tactic_start, tactic_end, steps} : PI.theorem_plan) =
+  P.join ["begin-proof-ir", id, name, Int.toString tactic_start, Int.toString tactic_end, plan_sml steps] ::
+  map emit_step steps @
+  [P.join ["end-proof-ir", id]]
 
 fun span_lines path wants =
   let val text = read_all_file path
@@ -155,14 +172,21 @@ fun analyse_file ({id, path, wants} : file_req) =
   let
     val deps_lines = if null wants orelse member "deps" wants then emit_deps (D.extract path) else []
     val span_lines = span_lines path wants
-    val proof_ir_lines = proof_ir_lines path wants
   in
-    P.join ["begin-file", id] :: deps_lines @ span_lines @ proof_ir_lines @ [P.join ["end-file", id]]
+    P.join ["begin-file", id] :: deps_lines @ span_lines @ [P.join ["end-file", id]]
   end
 
-fun response files =
+fun proof_ir_plan_response items =
+  let
+    fun one ({id, name, tactic_start, tactic_end, tactic_text} : proof_req) =
+      emit_proof_plan_with_id id (PI.plan_text {name = name, tactic_start = tactic_start,
+                                                tactic_end = tactic_end, tactic_text = tactic_text})
+  in List.concat (map one items) end
+
+fun response req =
   String.concatWith "\n" ([P.join ["version", P.protocol_version], P.join ["ok"]] @
-                          List.concat (map analyse_file files) @
+                          (case req of Analyse files => List.concat (map analyse_file files)
+                                     | ProofIrPlan items => proof_ir_plan_response items) @
                           [P.join ["end"]]) ^ "\n"
 
 fun arg_value flag args =

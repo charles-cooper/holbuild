@@ -1675,37 +1675,37 @@ fun failed_prefix_ok proof_engine proof_timeout deps_key safe_name pre_hash head
      ("header_key", header_hash),
      ("failure_diagnostic_key", failed_prefix_diagnostic_key proof_engine)]
 
-fun theorem_checkpoint_specs proof_engine proof_timeout project node deps_key source proof_ir_plans boundaries =
+fun theorem_checkpoint_specs proof_engine proof_timeout project node deps_key source proof_ir_plans (boundaries : HolbuildTheoryCheckpoints.boundary list) =
   let
-    fun proof_ir_plan_for name =
-      case List.find (fn (n, _) => n = name) proof_ir_plans of SOME (_, expr) => SOME expr | NONE => NONE
+    fun pair (boundary, proof_ir_plan) =
+      let
+        val {kind, name, safe_name, theorem_start, theorem_stop, boundary = boundary_pos, tactic_start,
+             tactic_end, tactic_text, has_proof_attrs, prefix_hash} = boundary
+        val checkpoint_key = theorem_checkpoint_key {kind = kind, name = name, safe_name = safe_name,
+                                                     boundary = boundary_pos, deps_key = deps_key,
+                                                     proof_engine = proof_engine,
+                                                     prefix_hash = prefix_hash}
+        val header_hash = theorem_header_hash source theorem_start tactic_start
+        val pre_hash = pre_theorem_hash source theorem_start
+      in
+        {kind = kind, name = name, safe_name = safe_name, theorem_start = theorem_start,
+         theorem_stop = theorem_stop, boundary = boundary_pos,
+         tactic_start = tactic_start, tactic_end = tactic_end,
+         tactic_text = tactic_text, has_proof_attrs = has_proof_attrs,
+         prefix_hash = prefix_hash,
+         context_path = theorem_context_path project node deps_key proof_engine prefix_hash safe_name,
+         context_ok = theorem_checkpoint_ok "theorem_context" deps_key proof_engine proof_timeout prefix_hash checkpoint_key,
+         end_of_proof_path = theorem_end_of_proof_path project node deps_key proof_engine prefix_hash safe_name,
+         end_of_proof_ok = theorem_checkpoint_ok "end_of_proof" deps_key proof_engine proof_timeout prefix_hash checkpoint_key,
+         failed_prefix_path = theorem_failed_prefix_path project node deps_key proof_engine safe_name,
+         failed_prefix_ok = failed_prefix_ok proof_engine proof_timeout deps_key safe_name pre_hash header_hash,
+         deps_key = deps_key,
+         checkpoint_key = checkpoint_key,
+         proof_ir_plan = proof_ir_plan}
+      end
   in
-  map (fn {kind, name, safe_name, theorem_start, theorem_stop, boundary, tactic_start,
-           tactic_end, tactic_text, has_proof_attrs, prefix_hash} =>
-          let
-            val checkpoint_key = theorem_checkpoint_key {kind = kind, name = name, safe_name = safe_name,
-                                                         boundary = boundary, deps_key = deps_key,
-                                                         proof_engine = proof_engine,
-                                                         prefix_hash = prefix_hash}
-            val header_hash = theorem_header_hash source theorem_start tactic_start
-            val pre_hash = pre_theorem_hash source theorem_start
-          in
-            {kind = kind, name = name, safe_name = safe_name, theorem_start = theorem_start,
-             theorem_stop = theorem_stop, boundary = boundary,
-             tactic_start = tactic_start, tactic_end = tactic_end,
-             tactic_text = tactic_text, has_proof_attrs = has_proof_attrs,
-             prefix_hash = prefix_hash,
-             context_path = theorem_context_path project node deps_key proof_engine prefix_hash safe_name,
-             context_ok = theorem_checkpoint_ok "theorem_context" deps_key proof_engine proof_timeout prefix_hash checkpoint_key,
-             end_of_proof_path = theorem_end_of_proof_path project node deps_key proof_engine prefix_hash safe_name,
-             end_of_proof_ok = theorem_checkpoint_ok "end_of_proof" deps_key proof_engine proof_timeout prefix_hash checkpoint_key,
-             failed_prefix_path = theorem_failed_prefix_path project node deps_key proof_engine safe_name,
-             failed_prefix_ok = failed_prefix_ok proof_engine proof_timeout deps_key safe_name pre_hash header_hash,
-             deps_key = deps_key,
-             checkpoint_key = checkpoint_key,
-             proof_ir_plan = proof_ir_plan_for name}
-          end)
-      boundaries
+    if length proof_ir_plans = length boundaries then ListPair.map pair (boundaries, proof_ir_plans)
+    else raise Error "internal error: proof-IR plan count does not match theorem boundary count"
   end
 
 fun declaration_checkpoint_specs proof_engine proof_timeout project node deps_key source terminations =
@@ -2050,7 +2050,7 @@ fun failed_prefix_resume_source policy timeout_marker plan_only_marker source ch
     val plan_line =
       case #proof_ir_plan checkpoint of
           SOME expr => "val _ = HolbuildProofRuntime.set_theorem_plan (SOME (" ^ expr ^ "));\n"
-        | NONE => ""
+        | NONE => "val _ = HolbuildProofRuntime.set_theorem_plan NONE;\n"
     val replay_block =
       plan_line ^ (if #kind checkpoint = "resume" then resume_replay_block else theorem_save_line)
     val suffix =
@@ -2644,18 +2644,21 @@ fun write_temp_text path text =
   let val out = TextIO.openOut path
   in TextIO.output(out, text); TextIO.closeOut out end
 
-fun analyser_proof_ir_plan_sml_for_source source_path =
+fun analyser_proof_ir_plan_sml_for_boundaries (boundaries : HolbuildTheoryCheckpoints.boundary list) =
   case HolbuildDependencies.current_analyser_path () of
-      NONE => []
+      NONE => raise Error "internal error: HOL analyser is not configured"
     | SOME analyser =>
         let
+          fun theorem_line (i, {name, tactic_start, tactic_end, tactic_text, ...}) =
+            HolbuildAnalysisProtocol.join ["theorem", Int.toString i, name,
+                                           Int.toString tactic_start, Int.toString tactic_end, tactic_text]
           val req = OS.FileSys.tmpName ()
           val resp = OS.FileSys.tmpName ()
           val request = String.concatWith "\n"
-            [HolbuildAnalysisProtocol.join ["version", HolbuildAnalysisProtocol.protocol_version],
-             HolbuildAnalysisProtocol.join ["command", "analyse"],
-             HolbuildAnalysisProtocol.join ["file", "1", source_path, "proof-ir"],
-             HolbuildAnalysisProtocol.join ["end"]] ^ "\n"
+            ([HolbuildAnalysisProtocol.join ["version", HolbuildAnalysisProtocol.protocol_version],
+              HolbuildAnalysisProtocol.join ["command", "proof-ir-plan"]] @
+             map theorem_line (ListPair.zip (List.tabulate(length boundaries, fn i => i), boundaries)) @
+             [HolbuildAnalysisProtocol.join ["end"]]) ^ "\n"
           val _ = write_temp_text req request
           val status = OS.Process.system (HolbuildHash.quote analyser ^ " --request " ^ HolbuildHash.quote req ^
                                           " --response " ^ HolbuildHash.quote resp)
@@ -2664,15 +2667,26 @@ fun analyser_proof_ir_plan_sml_for_source source_path =
                      else (OS.FileSys.remove resp handle OS.SysErr _ => ();
                            raise Error "holbuild-hol-analyser failed")
           val _ = OS.FileSys.remove resp handle OS.SysErr _ => ()
-          val lines = String.tokens (fn c => c = #"\n") text
-          fun loop rest acc =
+          val expected = length boundaries
+          val result = Array.array(expected, NONE : string option)
+          fun store id expr =
+            case Int.fromString id of
+                SOME i => if i >= 0 andalso i < expected then Array.update(result, i, SOME expr)
+                          else raise Error ("bad proof-IR response id: " ^ id)
+              | NONE => raise Error ("bad proof-IR response id: " ^ id)
+          fun loop rest =
             case rest of
-                [] => rev acc
+                [] => ()
               | line :: more =>
                   (case HolbuildAnalysisProtocol.split line of
-                       "begin-proof-ir" :: name :: _ :: _ :: expr :: _ => loop more ((name, expr) :: acc)
-                     | _ => loop more acc)
-        in loop lines [] end
+                       "begin-proof-ir" :: id :: _ :: _ :: _ :: expr :: _ => (store id expr; loop more)
+                     | _ => loop more)
+          val _ = loop (String.tokens (fn c => c = #"\n") text)
+          fun require i =
+            case Array.sub(result, i) of
+                SOME expr => SOME expr
+              | NONE => raise Error ("missing proof-IR plan for theorem boundary " ^ Int.toString i)
+        in List.tabulate(expected, require) end
 
 fun source_boundaries_for_node node source_text =
   SOME (discover_theorem_boundaries_recovering (source_file node) source_text)
@@ -2686,7 +2700,7 @@ fun theory_checkpoints_for_node policy project plan keys toolchain_key node sour
   else
     let
       val deps_key = dependency_context_key toolchain_key plan keys node
-      val proof_ir_plans = if proof_ir_enabled policy then analyser_proof_ir_plan_sml_for_source (source_file node) else []
+      val proof_ir_plans = if proof_ir_enabled policy then analyser_proof_ir_plan_sml_for_boundaries boundaries else map (fn _ => NONE) boundaries
       val _ =
         case errors of
             [] => ()
@@ -2697,9 +2711,11 @@ fun theory_checkpoints_for_node policy project plan keys toolchain_key node sour
       theorem_checkpoint_specs (proof_engine policy) (tactic_timeout policy) project node deps_key source_text proof_ir_plans boundaries
     end
     handle Error msg =>
-      (warn ("could not safely instrument theorem boundaries for " ^ logical_name node ^
-             "; building without goalfrag/checkpoints for this theory\n" ^ msg);
-       [])
+      if proof_ir_enabled policy then raise Error msg
+      else
+        (warn ("could not safely instrument theorem boundaries for " ^ logical_name node ^
+               "; building without goalfrag/checkpoints for this theory\n" ^ msg);
+         [])
 
 fun termination_diagnostics_for_node policy node source_text =
   if not (goalfrag_enabled policy) then []

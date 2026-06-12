@@ -120,7 +120,7 @@ fun begin_theorem_line ({kind, name, tactic_text, context_path, context_ok,
   String.concat
     [(case proof_ir_plan of
           SOME expr => "val _ = HolbuildProofRuntime.set_theorem_plan (SOME (" ^ expr ^ "));\n"
-        | NONE => ""),
+        | NONE => "val _ = HolbuildProofRuntime.set_theorem_plan NONE;\n"),
      "val _ = holbuild_begin_theorem(",
      HolbuildToolchain.sml_string kind, ", ",
      HolbuildToolchain.sml_string name, ", ",
