@@ -2370,7 +2370,7 @@ fun build_theory cache_allowed policy tc project base_context plan keys toolchai
         else
           (case goalfrag_trace_output project node input_key stage of
                NONE => ()
-             | SOME output => HolbuildStatus.message_stdout ("goalfrag trace log: " ^ captured_output_path output ^ "\n"))
+             | SOME output => HolbuildStatus.message_stdout ("debug steps log: " ^ captured_output_path output ^ "\n"))
       else ()
     val _ = copy_binary staged_dat data_path
     val _ = copy_binary staged_dat (hfs_remapped_path data_path)

@@ -48,9 +48,8 @@ holbuild build                           # build all, or roots if configured
 holbuild build --dry-run FooTheory       # show plan
 holbuild context                         # show manifest info/cache paths
 holbuild buildhol                        # prebuild/reuse dependencies.hol
-holbuild execution-plan FooTheory:thm    # static proof-IR plan
-holbuild goalfrag-plan FooTheory:thm     # static legacy GoalFrag plan
-holbuild build --force --goalfrag-trace FooTheory
+holbuild execution-plan FooTheory:thm    # static proof-step plan
+holbuild build --force --debug-steps FooTheory
 holbuild --json build FooTheory          # bounded JSON events/errors for build output
 holbuild --json build --retain-debug-artifacts FooTheory  # also retain/report failure logs
 ```
@@ -72,13 +71,13 @@ holbuild --json build --retain-debug-artifacts FooTheory  # also retain/report f
 - `--force=full` / `--force-full` / `--force` — rebuild the whole requested plan from source; forced nodes still publish cache unless `--no-cache`
 - `--no-cache` — skip global cache restore/publish; local `.holbuild/` up-to-date checks still work
 - `--skip-checkpoints` — no `.save`/`.ok` checkpoint files; theorem instrumentation still runs
-- `--skip-goalfrag` — no theorem instrumentation/proof IR, hence no tactic timeout/plan/trace support
-- `--goalfrag` — use the legacy HOL GoalFrag runtime instead of default proof IR
+- `--skip-proof-steps` — no proof-step execution, hence no tactic timeout/debug-step/repl-on-failure support
+- `--debug-steps` — record detailed proof-step execution logs; use with `--force` to inspect up-to-date targets
 - `--tactic-timeout SECONDS` — per-step timeout for root package (default 2.5s, `0` disables)
 - `--repl-on-failure` — serial build; on theory failure, start `hol repl` from failed-prefix or replay/deps checkpoint (requires checkpoints; no JSON)
 - `--retain-debug-artifacts` — with `--json build`, retain durable failure logs and report `debug_artifacts.log`; logs may contain full goals/output, stage dirs are still cleaned
 
-**Incompatible**: `--skip-goalfrag` + `--tactic-timeout`/`--goalfrag-plan`/`--goalfrag-trace`; `--json` + dry-run/plan/repl-on-failure.
+**Incompatible**: `--skip-proof-steps` + `--tactic-timeout`/`--debug-steps`/`--repl-on-failure`; `--json` + dry-run/debug-steps/repl-on-failure.
 
 Parser recovery policy: HOL source parse errors are build failures. holbuild may still use HOLSourceParser recovery internally to record warnings, recover theorem/resume boundaries where possible, and produce best-effort instrumentation diagnostics before HOL reports the failing script-play status.
 

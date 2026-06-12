@@ -1,15 +1,15 @@
-# Checkpoints, proof IR, and GoalFrag
+# Checkpoints and proof steps
 
-## Default theorem instrumentation
+## Default proof-step execution
 
-When theorem instrumentation is enabled (default), holbuild instruments modern theorem declarations at the AST level:
+When proof steps are enabled (default), holbuild instruments modern theorem declarations at the AST level:
 
 1. Parses source with `HOLSourceParser`
 2. Identifies recovered `Theorem ... Proof ... QED` / `Resume ... QED` declarations and tactic/source spans
 3. Rewrites source to insert theorem-boundary markers and load a runtime helper
 4. Runs theorem proofs through the selected runtime with per-step timeout, failure diagnostics, and optional checkpoint saves
 
-The default runtime is **proof IR**. It lowers `HOLSourceAST.exp` directly and executes exact HOL tactic/list-tactic boundaries for recognized constructs. If the proof-IR planner cannot parse/decompose a recovered tactic expression, it falls back to a whole-tactic `StepPlain` so the proof still runs under the installed runtime. Use `--goalfrag` only to select the legacy HOL GoalFrag/proof-manager runtime for comparison/debugging. The old `--new-ir` flag is a deprecated no-op because proof IR is default.
+The runtime is **proof IR**. It lowers `HOLSourceAST.exp` directly and executes exact HOL tactic/list-tactic boundaries for recognized constructs. If the proof-IR planner cannot parse/decompose a recovered tactic expression, it falls back to a whole-tactic `StepPlain` so the proof still runs under the installed runtime. `--goalfrag` and `goalfrag-plan` have been removed. The old `--new-ir` flag is a deprecated no-op because proof IR is default.
 
 This enables:
 - Per-step tactic timeouts (`--tactic-timeout`)
@@ -45,20 +45,20 @@ Successful source builds retain reusable deps/theorem-context checkpoints for fu
 `.ok` metadata contains schema/versioned fields such as:
 - Checkpoint kind (`deps_loaded`, `theorem_context`, `end_of_proof`, `failed_prefix`, `final_context`)
 - Dependency context key (`deps_key`)
-- Proof engine (`proof_ir_*` or legacy GoalFrag engine key)
+- Proof engine (`proof_ir_*`)
 - Source prefix/header/checkpoint keys
 
 Replay eligibility requires exact metadata match. Invalid selected checkpoints are discarded and retried from an earlier valid context instead of surfacing as proof failures. Parent/child checkpoint families are removed atomically: theorem descendants must not outlive their `deps_loaded.save` parent.
 
 ## `--skip-checkpoints`
 
-Runs theorem proofs through the selected instrumentation runtime without saving `.save`/`.ok` files. No `deps_loaded`, `final_context`, theorem-context, end-of-proof, or failed-prefix checkpoints are created. Theory artifacts are still built normally.
+Runs theorem proofs through proof steps without saving `.save`/`.ok` files. No `deps_loaded`, `final_context`, theorem-context, end-of-proof, or failed-prefix checkpoints are created. Theory artifacts are still built normally.
 
-## `--skip-goalfrag`
+## `--skip-proof-steps`
 
-Opts out of theorem instrumentation/proof IR. Source is sent through the plain `hol run` path. There is no per-tactic timeout, execution plan, trace, theorem-context/end-of-proof/failed-prefix proof navigation, or instrumented goal diagnostics. Non-theorem dependency/final-context checkpoint machinery may still be used when checkpoints are enabled.
+Opts out of proof-step execution. Source is sent through the plain `hol run` path. There is no per-tactic timeout, debug-step trace, theorem-context/end-of-proof/failed-prefix proof navigation, or instrumented goal diagnostics. Non-theorem dependency/final-context checkpoint machinery may still be used when checkpoints are enabled.
 
-**Incompatible**: `--skip-goalfrag` with `--tactic-timeout`, `--goalfrag-plan`, or `--goalfrag-trace`.
+**Incompatible**: `--skip-proof-steps` with `--tactic-timeout`, `--debug-steps`, or `--repl-on-failure`.
 
 ## Parser recovery
 
@@ -96,16 +96,13 @@ On a rebuild after source edit:
 ## Plan and trace inspection
 
 ```sh
-holbuild execution-plan FooTheory:thm          # proof IR, static, no build lock/proof execution
-holbuild goalfrag-plan FooTheory:thm           # legacy GoalFrag static plan
-holbuild goalfrag-plan --new-ir FooTheory:thm  # deprecated alias for execution-plan
-holbuild build --force --goalfrag-trace FooTheory
-holbuild build --goalfrag --goalfrag-trace FooTheory  # legacy trace shape
+holbuild execution-plan FooTheory:thm          # static, no build lock/proof execution
+holbuild build --force --debug-steps FooTheory
 ```
 
 Plan lines are executable tactic/list-tactic operations. Indentation/body text is formatting only; if a source construct executes as one HOL combinator boundary, it should display as one numbered step.
 
-`--goalfrag-trace` executes a build and records runtime before/after goal counts and elapsed times in the child log. Use `--force` when an up-to-date artifact would otherwise skip source execution.
+`--debug-steps` executes a build and records runtime before/after goal counts and elapsed times in the child log. Use `--force` when an up-to-date artifact would otherwise skip source execution.
 
 ## REPL on failure
 

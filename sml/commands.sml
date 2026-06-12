@@ -17,8 +17,7 @@ fun usage () = print
   \Usage:\n\
   \  holbuild [--json] [--quiet|--verbose|--verbosity LEVEL] [--source-dir PATH] [--maxheap MB] [-jN] context\n\
   \  holbuild [--json] [--quiet|--verbose|--verbosity LEVEL] [--source-dir PATH] [--maxheap MB] [-jN] execution-plan THEORY:THEOREM\n\
-  \  holbuild [--json] [--quiet|--verbose|--verbosity LEVEL] [--source-dir PATH] [--maxheap MB] [-jN] goalfrag-plan THEORY:THEOREM\n\
-  \  holbuild [--json] [--quiet|--verbose|--verbosity LEVEL] [--source-dir PATH] [--maxheap MB] [-jN] build [--dry-run] [--force[=theory|project|full]] [--no-cache] [--skip-checkpoints] [--skip-goalfrag] [--goalfrag] [--tactic-timeout SECONDS] [--goalfrag-plan THEORY:THEOREM] [--goalfrag-trace] [--repl-on-failure] [--retain-debug-artifacts] [TARGET ...]\n\
+  \  holbuild [--json] [--quiet|--verbose|--verbosity LEVEL] [--source-dir PATH] [--maxheap MB] [-jN] build [--dry-run] [--force[=theory|project|full]] [--no-cache] [--skip-checkpoints] [--skip-proof-steps] [--tactic-timeout SECONDS] [--debug-steps] [--repl-on-failure] [--retain-debug-artifacts] [TARGET ...]\n\
   \  holbuild [--json] [--quiet|--verbose|--verbosity LEVEL] [--source-dir PATH] [--maxheap MB] [-jN] heap NAME\n\
   \  holbuild [--json] [--quiet|--verbose|--verbosity LEVEL] [--source-dir PATH] [--maxheap MB] run [ARG ...]\n\
   \  holbuild [--json] [--quiet|--verbose|--verbosity LEVEL] [--source-dir PATH] [--maxheap MB] repl [ARG ...]\n\
@@ -83,19 +82,22 @@ fun split_flags args =
             loop dry force false skip_checkpoints goalfrag new_ir tactic_timeout tactic_timeout_set goalfrag_plan goalfrag_trace repl_on_failure retain_debug_artifacts xs
         | "--skip-checkpoints" :: xs =>
             loop dry force use_cache true goalfrag new_ir tactic_timeout tactic_timeout_set goalfrag_plan goalfrag_trace repl_on_failure retain_debug_artifacts xs
-        | "--skip-goalfrag" :: xs =>
+        | "--skip-proof-steps" :: xs =>
             loop dry force use_cache skip_checkpoints false false tactic_timeout tactic_timeout_set goalfrag_plan goalfrag_trace repl_on_failure retain_debug_artifacts xs
-        | "--goalfrag" :: xs =>
-            (warn "--goalfrag is deprecated; proof IR is the default, use --goalfrag only for legacy GoalFrag debugging";
-             loop dry force use_cache skip_checkpoints true false tactic_timeout tactic_timeout_set goalfrag_plan goalfrag_trace repl_on_failure retain_debug_artifacts xs)
+        | "--skip-goalfrag" :: xs =>
+            (warn "--skip-goalfrag is deprecated; use --skip-proof-steps";
+             loop dry force use_cache skip_checkpoints false false tactic_timeout tactic_timeout_set goalfrag_plan goalfrag_trace repl_on_failure retain_debug_artifacts xs)
+        | "--goalfrag" :: _ =>
+            raise Error "--goalfrag has been removed; proof steps are enabled by default"
         | "--new-ir" :: xs =>
             (warn "--new-ir is deprecated and has no effect; proof IR is the default";
              loop dry force use_cache skip_checkpoints goalfrag true tactic_timeout tactic_timeout_set goalfrag_plan goalfrag_trace repl_on_failure retain_debug_artifacts xs)
-        | "--goalfrag-plan" :: theorem :: xs =>
-            loop dry force use_cache skip_checkpoints goalfrag new_ir tactic_timeout tactic_timeout_set (SOME theorem) goalfrag_trace repl_on_failure retain_debug_artifacts xs
-        | "--goalfrag-plan" :: [] => raise Error "--goalfrag-plan requires THEORY:THEOREM"
-        | "--goalfrag-trace" :: xs =>
+        | "--goalfrag-plan" :: _ => raise Error "--goalfrag-plan has been removed; use execution-plan THEORY:THEOREM"
+        | "--debug-steps" :: xs =>
             loop dry force use_cache skip_checkpoints goalfrag new_ir tactic_timeout tactic_timeout_set goalfrag_plan true repl_on_failure retain_debug_artifacts xs
+        | "--goalfrag-trace" :: xs =>
+            (warn "--goalfrag-trace is deprecated; use --debug-steps";
+             loop dry force use_cache skip_checkpoints goalfrag new_ir tactic_timeout tactic_timeout_set goalfrag_plan true repl_on_failure retain_debug_artifacts xs)
         | "--repl-on-failure" :: xs =>
             loop dry force use_cache skip_checkpoints goalfrag new_ir tactic_timeout tactic_timeout_set goalfrag_plan goalfrag_trace true retain_debug_artifacts xs
         | "--retain-debug-artifacts" :: xs =>
@@ -111,10 +113,11 @@ fun split_flags args =
                    (tactic_timeout_value (String.extract (x, size "--tactic-timeout=", NONE)))
                    true goalfrag_plan goalfrag_trace repl_on_failure retain_debug_artifacts xs
             else if String.isPrefix "--goalfrag-plan=" x then
-              loop dry force use_cache skip_checkpoints goalfrag new_ir tactic_timeout tactic_timeout_set
-                   (SOME (String.extract (x, size "--goalfrag-plan=", NONE))) goalfrag_trace repl_on_failure retain_debug_artifacts xs
+              raise Error "--goalfrag-plan has been removed; use execution-plan THEORY:THEOREM"
+            else if String.isPrefix "--debug-steps=" x then
+              raise Error "--debug-steps does not take an argument"
             else if String.isPrefix "--goalfrag-trace=" x then
-              raise Error "--goalfrag-trace does not take a theorem; use --goalfrag-trace TARGET"
+              raise Error "--goalfrag-trace has been replaced by --debug-steps and does not take an argument"
             else if String.isPrefix "--" x then
               raise Error ("unknown build option: " ^ x)
             else
@@ -194,9 +197,9 @@ fun parse_goalfrag_selector selector =
   case String.fields (fn c => c = #":") selector of
       [theory, theorem] =>
         if theory = "" orelse theorem = "" then
-          raise Error "--goalfrag-plan requires THEORY:THEOREM"
+          raise Error "execution-plan requires THEORY:THEOREM"
         else {theory = theory, theorem = theorem}
-    | _ => raise Error "--goalfrag-plan requires THEORY:THEOREM"
+    | _ => raise Error "execution-plan requires THEORY:THEOREM"
 
 fun theorem_match theorem source =
   let
@@ -322,7 +325,7 @@ fun analyser_proof_ir_plan project source theorem =
   in
     case loop lines NONE [] NONE of
         SOME steps => steps
-      | NONE => raise Error ("theorem not found for --goalfrag-plan: " ^ #logical_name source ^ ":" ^ theorem)
+      | NONE => raise Error ("theorem not found for execution-plan: " ^ #logical_name source ^ ":" ^ theorem)
   end
 
 fun print_static_goalfrag_plan project new_ir source theorem boundary_opt =
@@ -343,15 +346,14 @@ fun print_static_goalfrag_plan project new_ir source theorem boundary_opt =
 fun find_theory_source index theory =
   case List.filter (fn source => theory_source source andalso #logical_name source = theory) index of
       [source] => source
-    | [] => raise Error ("theory not found for --goalfrag-plan: " ^ theory)
+    | [] => raise Error ("theory not found for execution-plan: " ^ theory)
     | matches =>
-        raise Error ("ambiguous theory for --goalfrag-plan: " ^ theory ^ " in " ^
-                     String.concatWith ", " (map describe_source matches))
+        raise Error ("ambiguous theory for execution-plan: " ^ theory ^ " in " ^                     String.concatWith ", " (map describe_source matches))
 
 fun find_theorem_in_source theorem source =
   case theorem_match theorem source of
       SOME (_, boundary) => boundary
-    | NONE => raise Error ("theorem not found for --goalfrag-plan: " ^ #logical_name source ^ ":" ^ theorem)
+    | NONE => raise Error ("theorem not found for execution-plan: " ^ #logical_name source ^ ":" ^ theorem)
 
 fun print_goalfrag_plan_selector new_ir project selector =
   let
@@ -466,14 +468,10 @@ fun build tc cli_jobs args =
     val _ =
       if HolbuildStatus.json_mode () andalso dry_run then
         raise Error "--json does not support build --dry-run yet"
-      else if HolbuildStatus.json_mode () andalso Option.isSome goalfrag_plan then
-        raise Error "--json does not support --goalfrag-plan yet"
       else if HolbuildStatus.json_mode () andalso goalfrag_trace then
-        raise Error "--json does not support --goalfrag-trace until structured proof_trace events exist"
-      else if Option.isSome goalfrag_plan andalso goalfrag_trace then
-        raise Error "--goalfrag-plan and --goalfrag-trace are separate modes"
+        raise Error "--json does not support --debug-steps until structured proof-step trace events exist"
       else if dry_run andalso goalfrag_trace then
-        raise Error "--goalfrag-trace requires build execution; use --force to inspect up-to-date targets"
+        raise Error "--debug-steps requires build execution; use --force to inspect up-to-date targets"
       else if dry_run andalso repl_on_failure then
         raise Error "--repl-on-failure requires build execution"
       else if HolbuildStatus.json_mode () andalso repl_on_failure then
@@ -481,11 +479,13 @@ fun build tc cli_jobs args =
       else if skip_checkpoints andalso repl_on_failure then
         raise Error "--repl-on-failure requires checkpoints; remove --skip-checkpoints"
       else if not goalfrag andalso new_ir then
-        raise Error "proof IR requires theorem instrumentation; remove --skip-goalfrag"
+        raise Error "proof steps are required for proof IR; remove --skip-proof-steps"
       else if not goalfrag andalso tactic_timeout_set then
-        raise Error "--tactic-timeout requires theorem instrumentation; remove --skip-goalfrag"
-      else if not goalfrag andalso (Option.isSome goalfrag_plan orelse goalfrag_trace) then
-        raise Error "--goalfrag-plan/--goalfrag-trace require theorem instrumentation; remove --skip-goalfrag"
+        raise Error "--tactic-timeout requires proof steps; remove --skip-proof-steps"
+      else if not goalfrag andalso goalfrag_trace then
+        raise Error "--debug-steps requires proof steps; remove --skip-proof-steps"
+      else if not goalfrag andalso repl_on_failure then
+        raise Error "--repl-on-failure requires proof steps; remove --skip-proof-steps"
       else ()
     fun default_tactic_timeout () =
       case #build_tactic_timeout project of
@@ -535,11 +535,8 @@ fun build tc cli_jobs args =
           (fn () => HolbuildBuildExec.build build_options tc project plan toolchain_key jobs)
       end
   in
-    case goalfrag_plan of
-        SOME selector => (configure_analyser_for_toolchain tc; print_goalfrag_plan_selector new_ir project selector)
-      | _ =>
-          if dry_run then describe_dry_run ()
-          else HolbuildBuildExec.with_project_lock project "build" execute_build
+    if dry_run then describe_dry_run ()
+    else HolbuildBuildExec.with_project_lock project "build" execute_build
   end
 
 fun heap_named project target =
@@ -599,14 +596,8 @@ fun run_hol tc subcommand user_args =
 fun repl_hol tc user_args =
   run_hol_with HolbuildToolchain.run_interactive tc "repl" user_args
 
-fun goalfrag_plan_command tc args =
-  (configure_analyser_for_toolchain tc;
-   case args of
-       [selector] => print_goalfrag_plan_selector false (load_project ()) selector
-     | ["--new-ir", selector] =>
-         (warn "goalfrag-plan --new-ir is deprecated; use holbuild execution-plan THEORY:THEOREM";
-          print_goalfrag_plan_selector true (load_project ()) selector)
-     | _ => raise Error "usage: holbuild goalfrag-plan [--new-ir] THEORY:THEOREM")
+fun goalfrag_plan_command _ _ =
+  raise Error "goalfrag-plan has been removed; use execution-plan THEORY:THEOREM"
 
 fun execution_plan_command tc args =
   (configure_analyser_for_toolchain tc;
@@ -624,7 +615,7 @@ fun dispatch tc jobs args =
       [] => (reject_json "context"; context ())
     | "context" :: [] => (reject_json "context"; context ())
     | "execution-plan" :: rest => (reject_json "execution-plan"; execution_plan_command tc rest)
-    | "goalfrag-plan" :: rest => (reject_json "goalfrag-plan"; goalfrag_plan_command tc rest)
+    | "goalfrag-plan" :: rest => goalfrag_plan_command tc rest
     | "build" :: rest => build tc jobs rest
     | "heap" :: [target] => (reject_json "heap"; build_heap tc jobs target)
     | "heap" :: _ => raise Error "usage: holbuild heap NAME"
@@ -720,6 +711,9 @@ fun buildhol holdir maxheap =
     print (holdir ^ "\n")
   end
 
+fun removed_goalfrag_build_arg arg =
+  arg = "--goalfrag" orelse arg = "--goalfrag-plan" orelse String.isPrefix "--goalfrag-plan=" arg
+
 fun dispatch_with_options {holdir, source_dir, jobs, maxheap, json, verbosity} args =
   (HolbuildStatus.set_json_mode json;
    HolbuildStatus.set_verbosity verbosity;
@@ -729,6 +723,14 @@ fun dispatch_with_options {holdir, source_dir, jobs, maxheap, json, verbosity} a
        "gc" :: rest => (reject_json "gc"; gc rest)
      | "cache" :: rest => (reject_json "cache"; HolbuildCache.dispatch rest)
      | "buildhol" :: [] => buildhol holdir maxheap
+     | "goalfrag-plan" :: _ => raise Error "goalfrag-plan has been removed; use execution-plan THEORY:THEOREM"
+     | "build" :: rest =>
+         if List.exists removed_goalfrag_build_arg rest then
+           (case List.find removed_goalfrag_build_arg rest of
+                SOME "--goalfrag" => raise Error "--goalfrag has been removed; proof steps are enabled by default"
+              | SOME _ => raise Error "--goalfrag-plan has been removed; use execution-plan THEORY:THEOREM"
+              | NONE => dispatch (effective_toolchain holdir maxheap) jobs args)
+         else dispatch (effective_toolchain holdir maxheap) jobs args
      | [] => dispatch (context_toolchain holdir maxheap) jobs args
      | "context" :: _ => dispatch (context_toolchain holdir maxheap) jobs args
      | _ => dispatch (effective_toolchain holdir maxheap) jobs args)

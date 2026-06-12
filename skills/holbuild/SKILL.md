@@ -16,7 +16,7 @@ holbuild build                           # all, or [build].roots closure if conf
 holbuild build --dry-run FooTheory       # show plan without building
 holbuild context                         # show manifest info
 holbuild execution-plan FooTheory:thm    # static proof-IR plan for one theorem
-holbuild build --force --goalfrag-trace FooTheory
+holbuild build --force --debug-steps FooTheory
 holbuild gc                              # clean project residue + global cache
 ```
 
@@ -52,8 +52,8 @@ members = ["src"]
 | `--force=full` / `--force-full` / `--force` | Rebuild the whole requested plan from source; forced nodes still publish cache unless `--no-cache` |
 | `--no-cache` | Skip global cache restore/publish; local up-to-date checks still work |
 | `--skip-checkpoints` | No `.save`/`.ok` checkpoint files; theorem instrumentation still runs |
-| `--skip-goalfrag` | No theorem instrumentation/proof IR; incompatible with timeout/plan/trace flags |
-| `--goalfrag` | Use legacy HOL GoalFrag runtime instead of default proof IR |
+| `--skip-proof-steps` | No proof-step execution; incompatible with timeout/debug-step/repl-on-failure flags |
+| `--debug-steps` | Record detailed proof-step execution logs; use with `--force` to inspect up-to-date targets |
 | `--tactic-timeout SECONDS` | Root-package per-step timeout (default 2.5s, `0` disables); also manifest/local-config settable |
 | `--json` | Newline-delimited streaming JSON build events/errors on stdout; no retained log paths by default; not supported for dry-run/plan/trace/repl-on-failure |
 | `--retain-debug-artifacts` | With `--json build`, retain durable failure logs and expose `debug_artifacts.log`; stage dirs still cleaned |

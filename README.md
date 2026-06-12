@@ -28,8 +28,8 @@ The current implementation intentionally focuses on:
 - publishes/restores simple theory semantic artifacts through the global cache
 - includes the configured toolchain/base context in current action keys
 - creates local theory checkpoints while building: dependencies-loaded and final-context checkpoints when checkpointing is enabled, plus theorem context/end-of-proof and failed-prefix proof-navigation checkpoints when theorem instrumentation is enabled; successful builds retain reusable checkpoints for incremental proof replay and clear stale failed-prefix checkpoints, while `holbuild gc` bounds old checkpoint families
-- runs modern theorem proofs through holbuild's proof IR runtime by default, with tactic parsing/step planning, proof-history execution, checkpoint saves, timeout handling, and diagnostics kept out of generated per-theory source; the legacy HOL `goalFrag` runtime remains available with `--goalfrag`
-- keeps proof instrumentation separate from checkpoint creation; `--skip-checkpoints` avoids theory `.save` files entirely, `--skip-goalfrag` opts out of theorem instrumentation but can still use non-theorem dependency/final-context checkpoints, and `--tactic-timeout SECONDS` controls the root-project per-tactic proof timeout (default 2.5s; `0` disables it)
+- runs theorem proofs through holbuild's proof-step runtime by default, with tactic parsing/step planning, proof-history execution, checkpoint saves, timeout handling, and diagnostics kept out of generated per-theory source
+- keeps proof steps separate from checkpoint creation; `--skip-checkpoints` avoids theory `.save` files entirely, `--skip-proof-steps` opts out of proof-step execution but can still use non-theorem dependency/final-context checkpoints, and `--tactic-timeout SECONDS` controls the root-project per-tactic proof timeout (default 2.5s; `0` disables it)
 - exports explicit project heap targets from `[[heap]]` entries using local SaveState
 - exposes `holbuild gc` for project-local residue cleanup plus global-cache GC with a 7-day default retention policy
 - does not delegate build semantics to Holmake
@@ -100,8 +100,7 @@ bin/holbuild build --skip-checkpoints MyTheory
 bin/holbuild build --tactic-timeout 5 MyTheory
 bin/holbuild build --repl-on-failure MyTheory
 bin/holbuild execution-plan MyTheory:my_theorem
-bin/holbuild goalfrag-plan MyTheory:my_theorem
-bin/holbuild build --force --goalfrag-trace MyTheory
+bin/holbuild build --force --debug-steps MyTheory
 bin/holbuild --json build MyTheory
 bin/holbuild --json build --retain-debug-artifacts MyTheory
 ```
@@ -149,14 +148,14 @@ disabling proof instrumentation. By default, checkpoints may be created during
 a build; successful builds retain reusable checkpoints for incremental proof
 replay, clear stale failed-prefix checkpoints, and rely on `holbuild gc` to bound
 old checkpoint families.
-`--skip-goalfrag` opts out of modern theorem instrumentation.
-The default theorem instrumentation engine is holbuild's proof IR: it parses tactic
-syntax from `HOLSourceAST` directly instead of using HOL `goalFrag`, while preserving
-exact tactic/list-tactic runtime boundaries for recognized constructs. `--goalfrag`
-is deprecated and selects the legacy GoalFrag engine only for comparison/debugging.
-The old `--new-ir` build flag is accepted as a deprecated no-op because proof IR is
-now the default. holbuild may use HOL parser recovery to produce best-effort
-instrumentation and diagnostics, but source parse errors remain build failures.
+`--skip-proof-steps` opts out of proof-step execution.  The deprecated
+`--skip-goalfrag` spelling is accepted as a warning alias for now.
+The theorem proof-step engine is holbuild's proof IR: it parses tactic syntax from
+`HOLSourceAST` directly and preserves exact tactic/list-tactic runtime boundaries
+for recognized constructs. `--goalfrag` and `goalfrag-plan` have been removed. The
+old `--new-ir` build flag is accepted as a deprecated no-op because proof IR is now
+the default. holbuild may use HOL parser recovery to produce best-effort proof-step
+diagnostics, but source parse errors remain build failures.
 `--tactic-timeout SECONDS` overrides the per-tactic proof timeout for this invocation;
 the default is 2.5 seconds, and `0` disables the timeout. Manifest entry points may
 set `[build.root_tactic_timeouts]` by root source path. An entry-point timeout applies
@@ -164,23 +163,21 @@ to that entry point's root-package dependency closure; dependency packages still
 without inherited consumer timeouts. If several declared entry points can reach a root-package
 script, the script uses the minimum effective timeout. `--tactic-timeout`
 overrides entry-point settings for the root package only. `execution-plan THEORY:THEOREM` statically prints the proof-IR plan for one
-theorem and exits without building. `goalfrag-plan THEORY:THEOREM` does the same for
-the legacy GoalFrag step IR; `goalfrag-plan --new-ir THEORY:THEOREM` is a deprecated
-alias for `execution-plan`. Each numbered line is one executable tactic/list-tactic operation;
-indentation and body text are formatting only. `--goalfrag-trace`
-runs a build, records runtime traces for all instrumented proofs in the child log,
-and prints the failed theorem's trace excerpt on failure. Use `--goalfrag --goalfrag-trace`
-for legacy GoalFrag traces; otherwise the trace follows the default proof IR engine. Use trace with `--force`
-when you need to force source execution for proof-performance/debug inspection.
+theorem and exits without building. Each numbered line is one executable tactic/list-tactic operation;
+indentation and body text are formatting only. `--debug-steps`
+runs a build and records runtime traces for all proof-step executions in the child log;
+the deprecated `--goalfrag-trace` spelling is accepted as a warning alias for now.
+Use `--debug-steps` with `--force` when you need to force source execution for
+proof-performance/debug inspection.
 `--repl-on-failure` serializes the build and, after a theory failure, starts
 `hol repl` from the newest failed-prefix checkpoint when available, falling back
 to the replay/deps-loaded checkpoint; it requires checkpoints and is not
 supported with `--json`.
-Combining `--skip-goalfrag` with
-`--tactic-timeout`, `--goalfrag-plan`, or `--goalfrag-trace` is an error because
-they are implemented by the theorem instrumentation runtime. Proof-engine/checkpoint/timeout
+Combining `--skip-proof-steps` with
+`--tactic-timeout`, `--debug-steps`, or `--repl-on-failure` is an error because
+those features require proof-step execution. Proof-engine/checkpoint/timeout
 policy affects execution and diagnostics, not final theory artifact action keys. `--json` emits newline-delimited
-streaming JSON status/message/error events on stdout; node events include target/source metadata for demuxing parallel builds and do not expose retained log paths by default. `build --retain-debug-artifacts` may be combined with `--json` to retain durable failure logs and report them as `debug_artifacts.log`; these debug artifacts are for human/harness debugging and may contain full goals/output, while JSON failure evidence remains bounded. `--json --goalfrag-trace` is reserved until structured proof trace events exist. `gc` removes stale project-local
+streaming JSON status/message/error events on stdout; node events include target/source metadata for demuxing parallel builds and do not expose retained log paths by default. `build --retain-debug-artifacts` may be combined with `--json` to retain durable failure logs and report them as `debug_artifacts.log`; these debug artifacts are for human/harness debugging and may contain full goals/output, while JSON failure evidence remains bounded. `--json --debug-steps` is reserved until structured proof-step trace events exist. `gc` removes stale project-local
 `.holbuild` stage/log/checkpoint residue and runs global cache GC using `$HOLBUILD_CACHE`,
 `$XDG_CACHE_HOME/holbuild`, or `$HOME/.cache/holbuild`; `gc --clean-only` skips the
 cache and `gc --cache-only` skips project discovery/locking and does not require a HOL
@@ -374,12 +371,12 @@ loading resolved ancestors and, unless `--skip-checkpoints` is set, saving
 transient PolyML checkpoints at syntactic boundaries: dependencies loaded,
 AST-derived theorem end-of-proof/context boundaries and failed-prefix
 proof-navigation state for modern `Theorem ... Proof ... QED` declarations when
-goalfrag instrumentation is enabled, and a final post-export context. Successful
+proof steps are enabled, and a final post-export context. Successful
 builds remove those checkpoint files after writing artifacts and metadata;
-failed/interrupted builds may leave them as debug breadcrumbs. `--skip-goalfrag`
+failed/interrupted builds may leave them as debug breadcrumbs. `--skip-proof-steps`
 removes the theorem proof-navigation checkpoints and tactic timeout path, not the
 non-theorem dependency/final-context checkpoint machinery. If a modern theorem
-fails after some goalfrag steps, the retained failed-prefix checkpoint can be
+fails after some proof steps, the retained failed-prefix checkpoint can be
 reused on the next rebuild by comparing raw proof-body bytes, backing up to the
 longest matching current fragment boundary, and replaying the edited suffix.
 Simple

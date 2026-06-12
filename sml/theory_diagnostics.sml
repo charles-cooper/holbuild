@@ -634,7 +634,7 @@ fun summarize_goalfrag_trace path =
         | SOME theorem => List.filter (fn line => field_after "theorem" line = SOME theorem) trace_lines
   in
     if null focused then NONE
-    else SOME ("holbuild goalfrag trace:\n" ^ String.concat (map (fn line => line ^ "\n") focused))
+    else SOME ("holbuild proof-ir trace:\n" ^ String.concat (map (fn line => line ^ "\n") focused))
   end
   handle _ => NONE
 
