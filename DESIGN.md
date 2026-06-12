@@ -707,7 +707,7 @@ property of the declared entry point graph, not of the current request, except t
 but local metadata/cache records the timeout a successful build satisfied; a success under
 60s may satisfy a later 180s request, while a success under 180s does not satisfy a later
 60s request.
-`execution-plan THEORY:THEOREM` and `--debug-steps` are debugging/inspection paths.
+`execution-plan THEORY:THEOREM` and `--trace-steps` are debugging/inspection paths.
 `holbuild execution-plan THEORY:THEOREM` is static inspection for proof steps: it
 discovers sources, finds the named theorem in the named theory script, pretty-prints
 the executable proof-IR step plan, and exits without acquiring the project build lock,
@@ -719,7 +719,7 @@ when that is what the runtime executes, not as an ordinary `>-` branch. The goal
 is that a developer can debug a divergence by inspecting the plan and knowing the
 HOL tactic combinator semantics.
 
-`--debug-steps` executes the build and records runtime plans plus before/after
+`--trace-steps` executes the build and records runtime plans plus before/after
 trace lines for all instrumented proofs in the child log. On failure, holbuild
 prints the failed theorem's trace excerpt with per-fragment elapsed time and
 open-goal counts. Use `--force` with trace when the artifact is already up to date
@@ -730,7 +730,7 @@ checkpoint when a theory action fails, falling back to the replay/deps-loaded
 checkpoint if no failed-prefix state is available; it requires checkpoints and is
 not an action-key input. Planning/tracing are not action-key inputs. Because
 timeouts and tracing only exist in the proof-step runtime,
-`--skip-proof-steps --tactic-timeout ...`, `--skip-proof-steps --debug-steps ...`, and
+`--skip-proof-steps --tactic-timeout ...`, `--skip-proof-steps --trace-steps ...`, and
 `--skip-proof-steps --repl-on-failure ...` are rejected instead of silently ignoring
 the request. In JSON mode, failure evidence is structured and bounded for agent/tool
 consumers by default; `build --retain-debug-artifacts` is an explicit human/harness

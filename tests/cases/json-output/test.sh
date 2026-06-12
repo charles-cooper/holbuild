@@ -222,8 +222,8 @@ PY
 
 trace_stdout=$tmpdir/trace.stdout
 trace_stderr=$tmpdir/trace.stderr
-if (cd "$project" && "$HOLBUILD_BIN" --json build --debug-steps JTheory) > "$trace_stdout" 2> "$trace_stderr"; then
-  echo "expected json debug-steps stub to reject --debug-steps" >&2
+if (cd "$project" && "$HOLBUILD_BIN" --json build --trace-steps JTheory) > "$trace_stdout" 2> "$trace_stderr"; then
+  echo "expected json trace-steps stub to reject --trace-steps" >&2
   exit 1
 fi
 if [[ -s "$trace_stderr" ]]; then

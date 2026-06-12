@@ -56,9 +56,9 @@ Runs theorem proofs through proof steps without saving `.save`/`.ok` files. No `
 
 ## `--skip-proof-steps`
 
-Opts out of proof-step execution. Source is sent through the plain `hol run` path. There is no per-tactic timeout, debug-step trace, theorem-context/end-of-proof/failed-prefix proof navigation, or instrumented goal diagnostics. Non-theorem dependency/final-context checkpoint machinery may still be used when checkpoints are enabled.
+Opts out of proof-step execution. Source is sent through the plain `hol run` path. There is no per-tactic timeout, trace-step trace, theorem-context/end-of-proof/failed-prefix proof navigation, or instrumented goal diagnostics. Non-theorem dependency/final-context checkpoint machinery may still be used when checkpoints are enabled.
 
-**Incompatible**: `--skip-proof-steps` with `--tactic-timeout`, `--debug-steps`, or `--repl-on-failure`.
+**Incompatible**: `--skip-proof-steps` with `--tactic-timeout`, `--trace-steps`, or `--repl-on-failure`.
 
 ## Parser recovery
 
@@ -97,12 +97,12 @@ On a rebuild after source edit:
 
 ```sh
 holbuild execution-plan FooTheory:thm          # static, no build lock/proof execution
-holbuild build --force --debug-steps FooTheory
+holbuild build --force --trace-steps FooTheory
 ```
 
 Plan lines are executable tactic/list-tactic operations. Indentation/body text is formatting only; if a source construct executes as one HOL combinator boundary, it should display as one numbered step.
 
-`--debug-steps` executes a build and records runtime before/after goal counts and elapsed times in the child log. Use `--force` when an up-to-date artifact would otherwise skip source execution.
+`--trace-steps` executes a build and records runtime before/after goal counts and elapsed times in the child log. Use `--force` when an up-to-date artifact would otherwise skip source execution.
 
 ## REPL on failure
 

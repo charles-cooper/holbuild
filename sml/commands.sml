@@ -17,7 +17,7 @@ fun usage () = print
   \Usage:\n\
   \  holbuild [--json] [--quiet|--verbose|--verbosity LEVEL] [--source-dir PATH] [--maxheap MB] [-jN] context\n\
   \  holbuild [--json] [--quiet|--verbose|--verbosity LEVEL] [--source-dir PATH] [--maxheap MB] [-jN] execution-plan THEORY:THEOREM\n\
-  \  holbuild [--json] [--quiet|--verbose|--verbosity LEVEL] [--source-dir PATH] [--maxheap MB] [-jN] build [--dry-run] [--force[=theory|project|full]] [--no-cache] [--skip-checkpoints] [--skip-proof-steps] [--tactic-timeout SECONDS] [--debug-steps] [--repl-on-failure] [--retain-debug-artifacts] [TARGET ...]\n\
+  \  holbuild [--json] [--quiet|--verbose|--verbosity LEVEL] [--source-dir PATH] [--maxheap MB] [-jN] build [--dry-run] [--force[=theory|project|full]] [--no-cache] [--skip-checkpoints] [--skip-proof-steps] [--tactic-timeout SECONDS] [--trace-steps] [--repl-on-failure] [--retain-debug-artifacts] [TARGET ...]\n\
   \  holbuild [--json] [--quiet|--verbose|--verbosity LEVEL] [--source-dir PATH] [--maxheap MB] [-jN] heap NAME\n\
   \  holbuild [--json] [--quiet|--verbose|--verbosity LEVEL] [--source-dir PATH] [--maxheap MB] run [ARG ...]\n\
   \  holbuild [--json] [--quiet|--verbose|--verbosity LEVEL] [--source-dir PATH] [--maxheap MB] repl [ARG ...]\n\
@@ -93,10 +93,10 @@ fun split_flags args =
             (warn "--new-ir is deprecated and has no effect; proof IR is the default";
              loop dry force use_cache skip_checkpoints goalfrag true tactic_timeout tactic_timeout_set goalfrag_plan goalfrag_trace repl_on_failure retain_debug_artifacts xs)
         | "--goalfrag-plan" :: _ => raise Error "--goalfrag-plan has been removed; use execution-plan THEORY:THEOREM"
-        | "--debug-steps" :: xs =>
+        | "--trace-steps" :: xs =>
             loop dry force use_cache skip_checkpoints goalfrag new_ir tactic_timeout tactic_timeout_set goalfrag_plan true repl_on_failure retain_debug_artifacts xs
         | "--goalfrag-trace" :: xs =>
-            (warn "--goalfrag-trace is deprecated; use --debug-steps";
+            (warn "--goalfrag-trace is deprecated; use --trace-steps";
              loop dry force use_cache skip_checkpoints goalfrag new_ir tactic_timeout tactic_timeout_set goalfrag_plan true repl_on_failure retain_debug_artifacts xs)
         | "--repl-on-failure" :: xs =>
             loop dry force use_cache skip_checkpoints goalfrag new_ir tactic_timeout tactic_timeout_set goalfrag_plan goalfrag_trace true retain_debug_artifacts xs
@@ -114,10 +114,10 @@ fun split_flags args =
                    true goalfrag_plan goalfrag_trace repl_on_failure retain_debug_artifacts xs
             else if String.isPrefix "--goalfrag-plan=" x then
               raise Error "--goalfrag-plan has been removed; use execution-plan THEORY:THEOREM"
-            else if String.isPrefix "--debug-steps=" x then
-              raise Error "--debug-steps does not take an argument"
+            else if String.isPrefix "--trace-steps=" x then
+              raise Error "--trace-steps does not take an argument"
             else if String.isPrefix "--goalfrag-trace=" x then
-              raise Error "--goalfrag-trace has been replaced by --debug-steps and does not take an argument"
+              raise Error "--goalfrag-trace has been replaced by --trace-steps and does not take an argument"
             else if String.isPrefix "--" x then
               raise Error ("unknown build option: " ^ x)
             else
@@ -469,9 +469,9 @@ fun build tc cli_jobs args =
       if HolbuildStatus.json_mode () andalso dry_run then
         raise Error "--json does not support build --dry-run yet"
       else if HolbuildStatus.json_mode () andalso goalfrag_trace then
-        raise Error "--json does not support --debug-steps until structured proof-step trace events exist"
+        raise Error "--json does not support --trace-steps until structured proof-step trace events exist"
       else if dry_run andalso goalfrag_trace then
-        raise Error "--debug-steps requires build execution; use --force to inspect up-to-date targets"
+        raise Error "--trace-steps requires build execution; use --force to inspect up-to-date targets"
       else if dry_run andalso repl_on_failure then
         raise Error "--repl-on-failure requires build execution"
       else if HolbuildStatus.json_mode () andalso repl_on_failure then
@@ -483,7 +483,7 @@ fun build tc cli_jobs args =
       else if not goalfrag andalso tactic_timeout_set then
         raise Error "--tactic-timeout requires proof steps; remove --skip-proof-steps"
       else if not goalfrag andalso goalfrag_trace then
-        raise Error "--debug-steps requires proof steps; remove --skip-proof-steps"
+        raise Error "--trace-steps requires proof steps; remove --skip-proof-steps"
       else if not goalfrag andalso repl_on_failure then
         raise Error "--repl-on-failure requires proof steps; remove --skip-proof-steps"
       else ()
@@ -714,6 +714,8 @@ fun buildhol holdir maxheap =
 fun removed_goalfrag_build_arg arg =
   arg = "--goalfrag" orelse arg = "--goalfrag-plan" orelse String.isPrefix "--goalfrag-plan=" arg
 
+fun trace_steps_build_arg arg = arg = "--trace-steps" orelse arg = "--goalfrag-trace"
+
 fun dispatch_with_options {holdir, source_dir, jobs, maxheap, json, verbosity} args =
   (HolbuildStatus.set_json_mode json;
    HolbuildStatus.set_verbosity verbosity;
@@ -730,6 +732,8 @@ fun dispatch_with_options {holdir, source_dir, jobs, maxheap, json, verbosity} a
                 SOME "--goalfrag" => raise Error "--goalfrag has been removed; proof steps are enabled by default"
               | SOME _ => raise Error "--goalfrag-plan has been removed; use execution-plan THEORY:THEOREM"
               | NONE => dispatch (effective_toolchain holdir maxheap) jobs args)
+         else if json andalso List.exists trace_steps_build_arg rest then
+           raise Error "--json does not support --trace-steps until structured proof-step trace events exist"
          else dispatch (effective_toolchain holdir maxheap) jobs args
      | [] => dispatch (context_toolchain holdir maxheap) jobs args
      | "context" :: _ => dispatch (context_toolchain holdir maxheap) jobs args

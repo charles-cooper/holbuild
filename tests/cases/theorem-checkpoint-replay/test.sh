@@ -209,13 +209,13 @@ if grep -q "holbuild goalfrag before theorem=b_thm\|elapsed_ms=\|ATheory built\|
   exit 1
 fi
 trace_log=$tmpdir/goalfrag-trace.log
-(cd "$trace_project" && "$HOLBUILD_BIN" build --force --debug-steps ATheory) > "$trace_log" 2>&1
+(cd "$trace_project" && "$HOLBUILD_BIN" build --force --trace-steps ATheory) > "$trace_log" 2>&1
 require_grep "ATheory built" "$trace_log"
 if grep -q "holbuild proof-ir plan theorem=\|holbuild proof-ir before theorem=" "$trace_log"; then
-  echo "--debug-steps should not dump successful proof traces to stdout" >&2
+  echo "--trace-steps should not dump successful proof traces to stdout" >&2
   exit 1
 fi
-require_grep "debug steps log:" "$trace_log"
+require_grep "proof step trace log:" "$trace_log"
 trace_child_log=$(find "$trace_project/.holbuild/logs" -name '*-ATheory-goalfrag-trace.log' -print -quit)
 require_file "$trace_child_log"
 require_grep "holbuild proof-ir plan theorem=a_thm steps=" "$trace_child_log"
@@ -926,7 +926,7 @@ QED
 val _ = export_theory();
 SML
 branch_failure_log=$tmpdir/branch-failure.log
-if (cd "$branch_failure_project" && "$HOLBUILD_BIN" build --debug-steps ATheory) > "$branch_failure_log" 2>&1; then
+if (cd "$branch_failure_project" && "$HOLBUILD_BIN" build --trace-steps ATheory) > "$branch_failure_log" 2>&1; then
   echo "expected branch proof to fail build" >&2
   exit 1
 fi

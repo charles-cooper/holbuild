@@ -100,7 +100,7 @@ bin/holbuild build --skip-checkpoints MyTheory
 bin/holbuild build --tactic-timeout 5 MyTheory
 bin/holbuild build --repl-on-failure MyTheory
 bin/holbuild execution-plan MyTheory:my_theorem
-bin/holbuild build --force --debug-steps MyTheory
+bin/holbuild build --force --trace-steps MyTheory
 bin/holbuild --json build MyTheory
 bin/holbuild --json build --retain-debug-artifacts MyTheory
 ```
@@ -164,20 +164,20 @@ without inherited consumer timeouts. If several declared entry points can reach 
 script, the script uses the minimum effective timeout. `--tactic-timeout`
 overrides entry-point settings for the root package only. `execution-plan THEORY:THEOREM` statically prints the proof-IR plan for one
 theorem and exits without building. Each numbered line is one executable tactic/list-tactic operation;
-indentation and body text are formatting only. `--debug-steps`
+indentation and body text are formatting only. `--trace-steps`
 runs a build and records runtime traces for all proof-step executions in the child log;
 the deprecated `--goalfrag-trace` spelling is accepted as a warning alias for now.
-Use `--debug-steps` with `--force` when you need to force source execution for
+Use `--trace-steps` with `--force` when you need to force source execution for
 proof-performance/debug inspection.
 `--repl-on-failure` serializes the build and, after a theory failure, starts
 `hol repl` from the newest failed-prefix checkpoint when available, falling back
 to the replay/deps-loaded checkpoint; it requires checkpoints and is not
 supported with `--json`.
 Combining `--skip-proof-steps` with
-`--tactic-timeout`, `--debug-steps`, or `--repl-on-failure` is an error because
+`--tactic-timeout`, `--trace-steps`, or `--repl-on-failure` is an error because
 those features require proof-step execution. Proof-engine/checkpoint/timeout
 policy affects execution and diagnostics, not final theory artifact action keys. `--json` emits newline-delimited
-streaming JSON status/message/error events on stdout; node events include target/source metadata for demuxing parallel builds and do not expose retained log paths by default. `build --retain-debug-artifacts` may be combined with `--json` to retain durable failure logs and report them as `debug_artifacts.log`; these debug artifacts are for human/harness debugging and may contain full goals/output, while JSON failure evidence remains bounded. `--json --debug-steps` is reserved until structured proof-step trace events exist. `gc` removes stale project-local
+streaming JSON status/message/error events on stdout; node events include target/source metadata for demuxing parallel builds and do not expose retained log paths by default. `build --retain-debug-artifacts` may be combined with `--json` to retain durable failure logs and report them as `debug_artifacts.log`; these debug artifacts are for human/harness debugging and may contain full goals/output, while JSON failure evidence remains bounded. `--json --trace-steps` is reserved until structured proof-step trace events exist. `gc` removes stale project-local
 `.holbuild` stage/log/checkpoint residue and runs global cache GC using `$HOLBUILD_CACHE`,
 `$XDG_CACHE_HOME/holbuild`, or `$HOME/.cache/holbuild`; `gc --clean-only` skips the
 cache and `gc --cache-only` skips project discovery/locking and does not require a HOL
