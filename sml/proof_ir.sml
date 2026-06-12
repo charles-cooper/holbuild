@@ -300,18 +300,22 @@ and parse_tactic_infix left opn right whole =
     | "THEN_LT" => TacThenLT (parse_tactic_ast left, parse_list_tactic_ast right)
     | "THENL" => parse_thenl left right whole
     | ">|" => parse_thenl left right whole
-    | ">-" => TacThen1 (parse_tactic_ast left, parse_tactic_ast right)
-    | "THEN1" => TacThen1 (parse_tactic_ast left, parse_tactic_ast right)
-    | "by" => TacThen1 (TacSubgoal (span left), parse_tactic_ast right)
-    | "suffices_by" => TacSufficesBy (span left, parse_tactic_ast right)
+    | ">-" => TacThen1 (parse_tactic_ast left, parse_branch_rhs_ast right)
+    | "THEN1" => TacThen1 (parse_tactic_ast left, parse_branch_rhs_ast right)
+    | "by" => TacThen1 (TacSubgoal (span left), parse_branch_rhs_ast right)
+    | "suffices_by" => TacSufficesBy (span left, parse_branch_rhs_ast right)
     | "ORELSE" => TacOrelse (flatten_orelse left @ flatten_orelse right)
     | ">~" => TacThenLT (parse_tactic_ast left, LtSelectGoal (span right))
     | ">>~" => TacThenLT (parse_tactic_ast left, LtSelectGoals (span right))
     | ">>~-" => parse_select_then1 left right whole
     | _ => atomic whole
+and parse_branch_rhs_ast e =
+  case e of
+      Parens {exp, right = SOME _, ...} => TacRepairGroup (span e, parse_tactic_ast exp)
+    | _ => parse_tactic_ast e
 and parse_thenl left right whole =
   case list_elems right of
-      SOME branches => TacThenL (parse_tactic_ast left, map parse_tactic_ast branches)
+      SOME branches => TacThenL (parse_tactic_ast left, map parse_branch_rhs_ast branches)
     | NONE => atomic whole
 and parse_select_then1 left right whole =
   case tuple_elems right of
