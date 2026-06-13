@@ -54,30 +54,6 @@ fun normalize_dep_path source_path dep =
   normalize_path
     (if absolute_path dep then dep else Path.concat(Path.dir source_path, dep))
 
-fun holdep_mentions path =
-  let
-    val reader = HOLSource.fileToReader {quietOpen = false, print = fn _ => ()} path
-    val mentions = Holdep_tokens.reader_deps (path, #read reader)
-  in
-    sort_unique (Binarymap.foldl (fn (name, _, acc) => name :: acc) [] mentions)
-  end
-  handle Holdep_tokens.LEX_ERROR msg =>
-    raise Error ("Holdep failed for " ^ path ^ ": " ^ msg)
-       | e as IO.Io _ =>
-    raise Error ("Holdep failed for " ^ path ^ ": " ^ General.exnMessage e)
-
-fun resolved_holdep_deps includes path =
-  let
-    val {deps, ...} = Holdep.main {assumes = [], includes = includes,
-                                   diag = fn _ => (), fname = path}
-  in
-    sort_unique (map (normalize_dep_path path) deps)
-  end
-  handle Holdep.Holdep_Error msg =>
-    raise Error ("Holdep failed for " ^ path ^ ": " ^ msg)
-       | Holdep_tokens.LEX_ERROR msg =>
-    raise Error ("Holdep failed for " ^ path ^ ": " ^ msg)
-
 fun read_all path =
   let
     val input = TextIO.openIn path
@@ -198,7 +174,7 @@ fun extract_textual path =
   in
     {loads = sort_unique loads, uses = sort_unique uses,
      extra_deps = sort_unique extra_deps,
-     holdep_mentions = holdep_mentions path}
+     holdep_mentions = []}
   end
 
 fun empty_deps () = {loads = [], uses = [], extra_deps = [], holdep_mentions = []} : t

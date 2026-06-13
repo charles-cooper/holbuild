@@ -18,33 +18,8 @@ fun path_join (a, b) = OS.Path.concat(a, b);
 
 fun use_hol rel = use (path_join(compile_time_holdir, rel));
 
-fun load_poly_hol_context () =
-  let
-    val origdir = OS.FileSys.getDir ()
-  in
-    OS.FileSys.chDir (path_join(compile_time_holdir, "tools-poly"));
-    use "poly/poly-init2.ML";
-    OS.FileSys.chDir origdir
-  end;
-
-load_poly_hol_context ();
-Meta.quiet_load := true;
-
-fun quiet_holsource_use raw_file =
-  let
-    val file = holpathdb.subst_pathvars raw_file
-    val reader = HOLSource.fileToReader {quietOpen = false, print = fn _ => ()} file
-    fun line () = #line (#fileline reader ()) + 1
-  in
-    while not (#eof reader ()) do
-      PolyML.compiler
-        (#read reader,
-         [PolyML.Compiler.CPFileName file,
-          PolyML.Compiler.CPLineNo line,
-          PolyML.Compiler.CPOutStream (fn _ => ())])
-        ()
-  end;
-
+use_hol("tools-poly/poly/Binarymap.sig");
+use_hol("tools-poly/poly/Binarymap.sml");
 use_hol("tools/Holmake/toml/TOMLvalue_dtype.sml");
 use_hol("tools/Holmake/toml/TOMLvalue.sig");
 use_hol("tools/Holmake/toml/TOMLvalue.sml");
@@ -52,10 +27,6 @@ use_hol("tools/Holmake/toml/TOMLerror.sml");
 use_hol("tools/Holmake/toml/parseTOMLUtil.sml");
 use_hol("tools/Holmake/toml/parseTOMLFunctor.sml");
 use_hol("tools/Holmake/toml/parseTOML.sml");
-use_hol("tools/Holmake/deps/Holdep_tokens.sig");
-use_hol("tools/Holmake/deps/Holdep_tokens.sml");
-use_hol("tools/Holmake/deps/Holdep.sig");
-use_hol("tools/Holmake/deps/Holdep.sml");
 use_hol("tools/Holmake/toml/TOML.sig");
 use_hol("tools/Holmake/toml/TOML.sml");
 use_hol("tools/Holmake/util/terminal_primitives.sig");
