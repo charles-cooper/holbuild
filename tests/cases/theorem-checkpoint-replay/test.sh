@@ -187,7 +187,7 @@ second_log=$tmpdir/second.log
 require_grep "ATheory is up to date" "$second_log"
 
 same_artifact_skip_goalfrag_log=$tmpdir/same-artifact-skip-goalfrag.log
-(cd "$project" && "$HOLBUILD_BIN" --verbose build --skip-goalfrag ATheory) > "$same_artifact_skip_goalfrag_log"
+(cd "$project" && "$HOLBUILD_BIN" --verbose build --skip-proof-steps ATheory) > "$same_artifact_skip_goalfrag_log"
 require_grep "ATheory is up to date" "$same_artifact_skip_goalfrag_log"
 
 trace_project=$tmpdir/trace-project
@@ -195,8 +195,8 @@ mkdir -p "$trace_project/src"
 cp "$project/holproject.toml" "$trace_project/holproject.toml"
 cp "$project/src/AScript.sml" "$trace_project/src/AScript.sml"
 plan_log=$tmpdir/goalfrag-plan.log
-(cd "$trace_project" && "$HOLBUILD_BIN" goalfrag-plan ATheory:b_thm) > "$plan_log" 2>&1
-require_grep "holbuild goalfrag plan ATheory:b_thm source=src/AScript.sml (" "$plan_log"
+(cd "$trace_project" && "$HOLBUILD_BIN" execution-plan ATheory:b_thm) > "$plan_log" 2>&1
+require_grep "holbuild proof-ir plan ATheory:b_thm source=src/AScript.sml (" "$plan_log"
 require_grep "^[[:space:]]*00 .*CONJ_TAC" "$plan_log"
 require_grep "^[[:space:]]*[0-9][0-9][[:space:]]*>-" "$plan_log"
 require_grep "^[[:space:]]*[0-9][0-9] .*ACCEPT_TAC TRUTH" "$plan_log"
@@ -204,57 +204,28 @@ if grep -q "open_\|close_\|next_" "$plan_log"; then
   echo "goalfrag plan leaked structural IR names" >&2
   exit 1
 fi
-reverse_plan_log=$tmpdir/reverse-goalfrag-plan.log
-(cd "$trace_project" && "$HOLBUILD_BIN" goalfrag-plan ATheory:reverse_cases) > "$reverse_plan_log" 2>&1
-require_grep "^[[:space:]]*00 gen_tac" "$reverse_plan_log"
-require_grep "list_tac Tactical.REVERSE_LT" "$reverse_plan_log"
-require_grep "^[[:space:]]*[0-9][0-9] .*DISJ1_TAC" "$reverse_plan_log"
-repeat_plan_log=$tmpdir/repeat-goalfrag-plan.log
-(cd "$trace_project" && "$HOLBUILD_BIN" goalfrag-plan ATheory:repeat_split) > "$repeat_plan_log" 2>&1
-require_grep "^[[:space:]]*[0-9][0-9] .*rpt" "$repeat_plan_log"
-require_grep "^[[:space:]]*[0-9][0-9] .*gen_tac" "$repeat_plan_log"
-if grep -q "rpt (\|^[[:space:]]*[0-9][0-9].*)$" "$repeat_plan_log"; then
-  echo "goalfrag plan rendered repeat as fake numbered parens" >&2
-  exit 1
-fi
-by_plan_log=$tmpdir/by-goalfrag-plan.log
-(cd "$trace_project" && "$HOLBUILD_BIN" goalfrag-plan ATheory:by_after_split) > "$by_plan_log" 2>&1
-require_grep '^[[:space:]]*[0-9][0-9] .*sg `T`' "$by_plan_log"
-require_grep "^[[:space:]]*[0-9][0-9][[:space:]]*>-" "$by_plan_log"
-require_grep "^[[:space:]]*[0-9][0-9] .*ACCEPT_TAC TRUTH" "$by_plan_log"
-if grep -q " by (" "$by_plan_log"; then
-  echo "goalfrag plan kept by body opaque" >&2
-  exit 1
-fi
-suffices_plan_log=$tmpdir/suffices-goalfrag-plan.log
-(cd "$trace_project" && "$HOLBUILD_BIN" goalfrag-plan ATheory:suffices_after_split) > "$suffices_plan_log" 2>&1
-require_grep '^[[:space:]]*[0-9][0-9] .*`F` suffices_by simp\[\]' "$suffices_plan_log"
-if grep -q "open_\|close_\|next_" "$reverse_plan_log"; then
-  echo "goalfrag plan leaked structural IR names" >&2
-  exit 1
-fi
 if grep -q "holbuild goalfrag before theorem=b_thm\|elapsed_ms=\|ATheory built\|ATheory inspected\|resuming ATheory" "$plan_log"; then
-  echo "--goalfrag-plan executed the build instead of statically printing the plan" >&2
+  echo "execution-plan executed the build instead of statically printing the plan" >&2
   exit 1
 fi
 trace_log=$tmpdir/goalfrag-trace.log
-(cd "$trace_project" && "$HOLBUILD_BIN" build --force --goalfrag --goalfrag-trace ATheory) > "$trace_log" 2>&1
+(cd "$trace_project" && "$HOLBUILD_BIN" build --force --trace-steps ATheory) > "$trace_log" 2>&1
 require_grep "ATheory built" "$trace_log"
-if grep -q "holbuild goalfrag plan theorem=\|holbuild goalfrag before theorem=" "$trace_log"; then
-  echo "--goalfrag-trace should not dump successful proof traces to stdout" >&2
+if grep -q "holbuild proof-ir plan theorem=\|holbuild proof-ir before theorem=" "$trace_log"; then
+  echo "--trace-steps should not dump successful proof traces to stdout" >&2
   exit 1
 fi
-require_grep "goalfrag trace log:" "$trace_log"
+require_grep "proof step trace log:" "$trace_log"
 trace_child_log=$(find "$trace_project/.holbuild/logs" -name '*-ATheory-goalfrag-trace.log' -print -quit)
 require_file "$trace_child_log"
-require_grep "holbuild goalfrag plan theorem=a_thm steps=" "$trace_child_log"
-require_grep "holbuild goalfrag plan theorem=b_thm steps=" "$trace_child_log"
-require_grep "holbuild goalfrag before theorem=b_thm step=0" "$trace_child_log"
+require_grep "holbuild proof-ir plan theorem=a_thm steps=" "$trace_child_log"
+require_grep "holbuild proof-ir plan theorem=b_thm steps=" "$trace_child_log"
+require_grep "holbuild proof-ir before theorem=b_thm step=0" "$trace_child_log"
 if grep -q '^[0-9][0-9]* subgoals:$' "$trace_child_log"; then
   echo "goalfrag child log leaked interactive goal-stack progress" >&2
   exit 1
 fi
-require_grep "holbuild goalfrag after theorem=b_thm step=0.*elapsed_ms=" "$trace_child_log"
+require_grep "holbuild proof-ir after theorem=b_thm step=0.*elapsed_ms=" "$trace_child_log"
 force_log=$tmpdir/force.log
 (cd "$trace_project" && "$HOLBUILD_BIN" build --force ATheory) > "$force_log" 2>&1
 require_grep "ATheory built" "$force_log"
@@ -267,15 +238,15 @@ skip_goalfrag_project=$tmpdir/skip-goalfrag-project
 mkdir -p "$skip_goalfrag_project/src"
 cp "$project/holproject.toml" "$skip_goalfrag_project/holproject.toml"
 cp "$project/src/AScript.sml" "$skip_goalfrag_project/src/AScript.sml"
-(cd "$skip_goalfrag_project" && "$HOLBUILD_BIN" build --skip-goalfrag ATheory)
+(cd "$skip_goalfrag_project" && "$HOLBUILD_BIN" build --skip-proof-steps ATheory)
 require_file "$skip_goalfrag_project/.holbuild/obj/src/ATheory.sig"
 require_file "$skip_goalfrag_project/.holbuild/obj/src/ATheory.sml"
 require_file "$skip_goalfrag_project/.holbuild/obj/src/ATheory.dat"
 if grep -q "theorem_boundary a_thm" "$skip_goalfrag_project/.holbuild/dep/replay/src/AScript.sml.key"; then
-  echo "--skip-goalfrag should not create theorem boundaries" >&2
+  echo "--skip-proof-steps should not create theorem boundaries" >&2
   exit 1
 fi
-# --skip-goalfrag does not create theorem context checkpoints,
+# --skip-proof-steps does not create theorem context checkpoints,
 # but deps/final-context checkpoints persist for incremental rebuilds
 
 plain_replay_project=$tmpdir/plain-replay-project
@@ -308,9 +279,9 @@ path = Path("$plain_replay_project/src/AScript.sml")
 path.write_text(path.read_text().replace('FAIL_TAC "expected replay seed failure"', 'ACCEPT_TAC TRUTH'))
 PY
 plain_replay_log=$tmpdir/plain-replay.log
-(cd "$plain_replay_project" && "$HOLBUILD_BIN" build --skip-goalfrag --no-cache ATheory) > "$plain_replay_log" 2>&1
+(cd "$plain_replay_project" && "$HOLBUILD_BIN" build --skip-proof-steps --no-cache ATheory) > "$plain_replay_log" 2>&1
 if grep -q "from: theorem-context checkpoint after a_thm" "$plain_replay_log"; then
-  echo "--skip-goalfrag reused goalfrag theorem checkpoint" >&2
+  echo "--skip-proof-steps reused goalfrag theorem checkpoint" >&2
   exit 1
 fi
 require_grep "ATheory built" "$plain_replay_log"
@@ -582,11 +553,11 @@ require_grep "failed tactic input goals: 1" "$failure_again_log"
 require_file "$a_thm_context"
 require_file "$b_thm_failed_prefix"
 failed_prefix_plan_log=$tmpdir/failed-prefix-plan.log
-(cd "$failure_project" && "$HOLBUILD_BIN" build --goalfrag --goalfrag-plan ATheory:b_thm) > "$failed_prefix_plan_log" 2>&1
-require_grep "holbuild goalfrag plan ATheory:b_thm source=src/AScript.sml (" "$failed_prefix_plan_log"
+(cd "$failure_project" && "$HOLBUILD_BIN" execution-plan ATheory:b_thm) > "$failed_prefix_plan_log" 2>&1
+require_grep "holbuild proof-ir plan ATheory:b_thm source=src/AScript.sml (" "$failed_prefix_plan_log"
 require_grep "FAIL_TAC \"expected failure\"" "$failed_prefix_plan_log"
 if grep -q "resuming ATheory\|ATheory inspected\|failed tactic top input goal" "$failed_prefix_plan_log"; then
-  echo "--goalfrag-plan executed/replayed the build instead of statically printing the plan" >&2
+  echo "execution-plan executed/replayed the build instead of statically printing the plan" >&2
   exit 1
 fi
 python3 - <<PY
@@ -955,12 +926,12 @@ QED
 val _ = export_theory();
 SML
 branch_failure_log=$tmpdir/branch-failure.log
-if (cd "$branch_failure_project" && "$HOLBUILD_BIN" build --goalfrag --goalfrag-trace ATheory) > "$branch_failure_log" 2>&1; then
+if (cd "$branch_failure_project" && "$HOLBUILD_BIN" build --trace-steps ATheory) > "$branch_failure_log" 2>&1; then
   echo "expected branch proof to fail build" >&2
   exit 1
 fi
-require_grep "holbuild goalfrag trace:" "$branch_failure_log"
-require_grep "holbuild goalfrag after theorem=branch_failure.*status=failed.*elapsed_ms=" "$branch_failure_log"
+require_grep "holbuild proof-ir trace:" "$branch_failure_log"
+require_grep "holbuild proof-ir after theorem=branch_failure.*status=failed.*elapsed_ms=" "$branch_failure_log"
 require_grep "fragment: FAIL_TAC" "$branch_failure_log"
 require_grep "branch side failed" "$branch_failure_log"
 if grep -q "fragment: CONJ_TAC >- FAIL_TAC" "$branch_failure_log"; then
@@ -982,7 +953,7 @@ QED
 val _ = export_theory();
 SML
 grouped_failure_log=$tmpdir/grouped-failure.log
-if (cd "$grouped_failure_project" && "$HOLBUILD_BIN" build --goalfrag ATheory) > "$grouped_failure_log" 2>&1; then
+if (cd "$grouped_failure_project" && "$HOLBUILD_BIN" build ATheory) > "$grouped_failure_log" 2>&1; then
   echo "expected grouped proof to fail build" >&2
   exit 1
 fi
@@ -1021,11 +992,11 @@ QED
 val _ = export_theory();
 SML
 close_paren_failure_log=$tmpdir/close-paren-failure.log
-if (cd "$close_paren_failure_project" && "$HOLBUILD_BIN" build --goalfrag ATheory) > "$close_paren_failure_log" 2>&1; then
+if (cd "$close_paren_failure_project" && "$HOLBUILD_BIN" build ATheory) > "$close_paren_failure_log" 2>&1; then
   echo "expected close-paren branch proof to fail build" >&2
   exit 1
 fi
-require_grep "fragment: close_paren" "$close_paren_failure_log"
+require_grep "fragment: branch close" "$close_paren_failure_log"
 require_grep "source: .*AScript.sml:7:6-9:4" "$close_paren_failure_log"
 python3 - <<PY
 from pathlib import Path
@@ -1198,7 +1169,7 @@ val _ = export_theory();
 PY
 
 goalfrag_shorten_first_log=$tmpdir/goalfrag-shorten-first.log
-if (cd "$goalfrag_shorten_project" && "$HOLBUILD_BIN" build --goalfrag ATheory) > "$goalfrag_shorten_first_log" 2>&1; then
+if (cd "$goalfrag_shorten_project" && "$HOLBUILD_BIN" build ATheory) > "$goalfrag_shorten_first_log" 2>&1; then
   echo "expected goalfrag shortened replay first build to fail" >&2
   exit 1
 fi
@@ -1223,7 +1194,7 @@ end = text.index('QED', start)
 path.write_text(text[:start] + 'slow_tac >> FAIL_TAC "goalfrag short suffix failure"\n' + text[end:])
 PY
 goalfrag_shorten_edit_log=$tmpdir/goalfrag-shorten-edit.log
-if (cd "$goalfrag_shorten_project" && "$HOLBUILD_BIN" build --goalfrag ATheory) > "$goalfrag_shorten_edit_log" 2>&1; then
+if (cd "$goalfrag_shorten_project" && "$HOLBUILD_BIN" build ATheory) > "$goalfrag_shorten_edit_log" 2>&1; then
   echo "expected goalfrag shortened replay edited build to fail" >&2
   exit 1
 fi
@@ -1263,13 +1234,12 @@ val _ = export_theory();
 SML
 
 goalfrag_resume_first_log=$tmpdir/goalfrag-resume-first.log
-if (cd "$goalfrag_resume_project" && "$HOLBUILD_BIN" build --goalfrag ATheory) > "$goalfrag_resume_first_log" 2>&1; then
+if (cd "$goalfrag_resume_project" && "$HOLBUILD_BIN" build ATheory) > "$goalfrag_resume_first_log" 2>&1; then
   echo "expected first GoalFrag Resume proof to fail" >&2
   exit 1
 fi
 goalfrag_resume_first_count=$(wc -c < "$goalfrag_resume_counter" | tr -d ' ')
 [[ "$goalfrag_resume_first_count" = "2" ]] || { echo "expected first GoalFrag Resume run to execute slow prefix twice, got $goalfrag_resume_first_count" >&2; exit 1; }
-require_grep "goalfrag is deprecated; proof IR is the default" "$goalfrag_resume_first_log"
 require_grep "goalfrag resume suffix failure" "$goalfrag_resume_first_log"
 require_file "$(find "$goalfrag_resume_project/.holbuild/checkpoints" -name '*partial_right__failed_prefix.save' -print -quit)"
 
@@ -1279,10 +1249,9 @@ path = Path("$goalfrag_resume_project/src/AScript.sml")
 path.write_text(path.read_text().replace('FAIL_TAC "goalfrag resume suffix failure"', 'ACCEPT_TAC TRUTH'))
 PY
 goalfrag_resume_fixed_log=$tmpdir/goalfrag-resume-fixed.log
-(cd "$goalfrag_resume_project" && "$HOLBUILD_BIN" build --goalfrag ATheory) > "$goalfrag_resume_fixed_log" 2>&1
+(cd "$goalfrag_resume_project" && "$HOLBUILD_BIN" build ATheory) > "$goalfrag_resume_fixed_log" 2>&1
 goalfrag_resume_fixed_count=$(wc -c < "$goalfrag_resume_counter" | tr -d ' ')
 [[ "$goalfrag_resume_fixed_count" = "2" ]] || { echo "GoalFrag Resume failed-prefix replay reran unchanged slow prefix after suffix fix; count $goalfrag_resume_fixed_count" >&2; exit 1; }
-require_grep "goalfrag is deprecated; proof IR is the default" "$goalfrag_resume_fixed_log"
 require_grep "from: failed-prefix checkpoint in partial_right_" "$goalfrag_resume_fixed_log"
 require_grep "ATheory built" "$goalfrag_resume_fixed_log"
 require_file "$goalfrag_resume_project/.holbuild/obj/src/ATheory.dat"

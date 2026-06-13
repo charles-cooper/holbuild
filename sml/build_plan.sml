@@ -405,8 +405,14 @@ fun make_node external_dirs source =
 
 fun plan holdir sources targets =
   let
+    val _ = if holdir = "" then HolbuildDependencies.clear_analyser_path ()
+            else HolbuildDependencies.set_analyser_path (HolbuildHolSharedCache.analyser_path_for_holdir holdir)
     val external_dirs = [normalize_path (Path.concat(holdir, "sigobj"))]
     val nodes = map (make_node external_dirs) sources
+    val _ = HolbuildDependencies.prefetch_cached_with_hash
+              (map (fn node => {cache_path = dependency_cache_path (source_of node),
+                                source_path = #source_path (source_of node),
+                                source_hash = source_hash_of node}) nodes)
     val index = build_name_index nodes
     val lookup = indexed_nodes_named index
     val roots = target_roots lookup nodes targets
@@ -621,6 +627,65 @@ fun external_dependency_names_with timing sources =
 
 fun external_dependency_kind name = if theory_name name then "theory" else "lib"
 
+fun external_sources_for_name dirs name =
+  case external_artifact_path_in dirs name of
+      NONE => []
+    | SOME artifact =>
+        let
+          val resolved = resolved_link_path artifact
+          val stem = drop_object_suffix resolved
+        in
+          List.filter readable (external_source_candidates stem name)
+        end
+
+fun prefetch_external_dependency_sources_with lookup nodes =
+  let
+    fun item_id (dirs, name) = String.concatWith "\030" dirs ^ "\029" ^ name
+    fun seen item seen_ids = member (item_id item) seen_ids
+    fun add_unseen (item, items) =
+      if List.exists (fn existing => item_id existing = item_id item) items then items else item :: items
+    fun source_requests paths =
+      map (fn path => {source_path = path, source_hash = HolbuildHash.file_sha1 path}) paths
+    fun deps_for_path path =
+      let val source_hash = HolbuildHash.file_sha1 path
+      in HolbuildDependencies.extract_global_cached_with_hash {source_path = path, source_hash = source_hash} end
+    fun deps_names deps = #loads deps @ #holdep_mentions deps
+    fun names_for_sources paths = unique_strings (List.concat (map (deps_names o deps_for_path) paths))
+    fun follow_names dirs names =
+      List.filter (fn (_, name) => Option.isSome (external_artifact_path_in dirs name))
+        (map (fn name => (dirs, name)) names)
+    fun initial_items_for_node node =
+      let val dirs = external_dirs_of node
+          val names = direct_external_libs_with lookup node @ direct_external_theories_with lookup node
+      in map (fn name => (dirs, name)) names end
+    fun loop seen_ids pending =
+      case pending of
+          [] => ()
+        | _ =>
+            let
+              val fresh = List.filter (fn item => not (seen item seen_ids)) pending
+              val seen_ids' = List.foldl (fn (item, acc) => item_id item :: acc) seen_ids fresh
+              val paths = unique_strings (List.concat (map (fn (dirs, name) => external_sources_for_name dirs name) fresh))
+              val _ = HolbuildDependencies.prefetch_global_cached_with_hash (source_requests paths)
+              val next =
+                List.foldl
+                  (fn ((dirs, name), acc) =>
+                      let
+                        val source_paths = external_sources_for_name dirs name
+                        val names = names_for_sources source_paths
+                      in
+                        List.foldl add_unseen acc (follow_names dirs names)
+                      end)
+                  [] fresh
+            in
+              loop seen_ids' next
+            end
+    val initial = List.foldl add_unseen [] (List.concat (map initial_items_for_node nodes))
+  in
+    loop [] initial
+  end
+  handle HolbuildDependencies.Error msg => raise Error msg
+
 (* External HOL objects are loaded from HOLDIR/sigobj, so their keys must reflect
    what HOL will load.  For theories, Holmake's .cachekey and the .dat hash are
    both acceptable semantic boundaries; recording both when available is stricter
@@ -771,6 +836,7 @@ fun add_input_key config_lines_for_node toolchain_key nodes (node, keys) =
 
 fun compute_input_keys_with lookup config_lines_for_node toolchain_key nodes =
   let
+    val _ = prefetch_external_dependency_sources_with lookup nodes
     val external_timing = new_external_timing ()
     val external_key = external_key_lookup_with_timing external_timing toolchain_key
     val keys =

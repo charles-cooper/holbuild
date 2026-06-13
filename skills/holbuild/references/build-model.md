@@ -56,7 +56,7 @@ hash(
 
 **Any source byte change** (including comments/proof edits) changes the action key and cascades to all dependents. This is conservative — v1 does not attempt semantic equivalence of generated outputs.
 
-Proof engine/checkpoint/timeout/trace flags are intentionally not final artifact action-key inputs. Switching `--skip-checkpoints`, `--skip-goalfrag`, `--goalfrag`, or root tactic timeout should not rebuild an otherwise up-to-date semantic artifact.
+Proof engine/checkpoint/timeout/trace flags are intentionally not final artifact action-key inputs. Switching `--skip-checkpoints`, `--skip-proof-steps`, or root tactic timeout should not rebuild an otherwise up-to-date semantic artifact.
 
 `extra_deps` are filesystem dependencies outside the normal HOL dependency graph. Manifest entries are package-root-relative; source annotations of the form `holbuild_extra_deps ["../data/table.txt"]` are source-file-relative. Entries may name files, directories, or simple globs. Expanded contents are hashed into the action key, and source-declared entries are staged so matching relative filesystem reads work during the action.
 

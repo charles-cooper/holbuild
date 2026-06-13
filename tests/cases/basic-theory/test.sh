@@ -260,7 +260,7 @@ mkdir -p "$stage_residue_dir"
 printf 'poisoned stale stage file\n' > "$stage_residue_dir/ATheory.dat"
 printf 'poisoned stale generated source\n' > "$stage_residue_dir/ATheory.sml"
 printf 'poisoned stale generated signature\n' > "$stage_residue_dir/ATheory.sig"
-(cd "$stage_residue_project" && "$HOLBUILD_BIN" build --skip-goalfrag --no-cache ATheory) > "$tmpdir/stage-residue.log"
+(cd "$stage_residue_project" && "$HOLBUILD_BIN" build --skip-proof-steps --no-cache ATheory) > "$tmpdir/stage-residue.log"
 require_grep "ATheory built" "$tmpdir/stage-residue.log"
 require_file "$stage_residue_project/.holbuild/obj/src/ATheory.dat"
 if strings -a "$stage_residue_project/.holbuild/obj/src/ATheory.dat" | grep -q "poisoned stale"; then
@@ -268,18 +268,20 @@ if strings -a "$stage_residue_project/.holbuild/obj/src/ATheory.dat" | grep -q "
   exit 1
 fi
 bad_flags_log=$tmpdir/bad-flags.log
-if (cd "$project" && "$HOLBUILD_BIN" build --skip-goalfrag --tactic-timeout 0 ATheory) > "$bad_flags_log" 2>&1; then
-  echo "--skip-goalfrag --tactic-timeout should fail" >&2
+if (cd "$project" && "$HOLBUILD_BIN" build --skip-proof-steps --tactic-timeout 0 ATheory) > "$bad_flags_log" 2>&1; then
+  echo "--skip-proof-steps --tactic-timeout should fail" >&2
   exit 1
 fi
-require_grep "requires theorem instrumentation" "$bad_flags_log"
+require_grep "tactic-timeout requires proof steps; remove --skip-proof-steps" "$bad_flags_log"
 
 deprecated_new_ir_log=$tmpdir/deprecated-new-ir.log
 (cd "$project" && "$HOLBUILD_BIN" --verbose build --new-ir ATheory) > "$deprecated_new_ir_log" 2>&1
 require_grep "new-ir is deprecated and has no effect; proof IR is the default" "$deprecated_new_ir_log"
 require_grep "ATheory is up to date" "$deprecated_new_ir_log"
 
-deprecated_goalfrag_log=$tmpdir/deprecated-goalfrag.log
-(cd "$project" && "$HOLBUILD_BIN" --verbose build --goalfrag ATheory) > "$deprecated_goalfrag_log" 2>&1
-require_grep "goalfrag is deprecated; proof IR is the default" "$deprecated_goalfrag_log"
-require_grep "ATheory is up to date" "$deprecated_goalfrag_log"
+removed_goalfrag_log=$tmpdir/removed-goalfrag.log
+if (cd "$project" && "$HOLBUILD_BIN" --verbose build --goalfrag ATheory) > "$removed_goalfrag_log" 2>&1; then
+  echo "expected removed --goalfrag to fail" >&2
+  exit 1
+fi
+require_grep "goalfrag has been removed; proof steps are enabled by default" "$removed_goalfrag_log"

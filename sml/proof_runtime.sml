@@ -22,6 +22,7 @@ val context_info_ref = ref NONE : (string * string * int) option ref
 val failed_prefix_resume_active_ref = ref false
 val proving_with_proof_ir_ref = ref false
 val active_tactic_text_ref = ref ""
+val active_plan_ref = ref (NONE : HolbuildProofIr.step list option)
 val successful_step_count_ref = ref 0
 val successful_prefix_end_ref = ref 0
 val failed_step_end_ref = ref NONE : int option ref
@@ -89,9 +90,8 @@ fun encode_step_signature proof_step =
   let val (kind, program) = HolbuildProofIr.step_signature proof_step
   in kind ^ "\t" ^ String.toString program ^ "\n" end
 
-fun save_failed_prefix_steps path tactic_text step_count =
+fun save_failed_prefix_steps path plan step_count =
   let
-    val plan = HolbuildProofIr.steps tactic_text
     val text = String.concat (map encode_step_signature (take_at_most step_count plan))
   in write_text_file (path ^ ".steps") text end
   handle _ => ()
@@ -142,7 +142,8 @@ fun save_failed_prefix_checkpoint () =
             val _ = save_checkpoint "failed_prefix" false failed_prefix_path failed_prefix_ok depth
             val _ = write_text_file (failed_prefix_path ^ ".meta") meta_text
             val _ = write_text_file (failed_prefix_path ^ ".prefix") prefix_text
-            val _ = save_failed_prefix_steps failed_prefix_path (!active_tactic_text_ref) step_count
+            val plan = case !active_plan_ref of SOME p => p | NONE => raise Fail "internal error: proof-IR plan is not installed"
+            val _ = save_failed_prefix_steps failed_prefix_path plan step_count
           in () end
 
 fun restore_failed_prefix_checkpoint_info (name, tactic_text, failed_prefix_path, failed_prefix_ok) =
@@ -151,6 +152,8 @@ fun restore_failed_prefix_checkpoint_info (name, tactic_text, failed_prefix_path
     theorem_info_ref := SOME ("theorem", name, tactic_text, "", "", "", "",
                               failed_prefix_path, failed_prefix_ok, false, depth)
   end
+
+fun set_theorem_plan plan = active_plan_ref := plan
 
 fun begin_theorem (kind, name, tactic_text, context_path, context_ok,
                    end_path, end_ok, failed_prefix_path, failed_prefix_ok, has_attrs) =
@@ -266,9 +269,32 @@ fun alpha_convert_to_goal g th =
 
 fun history_top_thm g = alpha_convert_to_goal g (project_history goalStack.extract_thm)
 
+fun trim_left s =
+  let
+    val n = size s
+    fun loop i = if i >= n orelse not (Char.isSpace (String.sub(s, i))) then i else loop (i + 1)
+    val i = loop 0
+  in String.extract(s, i, NONE) end
+
+fun drop_prefix prefix s =
+  if String.isPrefix prefix s then SOME (String.extract(s, size prefix, NONE)) else NONE
+
+fun diagnostic_fragment_label label =
+  let val s = trim_left label
+  in
+    if s = ">- solved" then "branch close"
+    else
+      case drop_prefix ">> " s of
+          SOME rest => rest
+        | NONE =>
+          case drop_prefix ">- " s of
+              SOME rest => rest
+            | NONE => s
+  end
+
 fun print_goal_state label goals =
   TextIO.output(TextIO.stdErr,
-    String.concat ["\nholbuild goal state at failed fragment: ", label,
+    String.concat ["\nholbuild goal state at failed fragment: ", diagnostic_fragment_label label,
                    failed_theorem_line (),
                    failed_step_end_line (),
                    failed_step_span_line (),
@@ -724,7 +750,7 @@ fun with_theorem_trace name f =
 fun proof_ir_prove name end_path end_ok checkpoint_depth g original_tac tactic_text =
   let
     val _ = active_tactic_text_ref := tactic_text
-    val plan = HolbuildProofIr.steps tactic_text
+    val plan = case !active_plan_ref of SOME p => p | NONE => raise Fail "internal error: proof-IR plan is not installed"
     val _ = trace_plan name plan
     val _ = stop_after_plan_if_requested ()
   in
@@ -814,7 +840,7 @@ fun finish_failed_prefix name old_prefix_text old_step_count tactic_text failed_
        with_theorem_trace name (fn () =>
         let
           val _ = active_tactic_text_ref := tactic_text
-          val plan = HolbuildProofIr.steps tactic_text
+          val plan = case !active_plan_ref of SOME p => p | NONE => raise Fail "internal error: proof-IR plan is not installed"
           val _ = ensure_history_limit (Int.max(length plan + 1, old_step_count + 1))
           val _ = trace_plan name plan
           val _ = stop_after_plan_if_requested ()

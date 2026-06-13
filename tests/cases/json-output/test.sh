@@ -222,8 +222,8 @@ PY
 
 trace_stdout=$tmpdir/trace.stdout
 trace_stderr=$tmpdir/trace.stderr
-if (cd "$project" && "$HOLBUILD_BIN" --json build --goalfrag-trace JTheory) > "$trace_stdout" 2> "$trace_stderr"; then
-  echo "expected json trace stub to reject --goalfrag-trace" >&2
+if (cd "$project" && "$HOLBUILD_BIN" --json build --trace-steps JTheory) > "$trace_stdout" 2> "$trace_stderr"; then
+  echo "expected json trace-steps stub to reject --trace-steps" >&2
   exit 1
 fi
 if [[ -s "$trace_stderr" ]]; then
@@ -237,8 +237,8 @@ import sys
 
 events = [json.loads(line) for line in open(sys.argv[1], encoding='utf-8') if line.strip()]
 message = '\n'.join(e.get('message', '') for e in events if e.get('event') == 'error')
-if 'structured proof_trace events' not in message:
-    raise SystemExit(f'json trace rejection did not explain proof_trace stub: {message!r}')
+if 'structured proof-step trace events' not in message:
+    raise SystemExit(f'json trace rejection did not explain proof-step trace stub: {message!r}')
 PY
 
 gen_fail_project=$tmpdir/gen-fail-project

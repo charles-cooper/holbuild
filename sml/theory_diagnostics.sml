@@ -618,8 +618,14 @@ fun field_after key line =
     scan 0
   end
 
+fun proof_trace_line line =
+  String.isPrefix "holbuild proof-ir " line
+
+fun proof_trace_after_line line =
+  String.isPrefix "holbuild proof-ir after " line
+
 fun failed_trace_theorem lines =
-  case List.filter (fn line => String.isPrefix "holbuild goalfrag after " line andalso
+  case List.filter (fn line => proof_trace_after_line line andalso
                                String.isSubstring "status=failed" line) lines of
       [] => NONE
     | failed => field_after "theorem" (List.last failed)
@@ -627,14 +633,14 @@ fun failed_trace_theorem lines =
 fun summarize_goalfrag_trace path =
   let
     val lines = String.fields (fn c => c = #"\n") (read_text path)
-    val trace_lines = List.filter (String.isPrefix "holbuild goalfrag ") lines
+    val trace_lines = List.filter proof_trace_line lines
     val focused =
       case failed_trace_theorem trace_lines of
           NONE => trace_lines
         | SOME theorem => List.filter (fn line => field_after "theorem" line = SOME theorem) trace_lines
   in
     if null focused then NONE
-    else SOME ("holbuild goalfrag trace:\n" ^ String.concat (map (fn line => line ^ "\n") focused))
+    else SOME ("holbuild proof-ir trace:\n" ^ String.concat (map (fn line => line ^ "\n") focused))
   end
   handle _ => NONE
 

@@ -1,6 +1,7 @@
-structure HolbuildProofIr =
+structure HolbuildProofIrPlanner =
 struct
 
+open HolbuildProofIr
 open HOLSourceAST
 
 fun repeat_string s n = if n <= 0 then "" else s ^ repeat_string s (n - 1)
@@ -111,79 +112,6 @@ and list_tactic =
   | LtSelectGoals of int * int
   | LtRepairGroup of (int * int) * list_tactic
   | LtAtomic of int * (int * int)
-
-datatype branch_phase = BranchStart | BranchSuffix | BranchClose
-
-datatype step =
-    StepTactic of {start_pos : int, end_pos : int, label : string, program : string}
-  | StepList of {start_pos : int, end_pos : int, label : string, program : string}
-  | StepChoice of {start_pos : int, end_pos : int, label : string, program : string, alternatives : string list}
-  | StepListChoice of {start_pos : int, end_pos : int, label : string, program : string, alternatives : string list}
-  | StepThen1 of {start_pos : int, end_pos : int, first_label : string, label : string, list_suffix : bool, first_program : string, second_program : string}
-  | StepGentleThen1 of {start_pos : int, end_pos : int, label : string, list_suffix : bool, first_program : string, second_program : string}
-  | StepBranch of {start_pos : int, end_pos : int, label : string, program : string, phase : branch_phase}
-  | StepBranchList of {start_pos : int, end_pos : int, label : string, program : string}
-  | StepPlain of {start_pos : int, end_pos : int, label : string, program : string}
-
-fun step_start (StepTactic {start_pos, ...}) = start_pos
-  | step_start (StepList {start_pos, ...}) = start_pos
-  | step_start (StepChoice {start_pos, ...}) = start_pos
-  | step_start (StepListChoice {start_pos, ...}) = start_pos
-  | step_start (StepThen1 {start_pos, ...}) = start_pos
-  | step_start (StepGentleThen1 {start_pos, ...}) = start_pos
-  | step_start (StepBranch {start_pos, ...}) = start_pos
-  | step_start (StepBranchList {start_pos, ...}) = start_pos
-  | step_start (StepPlain {start_pos, ...}) = start_pos
-
-fun step_end (StepTactic {end_pos, ...}) = end_pos
-  | step_end (StepList {end_pos, ...}) = end_pos
-  | step_end (StepChoice {end_pos, ...}) = end_pos
-  | step_end (StepListChoice {end_pos, ...}) = end_pos
-  | step_end (StepThen1 {end_pos, ...}) = end_pos
-  | step_end (StepGentleThen1 {end_pos, ...}) = end_pos
-  | step_end (StepBranch {end_pos, ...}) = end_pos
-  | step_end (StepBranchList {end_pos, ...}) = end_pos
-  | step_end (StepPlain {end_pos, ...}) = end_pos
-
-fun step_label (StepTactic {label, ...}) = label
-  | step_label (StepList {label, ...}) = label
-  | step_label (StepChoice {label, ...}) = label
-  | step_label (StepListChoice {label, ...}) = label
-  | step_label (StepThen1 {label, ...}) = label
-  | step_label (StepGentleThen1 {label, ...}) = label
-  | step_label (StepBranch {label, ...}) = label
-  | step_label (StepBranchList {label, ...}) = label
-  | step_label (StepPlain {label, ...}) = label
-
-fun step_program (StepTactic {program, ...}) = program
-  | step_program (StepList {program, ...}) = program
-  | step_program (StepChoice {program, ...}) = program
-  | step_program (StepListChoice {program, ...}) = program
-  | step_program (StepThen1 {list_suffix, first_program, second_program, ...}) =
-      let val tactic = "Tactical.THEN1(" ^ first_program ^ ", " ^ second_program ^ ")"
-      in if list_suffix then "Tactical.ALLGOALS (" ^ tactic ^ ")" else tactic end
-  | step_program (StepGentleThen1 {list_suffix, first_program, second_program, ...}) =
-      let val tactic = "HolbuildProofRuntime.gentle_then1 (" ^ first_program ^ ") (" ^ second_program ^ ")"
-      in if list_suffix then "Tactical.ALLGOALS (" ^ tactic ^ ")" else tactic end
-  | step_program (StepBranch {program, ...}) = program
-  | step_program (StepBranchList {program, ...}) = program
-  | step_program (StepPlain {program, ...}) = program
-
-fun step_kind (StepTactic _) = "tactic"
-  | step_kind (StepList _) = "list_tactic"
-  | step_kind (StepChoice _) = "choice"
-  | step_kind (StepListChoice _) = "list_choice"
-  | step_kind (StepThen1 {list_suffix = true, ...}) = "list_then1"
-  | step_kind (StepThen1 _) = "then1"
-  | step_kind (StepGentleThen1 {list_suffix = true, ...}) = "list_gentle_then1"
-  | step_kind (StepGentleThen1 _) = "gentle_then1"
-  | step_kind (StepBranch {phase = BranchStart, ...}) = "branch_start"
-  | step_kind (StepBranch {phase = BranchSuffix, ...}) = "branch_suffix"
-  | step_kind (StepBranch {phase = BranchClose, ...}) = "branch_close"
-  | step_kind (StepBranchList _) = "branch_list_suffix"
-  | step_kind (StepPlain _) = "plain"
-
-fun step_signature proof_step = (step_kind proof_step, step_program proof_step)
 
 fun tactic_end (TacThen []) = 0
   | tactic_end (TacThen xs) = tactic_end (List.last xs)
@@ -300,18 +228,22 @@ and parse_tactic_infix left opn right whole =
     | "THEN_LT" => TacThenLT (parse_tactic_ast left, parse_list_tactic_ast right)
     | "THENL" => parse_thenl left right whole
     | ">|" => parse_thenl left right whole
-    | ">-" => TacThen1 (parse_tactic_ast left, parse_tactic_ast right)
-    | "THEN1" => TacThen1 (parse_tactic_ast left, parse_tactic_ast right)
-    | "by" => TacThen1 (TacSubgoal (span left), parse_tactic_ast right)
-    | "suffices_by" => TacSufficesBy (span left, parse_tactic_ast right)
+    | ">-" => TacThen1 (parse_tactic_ast left, parse_branch_rhs_ast right)
+    | "THEN1" => TacThen1 (parse_tactic_ast left, parse_branch_rhs_ast right)
+    | "by" => TacThen1 (TacSubgoal (span left), parse_branch_rhs_ast right)
+    | "suffices_by" => TacSufficesBy (span left, parse_branch_rhs_ast right)
     | "ORELSE" => TacOrelse (flatten_orelse left @ flatten_orelse right)
     | ">~" => TacThenLT (parse_tactic_ast left, LtSelectGoal (span right))
     | ">>~" => TacThenLT (parse_tactic_ast left, LtSelectGoals (span right))
     | ">>~-" => parse_select_then1 left right whole
     | _ => atomic whole
+and parse_branch_rhs_ast e =
+  case e of
+      Parens {exp, right = SOME _, ...} => TacRepairGroup (span e, parse_tactic_ast exp)
+    | _ => parse_tactic_ast e
 and parse_thenl left right whole =
   case list_elems right of
-      SOME branches => TacThenL (parse_tactic_ast left, map parse_tactic_ast branches)
+      SOME branches => TacThenL (parse_tactic_ast left, map parse_branch_rhs_ast branches)
     | NONE => atomic whole
 and parse_select_then1 left right whole =
   case tuple_elems right of
@@ -633,6 +565,8 @@ and branch_steps source rhs =
           List.concat (map (branch_suffix_steps source) rest) @
           [branch_step sp "   >- solved" BranchClose "Tactical.ALL_TAC"]
         end
+    | TacRepairGroup (sp, inner) =>
+        branch_start_steps source inner @ [branch_step sp "   >- solved" BranchClose "Tactical.ALL_TAC"]
     | _ =>
         [list_step (tactic_span rhs) (">- " ^ source_text source (tactic_span rhs))
            ("Tactical.NTH_GOAL (Tactical.THEN(" ^ tactic_program source rhs ^ ", Tactical.NO_TAC)) 1")]
@@ -753,53 +687,5 @@ fun steps source =
   (plan_tactic source (parse_tactic_ast (parse_tactic_expr source))
    handle _ => plain_steps source)
 
-fun display_line_count (StepChoice {alternatives, ...}) = 1 + Int.max(0, 2 * length alternatives - 1)
-  | display_line_count (StepListChoice {alternatives, ...}) = 1 + Int.max(0, 2 * length alternatives - 1)
-  | display_line_count (StepThen1 _) = 2
-  | display_line_count (StepGentleThen1 _) = 2
-  | display_line_count _ = 1
-
-fun format_index i = if i < 10 then "0" ^ Int.toString i else Int.toString i
-
-fun format_choice_lines i label alternatives =
-  let
-    fun alt_lines (_, []) = ""
-      | alt_lines (j, [alt]) = "  " ^ format_index j ^ "   " ^ alt ^ "\n"
-      | alt_lines (j, alt :: rest) =
-          "  " ^ format_index j ^ "   " ^ alt ^ "\n" ^
-          "  " ^ format_index (j + 1) ^ "   |\n" ^
-          alt_lines (j + 2, rest)
-  in
-    "  " ^ format_index i ^ " " ^ label ^ "\n" ^ alt_lines (i + 1, alternatives)
-  end
-
-fun format_step (i, step) =
-  case step of
-      StepChoice {label, alternatives, ...} => format_choice_lines i label alternatives
-    | StepListChoice {label, alternatives, ...} => format_choice_lines i label alternatives
-    | StepThen1 {first_label, label, ...} =>
-        "  " ^ format_index i ^ " " ^ first_label ^ "\n" ^
-        "  " ^ format_index (i + 1) ^ " " ^ label ^ "\n"
-    | StepGentleThen1 {first_program, label, ...} =>
-        "  " ^ format_index i ^ " >> " ^ first_program ^ "\n" ^
-        "  " ^ format_index (i + 1) ^ " " ^ label ^ "\n"
-    | StepPlain {label, ...} => "  " ^ format_index i ^ " plain " ^ label ^ "\n"
-    | _ => "  " ^ format_index i ^ " " ^ step_label step ^ "\n"
-
-fun format_plan_lines steps =
-  let
-    fun loop _ [] = ""
-      | loop i (step :: rest) = format_step (i, step) ^ loop (i + display_line_count step) rest
-  in loop 0 steps end
-
-fun display_step_count plan = List.foldl (fn (step, n) => n + display_line_count step) 0 plan
-
-fun format_tactic {theory, theorem, source} tactic_text =
-  let val plan = steps tactic_text
-  in
-    "holbuild proof-ir plan " ^ theory ^ ":" ^ theorem ^ " source=" ^ source ^
-    " (" ^ Int.toString (display_step_count plan) ^ " steps)\n" ^
-    format_plan_lines plan
-  end
 
 end

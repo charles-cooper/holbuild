@@ -1,13 +1,10 @@
-fun compile_holdir () =
-  case OS.Process.getEnv "HOLBUILD_HOLDIR" of
+fun compile_hol_source () =
+  case OS.Process.getEnv "HOL_SOURCE" of
       SOME h => h
     | NONE =>
-      case OS.Process.getEnv "HOLDIR" of
-          SOME h => h
-        | NONE =>
-          raise Fail "set HOLBUILD_HOLDIR or HOLDIR when compiling holbuild";
+      raise Fail "set HOL_SOURCE=/path/to/HOL source checkout when compiling holbuild";
 
-val compile_time_holdir = compile_holdir ();
+val compile_time_hol_source = compile_hol_source ();
 
 structure HolbuildRuntimePaths =
 struct
@@ -16,37 +13,10 @@ end
 
 fun path_join (a, b) = OS.Path.concat(a, b);
 
-fun use_hol rel = use (path_join(compile_time_holdir, rel));
+fun use_hol rel = use (path_join(compile_time_hol_source, rel));
 
-fun load_poly_hol_context () =
-  let
-    val origdir = OS.FileSys.getDir ()
-  in
-    OS.FileSys.chDir (path_join(compile_time_holdir, "tools-poly"));
-    use "poly/poly-init2.ML";
-    OS.FileSys.chDir origdir
-  end;
-
-load_poly_hol_context ();
-Meta.quiet_load := true;
-
-fun quiet_holsource_use raw_file =
-  let
-    val file = holpathdb.subst_pathvars raw_file
-    val reader = HOLSource.fileToReader {quietOpen = false, print = fn _ => ()} file
-    fun line () = #line (#fileline reader ()) + 1
-  in
-    while not (#eof reader ()) do
-      PolyML.compiler
-        (#read reader,
-         [PolyML.Compiler.CPFileName file,
-          PolyML.Compiler.CPLineNo line,
-          PolyML.Compiler.CPOutStream (fn _ => ())])
-        ()
-  end;
-
-Meta.loadPlan quiet_holsource_use "TacticParse";
-
+use_hol("tools-poly/poly/Binarymap.sig");
+use_hol("tools-poly/poly/Binarymap.sml");
 use_hol("tools/Holmake/toml/TOMLvalue_dtype.sml");
 use_hol("tools/Holmake/toml/TOMLvalue.sig");
 use_hol("tools/Holmake/toml/TOMLvalue.sml");
@@ -54,18 +24,18 @@ use_hol("tools/Holmake/toml/TOMLerror.sml");
 use_hol("tools/Holmake/toml/parseTOMLUtil.sml");
 use_hol("tools/Holmake/toml/parseTOMLFunctor.sml");
 use_hol("tools/Holmake/toml/parseTOML.sml");
-use_hol("tools/Holmake/deps/Holdep_tokens.sig");
-use_hol("tools/Holmake/deps/Holdep_tokens.sml");
-use_hol("tools/Holmake/deps/Holdep.sig");
-use_hol("tools/Holmake/deps/Holdep.sml");
 use_hol("tools/Holmake/toml/TOML.sig");
 use_hol("tools/Holmake/toml/TOML.sml");
 use_hol("tools/Holmake/util/terminal_primitives.sig");
 use_hol("tools/Holmake/util/poly-terminal-prims.ML");
 use_hol("src/portableML/poly/SHA1_ML.sig");
 use_hol("src/portableML/poly/w64-SHA1.ML");
+use_hol("src/portableML/poly/ConcIsaLib.sml");
+use_hol("src/portableML/Redblackset.sig");
+use_hol("src/portableML/Redblackset.sml");
 
 use "sml/hash.sml";
+use "sml/version.sml";
 use "sml/builtin_manifests.sml";
 use "sml/git_cache.sml";
 use "sml/hol_shared_cache.sml";
@@ -74,6 +44,7 @@ use "sml/toolchain.sml";
 use "sml/status.sml";
 use "sml/generators.sml";
 use "sml/source_index.sml";
+use "sml/analyser/analysis_protocol.sml";
 use "sml/dependencies.sml";
 use "sml/build_plan.sml";
 use "sml/checkpoint_save_runtime.sml";
@@ -85,8 +56,7 @@ use "sml/theory_spans.sml";
 use "sml/cache.sml";
 use "sml/build_exec.sml";
 use "sml/tactic_timeout_policy.sml";
-use "sml/goalfrag_plan.sml";
-use "sml/proof_ir.sml";
+use "sml/proof_ir_types.sml";
 use "sml/commands.sml";
 
 fun main () = HolbuildCommands.main (CommandLine.arguments())

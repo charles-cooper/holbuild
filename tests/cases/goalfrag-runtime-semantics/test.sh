@@ -12,10 +12,9 @@ cleanup() { rm -rf "$tmpdir"; }
 trap cleanup EXIT
 use_case_cache "$tmpdir/cache"
 
-make_project() {
-  local project=$1
-  mkdir -p "$project/src"
-  cat > "$project/holproject.toml" <<TOML
+project=$tmpdir/project
+mkdir -p "$project/src"
+cat > "$project/holproject.toml" <<TOML
 [holbuild]
 schema = 2
 
@@ -24,17 +23,52 @@ git = "https://github.com/HOL-Theorem-Prover/HOL.git"
 rev = "$(holbuild_pinned_hol_rev)"
 
 [project]
-name = "goalfrag-runtime"
+name = "removed-goalfrag-runtime"
+
+[build]
+members = ["src"]
+TOML
+cat > "$project/src/AScript.sml" <<'SML'
+open HolKernel Parse boolLib bossLib;
+val _ = new_theory "A";
+Theorem simple:
+  T
+Proof
+  ACCEPT_TAC TRUTH
+QED
+val _ = export_theory();
+SML
+
+log=$tmpdir/goalfrag.log
+if (cd "$project" && "$HOLBUILD_BIN" build --goalfrag ATheory) > "$log" 2>&1; then
+  echo "expected removed --goalfrag option to fail" >&2
+  exit 1
+fi
+require_grep "goalfrag has been removed; proof steps are enabled by default" "$log"
+
+make_project() {
+  local p=$1
+  local name=$2
+  mkdir -p "$p/src"
+  cat > "$p/holproject.toml" <<TOML
+[holbuild]
+schema = 2
+
+[dependencies.hol]
+git = "https://github.com/HOL-Theorem-Prover/HOL.git"
+rev = "$(holbuild_pinned_hol_rev)"
+
+[project]
+name = "$name"
 
 [build]
 members = ["src"]
 TOML
 }
 
-run_new_ir_smoke_project() {
-  local project=$tmpdir/new-ir
-  make_project "$project"
-  cat > "$project/src/AScript.sml" <<'SML'
+runtime_project=$tmpdir/proof-step-runtime
+make_project "$runtime_project" proof-step-runtime
+cat > "$runtime_project/src/AScript.sml" <<'SML'
 open HolKernel Parse boolLib bossLib;
 val _ = new_theory "A";
 
@@ -49,19 +83,6 @@ Theorem branch_then1:
 Proof
   CONJ_TAC >- ACCEPT_TAC TRUTH >- ACCEPT_TAC TRUTH
 QED
-
-val _ = export_theory();
-SML
-  (cd "$project" && HOLBUILD_ECHO_CHILD_LOGS=1 "$HOLBUILD_BIN" build --skip-checkpoints --tactic-timeout 60) > "$tmpdir/new-ir.out" 2>&1
-  require_file "$project/.holbuild/obj/src/ATheory.dat"
-}
-
-run_goalfrag_success_project() {
-  local project=$tmpdir/success
-  make_project "$project"
-  cat > "$project/src/AScript.sml" <<'SML'
-open HolKernel Parse boolLib bossLib;
-val _ = new_theory "A";
 
 Theorem try_no_tac:
   T
@@ -140,23 +161,14 @@ QED
 
 val _ = export_theory();
 SML
-  (cd "$project" && HOLBUILD_ECHO_CHILD_LOGS=1 "$HOLBUILD_BIN" build --goalfrag --skip-checkpoints --tactic-timeout 60) > "$tmpdir/success.goalfrag.out" 2>&1
-  require_file "$project/.holbuild/obj/src/ATheory.sig"
-  require_file "$project/.holbuild/obj/src/ATheory.sml"
-  require_file "$project/.holbuild/obj/src/ATheory.dat"
-  require_file "$project/.holbuild/obj/src/ATheory.ui"
-  require_file "$project/.holbuild/obj/src/ATheory.uo"
-  (cd "$project" && "$HOLBUILD_BIN" goalfrag-plan ATheory:chained_then1_plain) > "$tmpdir/chained_then1.plan.out" 2>&1
-  require_grep 'plain rpt CONJ_TAC' "$tmpdir/chained_then1.plan.out"
-  (cd "$project" && "$HOLBUILD_BIN" build --force --skip-goalfrag --skip-checkpoints) > "$tmpdir/success.plain.out" 2>&1
-}
+(cd "$runtime_project" && HOLBUILD_ECHO_CHILD_LOGS=1 "$HOLBUILD_BIN" build --skip-checkpoints --tactic-timeout 60) > "$tmpdir/runtime.out" 2>&1
+require_file "$runtime_project/.holbuild/obj/src/ATheory.dat"
+(cd "$runtime_project" && "$HOLBUILD_BIN" execution-plan ATheory:chained_then1_plain) > "$tmpdir/chained_then1.plan.out" 2>&1
+require_grep 'rpt CONJ_TAC' "$tmpdir/chained_then1.plan.out"
 
-expect_parse_recovery_fails() {
-  local name=$1
-  local mode=$2
-  local project=$tmpdir/$name
-  make_project "$project"
-  cat > "$project/src/AScript.sml" <<'SML'
+parser_project=$tmpdir/parser-recovery
+make_project "$parser_project" parser-recovery
+cat > "$parser_project/src/AScript.sml" <<'SML'
 open HolKernel Parse boolLib bossLib;
 val _ = new_theory "A";
 
@@ -168,58 +180,18 @@ QED
 
 val _ = export_theory();
 SML
-  case "$mode" in
-    new-ir)
-      if (cd "$project" && HOLBUILD_ECHO_CHILD_LOGS=1 "$HOLBUILD_BIN" build --skip-checkpoints --tactic-timeout 60) > "$tmpdir/$name.out" 2>&1; then
-        echo "expected parser recovery build to fail for $name" >&2
-        exit 1
-      fi
-      ;;
-    goalfrag)
-      if (cd "$project" && HOLBUILD_ECHO_CHILD_LOGS=1 "$HOLBUILD_BIN" build --goalfrag --skip-checkpoints --tactic-timeout 60) > "$tmpdir/$name.out" 2>&1; then
-        echo "expected GoalFrag parser recovery build to fail for $name" >&2
-        exit 1
-      fi
-      ;;
-    *) echo "unknown parser recovery mode: $mode" >&2; exit 2 ;;
-  esac
-  require_grep "HOL source parser recovered while instrumenting theorem boundaries" "$tmpdir/$name.out"
-  require_grep "parse error: expected closing parenthesis" "$tmpdir/$name.out"
-  require_grep "source: .*AScript.sml:" "$tmpdir/$name.out"
-  require_grep "hol run failed while building theory script" "$tmpdir/$name.out"
-  if grep -q "ATheory built" "$tmpdir/$name.out"; then
-    echo "malformed parser-recovery source was reported as built for $name" >&2
-    exit 1
-  fi
-}
+if (cd "$parser_project" && HOLBUILD_ECHO_CHILD_LOGS=1 "$HOLBUILD_BIN" build --skip-checkpoints --tactic-timeout 60) > "$tmpdir/parser-recovery.out" 2>&1; then
+  echo "expected parser recovery build to fail" >&2
+  exit 1
+fi
+require_grep "HOL source parser recovered while instrumenting theorem boundaries" "$tmpdir/parser-recovery.out"
+require_grep "parse error: expected closing parenthesis" "$tmpdir/parser-recovery.out"
+require_grep "source: .*AScript.sml:" "$tmpdir/parser-recovery.out"
+require_grep "hol run failed while building theory script" "$tmpdir/parser-recovery.out"
 
-expect_both_fail() {
-  local name=$1
-  local proof=$2
-  local project=$tmpdir/$name
-  make_project "$project"
-  cat > "$project/src/AScript.sml" <<SML
-open HolKernel Parse boolLib bossLib;
-val _ = new_theory "A";
-
-$proof
-
-val _ = export_theory();
-SML
-  if (cd "$project" && "$HOLBUILD_BIN" build --goalfrag --skip-checkpoints --tactic-timeout 60) > "$tmpdir/$name.goalfrag.out" 2>&1; then
-    echo "expected goalfrag build to fail for $name" >&2
-    exit 1
-  fi
-  if (cd "$project" && "$HOLBUILD_BIN" build --force --skip-goalfrag --skip-checkpoints) > "$tmpdir/$name.plain.out" 2>&1; then
-    echo "expected plain build to fail for $name" >&2
-    exit 1
-  fi
-}
-
-run_repeated_label_source_location_project() {
-  local project=$tmpdir/repeated-label-source-location
-  make_project "$project"
-  cat > "$project/src/AScript.sml" <<'SML'
+repeated_project=$tmpdir/repeated-label-source-location
+make_project "$repeated_project" repeated-label-source-location
+cat > "$repeated_project/src/AScript.sml" <<'SML'
 open HolKernel Parse boolLib bossLib;
 val _ = new_theory "A";
 
@@ -231,48 +203,49 @@ QED
 
 val _ = export_theory();
 SML
-  if (cd "$project" && "$HOLBUILD_BIN" build --goalfrag --skip-checkpoints --tactic-timeout 60) > "$tmpdir/repeated-label.goalfrag.out" 2>&1; then
-    echo "expected repeated-label GoalFrag build to fail" >&2
-    exit 1
-  fi
-  require_grep "plan position: 01 tactic strip_tac" "$tmpdir/repeated-label.goalfrag.out"
-  require_grep "source: .*AScript.sml:7:16-25" "$tmpdir/repeated-label.goalfrag.out"
-  if grep -q "source: .*AScript.sml:7:3-12" "$tmpdir/repeated-label.goalfrag.out"; then
-    echo "GoalFrag failure source used first matching label instead of failed step span" >&2
-    exit 1
-  fi
+if (cd "$repeated_project" && "$HOLBUILD_BIN" build --skip-checkpoints --tactic-timeout 60) > "$tmpdir/repeated-label.out" 2>&1; then
+  echo "expected repeated-label proof-step build to fail" >&2
+  exit 1
+fi
+require_grep "plan position: 01 list_tactic >> strip_tac" "$tmpdir/repeated-label.out"
+require_grep "source: .*AScript.sml:7:16-25" "$tmpdir/repeated-label.out"
+if grep -q "source: .*AScript.sml:7:3-12" "$tmpdir/repeated-label.out"; then
+  echo "proof-step failure source used first matching label instead of failed step span" >&2
+  exit 1
+fi
 
-  rm -rf "$project/.holbuild"
-  if (cd "$project" && "$HOLBUILD_BIN" build --skip-checkpoints --tactic-timeout 60) > "$tmpdir/repeated-label.new-ir.out" 2>&1; then
-    echo "expected repeated-label new-IR build to fail" >&2
-    exit 1
-  fi
-  require_grep "plan position: 01 list_tactic >> strip_tac" "$tmpdir/repeated-label.new-ir.out"
-  require_grep "source: .*AScript.sml:7:16-25" "$tmpdir/repeated-label.new-ir.out"
-  if grep -q "source: .*AScript.sml:7:3-12" "$tmpdir/repeated-label.new-ir.out"; then
-    echo "new-IR failure source used first matching label instead of failed step span" >&2
-    exit 1
-  fi
-}
-
-run_new_ir_smoke_project
-run_goalfrag_success_project
-expect_parse_recovery_fails parser-recovery-new-ir new-ir
-expect_parse_recovery_fails parser-recovery-goalfrag goalfrag
-run_repeated_label_source_location_project
-
-expect_both_fail first_empty_then 'Theorem first_empty_then:
+first_empty_project=$tmpdir/first-empty-then
+make_project "$first_empty_project" first-empty-then
+cat > "$first_empty_project/src/AScript.sml" <<'SML'
+open HolKernel Parse boolLib bossLib;
+val _ = new_theory "A";
+Theorem first_empty_then:
   T
 Proof
   FIRST [] >> ACCEPT_TAC TRUTH
-QED'
-require_grep 'FIRST \[\]' "$tmpdir/first_empty_then.goalfrag.out"
-require_grep 'NO_TAC' "$tmpdir/first_empty_then.plain.out"
+QED
+val _ = export_theory();
+SML
+if (cd "$first_empty_project" && "$HOLBUILD_BIN" build --skip-checkpoints --tactic-timeout 60) > "$tmpdir/first_empty_then.out" 2>&1; then
+  echo "expected FIRST [] build to fail" >&2
+  exit 1
+fi
+require_grep 'FIRST \[\]' "$tmpdir/first_empty_then.out"
 
-expect_both_fail map_first_empty_then 'Theorem map_first_empty_then:
+map_first_empty_project=$tmpdir/map-first-empty-then
+make_project "$map_first_empty_project" map-first-empty-then
+cat > "$map_first_empty_project/src/AScript.sml" <<'SML'
+open HolKernel Parse boolLib bossLib;
+val _ = new_theory "A";
+Theorem map_first_empty_then:
   T
 Proof
   MAP_FIRST (fn th => ACCEPT_TAC th) [] >> ACCEPT_TAC TRUTH
-QED'
-require_grep 'MAP_FIRST' "$tmpdir/map_first_empty_then.goalfrag.out"
-require_grep 'NO_TAC' "$tmpdir/map_first_empty_then.plain.out"
+QED
+val _ = export_theory();
+SML
+if (cd "$map_first_empty_project" && "$HOLBUILD_BIN" build --skip-checkpoints --tactic-timeout 60) > "$tmpdir/map_first_empty_then.out" 2>&1; then
+  echo "expected MAP_FIRST [] build to fail" >&2
+  exit 1
+fi
+require_grep 'MAP_FIRST' "$tmpdir/map_first_empty_then.out"
