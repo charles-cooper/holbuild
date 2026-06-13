@@ -40,9 +40,10 @@ Projects are schema 2 only and must declare exactly one `[dependencies.hol]` git
 revision. Commands that need HOL build or reuse that declared HOL under
 `$HOLBUILD_CACHE/hol-toolchains/<key>/hol`; `--holdir`, `HOLDIR`,
 `HOLBUILD_HOLDIR`, schema 1, and `[dependencies.HOLDIR]` are no longer supported
-as project/runtime configuration. The external implementation still needs a HOL
-checkout via `make HOLDIR=...` to compile `bin/holbuild`; this is a temporary
-build-time implementation dependency, not a runtime project selector. See
+as project/runtime configuration. Building the `holbuild` executable itself
+needs a source-only HOL checkout via `make HOL_SOURCE=...`; this checkout must
+be at the revision pinned in `PINS/hol.txt` and does not need to be built. This
+is a build-time source dependency, not a runtime project selector. See
 `DESIGN.md`.
 
 ## Current validation status
@@ -60,23 +61,25 @@ setting for all root projects.
 ## Build
 
 ```sh
-make HOLDIR=/path/to/HOL
-make HOLDIR=/path/to/HOL test
-HOLBUILD_TEST_JOBS=16 make HOLDIR=/path/to/HOL test
+make HOL_SOURCE=/path/to/HOL-source
+make HOL_SOURCE=/path/to/HOL-source HOLDIR=/path/to/built/HOL test
+HOLBUILD_TEST_JOBS=16 make HOL_SOURCE=/path/to/HOL-source HOLDIR=/path/to/built/HOL test
 ```
 
 Optional install:
 
 ```sh
-make HOLDIR=/path/to/HOL install
+make HOL_SOURCE=/path/to/HOL-source install
 ```
 
 This installs only the `holbuild` executable to `$HOME/.local/bin/holbuild` by
 default. Override with `PREFIX`, `BINDIR`, or `DESTDIR` if needed.
 
-The `HOLDIR` passed to `make` is currently only for compiling/testing holbuild
-itself. Project commands do not accept `--holdir` and never use `HOLDIR` or
-`HOLBUILD_HOLDIR` to select a runtime HOL; they use manifest `dependencies.hol`.
+`HOL_SOURCE` is only for compiling holbuild itself. It must be a HOL git
+checkout at the exact revision in `PINS/hol.txt`, but it does not need to be
+built. The `HOLDIR` passed to `make test` is only for the test harness. Project
+commands do not accept `--holdir` and never use `HOLDIR` or `HOLBUILD_HOLDIR` to
+select a runtime HOL; they use manifest `dependencies.hol`.
 The compiler loads HOL's existing SML TOML parser from `$(HOLDIR)` and embeds it
 in `bin/holbuild`. Tests live under `tests/cases/*/test.sh` so they can move into
 HOL's selftest layout with minimal reshaping; `tests/run.sh` is the repo-local

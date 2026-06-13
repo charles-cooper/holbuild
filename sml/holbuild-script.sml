@@ -1,13 +1,10 @@
-fun compile_holdir () =
-  case OS.Process.getEnv "HOLBUILD_HOLDIR" of
+fun compile_hol_source () =
+  case OS.Process.getEnv "HOL_SOURCE" of
       SOME h => h
     | NONE =>
-      case OS.Process.getEnv "HOLDIR" of
-          SOME h => h
-        | NONE =>
-          raise Fail "set HOLBUILD_HOLDIR or HOLDIR when compiling holbuild";
+      raise Fail "set HOL_SOURCE=/path/to/HOL source checkout when compiling holbuild";
 
-val compile_time_holdir = compile_holdir ();
+val compile_time_hol_source = compile_hol_source ();
 
 structure HolbuildRuntimePaths =
 struct
@@ -16,7 +13,7 @@ end
 
 fun path_join (a, b) = OS.Path.concat(a, b);
 
-fun use_hol rel = use (path_join(compile_time_holdir, rel));
+fun use_hol rel = use (path_join(compile_time_hol_source, rel));
 
 use_hol("tools-poly/poly/Binarymap.sig");
 use_hol("tools-poly/poly/Binarymap.sml");
