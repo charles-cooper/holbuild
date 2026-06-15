@@ -33,6 +33,7 @@ fun remove_checkpoint path =
    remove_file (ok_path path);
    remove_file (path ^ ".meta");
    remove_file (path ^ ".prefix");
+   remove_file (path ^ ".steps");
    remove_file path)
 
 fun ok_v1 () = "holbuild-checkpoint-ok-v1\n"

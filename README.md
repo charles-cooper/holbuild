@@ -61,7 +61,7 @@ Create `holproject.toml` in the root of your HOL project:
 ```toml
 [holbuild]
 schema = 2
-required_version = "0.6.1"  # optional
+required_version = "0.6.2"  # optional
 
 [project]
 name = "example"
@@ -131,6 +131,7 @@ holbuild context
 holbuild build
 holbuild build MyTheory
 holbuild build --dry-run MyTheory
+holbuild clean MyTheory
 holbuild execution-plan MyTheory:my_theorem
 holbuild heap main
 holbuild run script.sml
@@ -147,9 +148,17 @@ holbuild --maxheap 4096 build MyTheory
 holbuild --source-dir /path/to/project build MyTheory
 holbuild build --force=project MyTheory
 holbuild build --no-cache MyTheory
+holbuild clean MyTheory && holbuild build --no-cache MyTheory
 holbuild build --tactic-timeout 5 MyTheory
 holbuild --json build MyTheory
 ```
+
+`holbuild clean MyTheory` removes project-local generated artifacts, dependency
+metadata, and checkpoints for the named theory target. This is primarily a
+recovery/debugging command for suspect local state; normal builds should not
+require it. Clean does not remove global cache entries, so use
+`holbuild build --no-cache MyTheory` afterwards if you also want to avoid
+restoring the target from the global cache.
 
 `--source-dir PATH` or `HOLBUILD_SOURCE_DIR` chooses where to look for
 `holproject.toml`. Build output is written under `.holbuild/` in the current
@@ -162,7 +171,7 @@ working directory.
 ```toml
 [holbuild]
 schema = 2
-required_version = "0.6.1"
+required_version = "0.6.2"
 ```
 
 `schema = 2` is required. `required_version` is optional. If present, it must be
@@ -418,13 +427,13 @@ Maintainer checklist:
 4. Create and push an annotated tag:
 
    ```sh
-   git tag -a v0.6.1 -m "holbuild v0.6.1"
-   git push origin v0.6.1
+   git tag -a v0.6.2 -m "holbuild v0.6.2"
+   git push origin v0.6.2
    ```
 
 5. Create a GitHub Release from that tag:
    - GitHub repository → Releases → Draft a new release.
-   - Select the tag, for example `v0.6.1`.
+   - Select the tag, for example `v0.6.2`.
    - Use the tag as the title.
    - Summarise user-visible changes.
 
