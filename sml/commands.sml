@@ -19,6 +19,7 @@ fun usage () = print
   \  holbuild [--json] [--quiet|--verbose|--verbosity LEVEL] [--source-dir PATH] [--maxheap MB] [-jN] context\n\
   \  holbuild [--json] [--quiet|--verbose|--verbosity LEVEL] [--source-dir PATH] [--maxheap MB] [-jN] execution-plan THEORY:THEOREM\n\
   \  holbuild [--json] [--quiet|--verbose|--verbosity LEVEL] [--source-dir PATH] [--maxheap MB] [-jN] build [--dry-run] [--force[=theory|project|full]] [--no-cache] [--skip-checkpoints] [--skip-proof-steps] [--tactic-timeout SECONDS] [--trace-steps] [--repl-on-failure] [--retain-debug-artifacts] [TARGET ...]\n\
+  \  holbuild [--json] [--quiet|--verbose|--verbosity LEVEL] [--source-dir PATH] clean THEORY...\n\
   \  holbuild [--json] [--quiet|--verbose|--verbosity LEVEL] [--source-dir PATH] [--maxheap MB] [-jN] heap NAME\n\
   \  holbuild [--json] [--quiet|--verbose|--verbosity LEVEL] [--source-dir PATH] [--maxheap MB] run [ARG ...]\n\
   \  holbuild [--json] [--quiet|--verbose|--verbosity LEVEL] [--source-dir PATH] [--maxheap MB] repl [ARG ...]\n\
@@ -505,6 +506,35 @@ fun build tc cli_jobs args =
     else HolbuildBuildExec.with_project_lock project "build" execute_build
   end
 
+fun clean_targets args =
+  let
+    val project = timed_phase "project.discover" load_project
+    val _ = if null args then raise Error "usage: holbuild clean THEORY..." else ()
+    val _ = reject_object_targets args
+    fun execute_clean () =
+      let
+        val index = timed_phase "source.discover" (fn () => HolbuildSourceIndex.discover project)
+        val plan = timed_phase "build.plan" (fn () => HolbuildBuildPlan.plan "" index args)
+        fun target_nodes target =
+          case HolbuildBuildPlan.lookup plan target of
+              [] => raise Error ("unknown clean target: " ^ target)
+            | matches => matches
+        fun require_theory node =
+          case #kind (HolbuildBuildPlan.source_of node) of
+              HolbuildSourceIndex.TheoryScript => node
+            | _ => raise Error ("clean only supports theory targets: " ^ HolbuildBuildPlan.logical_name node)
+        val nodes = List.concat (map target_nodes args)
+        val theory_nodes = map require_theory nodes
+        val _ = List.app (HolbuildBuildExec.clean_theory_node project) theory_nodes
+        val _ = List.app (fn node => print ("cleaned " ^ HolbuildBuildPlan.logical_name node ^ "\n")) theory_nodes
+        val _ = print "note: subsequent builds may restore cleaned targets from the global cache; use `holbuild build --no-cache TARGET...` to force a local rebuild\n"
+      in
+        ()
+      end
+  in
+    HolbuildBuildExec.with_project_lock project "clean" execute_clean
+  end
+
 fun heap_named project target =
   let
     fun matches (HolbuildProject.Heap {name, ...}) = name = target
@@ -583,6 +613,7 @@ fun dispatch tc jobs args =
     | "execution-plan" :: rest => (reject_json "execution-plan"; execution_plan_command tc rest)
     | "goalfrag-plan" :: rest => goalfrag_plan_command tc rest
     | "build" :: rest => build tc jobs rest
+    | "clean" :: rest => (reject_json "clean"; clean_targets rest)
     | "heap" :: [target] => (reject_json "heap"; build_heap tc jobs target)
     | "heap" :: _ => raise Error "usage: holbuild heap NAME"
     | "run" :: rest => (reject_json "run"; run_hol tc "run" rest)

@@ -1527,6 +1527,7 @@ fun remove_failed_cache_outputs project node =
     remove_checkpoint_family project node
   end
 
+
 fun cache_key_role project plan node input_key cache_key =
   let
     val context_key = parent_output_cache_key plan node input_key
@@ -1594,6 +1595,11 @@ fun metadata_path (project : HolbuildProject.t) node =
   in
     Path.concat(base, #relative_path source ^ ".key")
   end
+
+fun clean_theory_node project node =
+  (remove_failed_cache_outputs project node;
+   remove_file (metadata_path project node);
+   remove_file (HolbuildBuildPlan.dependency_cache_path (HolbuildBuildPlan.source_of node)))
 
 fun theorem_context_path project node deps_key proof_engine prefix_hash safe_name =
   Path.concat(theorem_checkpoint_dir project node deps_key proof_engine prefix_hash,
