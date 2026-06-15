@@ -506,6 +506,18 @@ Proof
   MAP_FIRST (fn th => ACCEPT_TAC th) [TRUTH]
 QED
 
+Theorem map_every_compound_arg_success:
+  T
+Proof
+  MAP_EVERY (fn th => ACCEPT_TAC th) [hd [TRUTH]]
+QED
+
+Theorem map_first_compound_arg_success:
+  T
+Proof
+  MAP_FIRST (fn th => ACCEPT_TAC th) [hd [TRUTH]]
+QED
+
 Theorem select_goals_success:
   T ∧ T
 Proof
