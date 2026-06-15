@@ -2134,7 +2134,7 @@ fun write_theory_script policy project base_context plan keys input_key toolchai
   if not (checkpoint_enabled policy) then
     (write_plain_preload plan node preload;
      write_text staged_script (instrumented_source policy (SOME timeout_marker) plan_only_marker source_text 0 checkpoints [] terminations);
-     {context = base_context, files = [preload, staged_script], failure_checkpoints = []})
+     {context = base_context, files = [preload, staged_script], failure_checkpoints = [], failed_prefix_context = NONE})
   else
     let
       val deps_key = dependency_context_key toolchain_key plan keys node
@@ -2149,14 +2149,14 @@ fun write_theory_script policy project base_context plan keys input_key toolchai
         (ensure_source_checkpoint_parents ();
          write_text staged_script (instrumented_source policy (SOME timeout_marker) plan_only_marker source_text 0 checkpoints declaration_checkpoints terminations);
          deps_loaded_resume_message node;
-         {context = HolState deps_loaded, files = [staged_script], failure_checkpoints = [deps_loaded]})
+         {context = HolState deps_loaded, files = [staged_script], failure_checkpoints = [deps_loaded], failed_prefix_context = NONE})
       fun run_from_fresh_preload () =
         (remove_theorem_checkpoints_for_deps project node deps_key;
          remove_declaration_checkpoints_for_deps project node deps_key;
          ensure_source_checkpoint_parents ();
          write_preload plan node deps_loaded deps_ok preload;
          write_text staged_script (instrumented_source policy (SOME timeout_marker) plan_only_marker source_text 0 checkpoints declaration_checkpoints terminations);
-         {context = base_context, files = [preload, staged_script], failure_checkpoints = []})
+         {context = base_context, files = [preload, staged_script], failure_checkpoints = [], failed_prefix_context = NONE})
       fun run_from_failed_prefix {checkpoint, step_count, prefix_text} =
         let
           val path = #failed_prefix_path checkpoint
@@ -2164,7 +2164,7 @@ fun write_theory_script policy project base_context plan keys input_key toolchai
           val _ = write_text staged_script (failed_prefix_resume_source policy timeout_marker plan_only_marker source_text checkpoints declaration_checkpoints terminations checkpoint step_count prefix_text)
           val _ = failed_prefix_resume_message node source_text checkpoint prefix_text
         in
-          {context = HolState path, files = [staged_script], failure_checkpoints = [path, deps_loaded]}
+          {context = HolState path, files = [staged_script], failure_checkpoints = [path, deps_loaded], failed_prefix_context = SOME path}
         end
       fun run_from_replay {boundary, path, safe_name, kind, failure_checkpoints} =
         let
@@ -2172,7 +2172,7 @@ fun write_theory_script policy project base_context plan keys input_key toolchai
           val _ = write_text staged_script (instrumented_source policy (SOME timeout_marker) plan_only_marker source_text boundary checkpoints declaration_checkpoints terminations)
           val _ = source_context_resume_message node source_text kind safe_name boundary
         in
-          {context = HolState path, files = [staged_script], failure_checkpoints = failure_checkpoints @ [deps_loaded]}
+          {context = HolState path, files = [staged_script], failure_checkpoints = failure_checkpoints @ [deps_loaded], failed_prefix_context = NONE}
         end
       fun failed_prefix_at_least_as_late failed NONE = true
         | failed_prefix_at_least_as_late failed (SOME replay) =
@@ -2281,6 +2281,13 @@ fun build_theory cache_allowed policy tc project base_context plan keys toolchai
     fun discard_loaded_checkpoint_after_load_failure () =
       remove_loaded_checkpoint_descendants project node deps_key deps_loaded theorem_checkpoints declaration_checkpoints
         (hol_context_path (#context run_spec))
+    fun discard_failed_prefix_after_resume_failure () =
+      case #failed_prefix_context run_spec of
+          NONE => false
+        | SOME path =>
+            (remove_checkpoint path;
+             warn ("discarding failed-prefix checkpoint after failed resume: " ^ path);
+             true)
     fun checkpoint_failure_error msg =
       let
         val failure_output = checkpoint_failure_output project node input_key stage
@@ -2344,6 +2351,8 @@ fun build_theory cache_allowed policy tc project base_context plan keys toolchai
           in
             raise RetryInvalidCheckpoint
           end
+        else if discard_failed_prefix_after_resume_failure () then
+          raise RetryInvalidCheckpoint
         else
           let
             val failure_error =
