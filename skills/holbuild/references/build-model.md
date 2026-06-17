@@ -70,7 +70,7 @@ The check is intentionally cheap — does not recompute dependency-context closu
 
 ## Cache
 
-Global cache path: `$HOLBUILD_CACHE` > `$XDG_CACHE_HOME/holbuild` > `~/.cache/holbuild/`
+Global cache path: `--cache-dir PATH` > `$HOLBUILD_CACHE` > `$XDG_CACHE_HOME/holbuild` > `~/.cache/holbuild/`
 
 Layout:
 ```
@@ -93,7 +93,7 @@ Cache restore: on action-key or parent-output key match, blobs are materialized 
 `--no-cache` disables both restore and publish but preserves local `.holbuild/` up-to-date checks. Force levels skip local up-to-date and cache restore only for the selected node set, and still publish cache unless `--no-cache` is also set: `--force=theory` (or `--force-theory`) forces requested/default target nodes, `--force=project` forces root-project nodes in the requested plan, and `--force=full`/bare `--force` forces the whole requested plan including dependency packages.
 
 GC:
-- `holbuild gc [--retention-days N] [--max-checkpoints-gb GB] [--cache-dir PATH] [--clean-only|--cache-only]`
+- `holbuild [--cache-dir PATH] gc [--retention-days N] [--max-checkpoints-gb GB] [--clean-only|--cache-only]`
 - Default: project clean + global cache GC, 7-day retention, 5GB checkpoint budget
 - Project clean removes stale `.holbuild/stage`, `.holbuild/logs`, checkpoint families, and evicts oldest checkpoint families above the size cap
 - Cache GC removes stale tmp, expired action manifests, and unreachable blobs, serialized with a POSIX file lock at `locks/gc.lock`

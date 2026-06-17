@@ -46,6 +46,7 @@ members = ["src"]
 | Flag | Effect |
 |------|--------|
 | `--source-dir PATH` | Source tree for manifest discovery; artifacts still under the shell cwd `.holbuild/` |
+| `--cache-dir PATH` | Override the global cache directory for this command |
 | `-jN` / `--jobs N` | Parallel workers (default: `.holconfig.toml [build].jobs` or `max(1, nproc/2)`) |
 | `--force=theory` / `--force-theory` | Rebuild only requested/default target nodes from source; deps still use up-to-date/cache |
 | `--force=project` / `--force-project` | Rebuild root-project nodes in the requested plan; dependency packages still use up-to-date/cache |

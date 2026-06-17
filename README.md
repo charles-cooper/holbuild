@@ -110,6 +110,7 @@ That revision is the HOL toolchain used to analyse and build the project.
 $HOLBUILD_CACHE/hol-toolchains/<key>/hol
 ```
 
+`--cache-dir PATH` overrides the global cache location for a command.
 `HOLBUILD_CACHE` defaults to the platform cache directory, normally:
 
 ```text
@@ -148,6 +149,7 @@ Common options:
 holbuild -j4 build MyTheory
 holbuild --maxheap 4096 build MyTheory
 holbuild --source-dir /path/to/project build MyTheory
+holbuild --cache-dir /path/to/cache build MyTheory
 holbuild build --force=project MyTheory
 holbuild build --no-cache MyTheory
 holbuild clean MyTheory && holbuild build --no-cache MyTheory
@@ -359,7 +361,7 @@ Clean old project and cache state with:
 ```sh
 holbuild gc
 holbuild gc --clean-only
-holbuild gc --cache-only
+holbuild --cache-dir /path/to/cache gc --cache-only
 ```
 
 `gc --clean-only` skips the global cache. `gc --cache-only` skips project
