@@ -13,7 +13,9 @@ trap cleanup EXIT
 use_case_cache "$tmpdir/cache"
 
 "$HOLBUILD_BIN" --version > "$tmpdir/version.log"
-require_grep "^holbuild 0.6.2$" "$tmpdir/version.log"
+holbuild_version=$(awk '/^holbuild / { print $2; exit }' "$tmpdir/version.log")
+[[ "$holbuild_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "invalid holbuild version: $holbuild_version" >&2; exit 1; }
+require_grep "^holbuild $holbuild_version$" "$tmpdir/version.log"
 
 make_project() {
   local name=$1
@@ -216,7 +218,7 @@ make_project required_version_current
 cat > "$tmpdir/required_version_current/holproject.toml" <<TOML
 [holbuild]
 schema = 2
-required_version = "0.6.2"
+required_version = "$holbuild_version"
 
 [dependencies.hol]
 git = "$schema2_repo"
@@ -227,11 +229,12 @@ name = "required_version_current"
 TOML
 (cd "$tmpdir/required_version_current" && "$HOLBUILD_BIN" context) > "$tmpdir/required_version_current.log"
 
+future_holbuild_version=999.0.0
 make_project required_version_future
 cat > "$tmpdir/required_version_future/holproject.toml" <<TOML
 [holbuild]
 schema = 2
-required_version = "0.6.3"
+required_version = "$future_holbuild_version"
 
 [dependencies.hol]
 git = "$schema2_repo"
@@ -240,7 +243,7 @@ rev = "$schema2_rev"
 [project]
 name = "required_version_future"
 TOML
-expect_context_failure required_version_future "project requires holbuild >= 0.6.3, but this is holbuild 0.6.2"
+expect_context_failure required_version_future "project requires holbuild >= $future_holbuild_version, but this is holbuild $holbuild_version"
 
 make_project required_version_invalid
 cat > "$tmpdir/required_version_invalid/holproject.toml" <<TOML

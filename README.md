@@ -63,7 +63,7 @@ Create `holproject.toml` in the root of your HOL project:
 ```toml
 [holbuild]
 schema = 2
-required_version = "0.6.2"  # optional
+required_version = "<MAJOR.MINOR.PATCH>"  # optional minimum holbuild version
 
 [project]
 name = "example"
@@ -173,7 +173,7 @@ working directory.
 ```toml
 [holbuild]
 schema = 2
-required_version = "0.6.2"
+required_version = "<MAJOR.MINOR.PATCH>"
 ```
 
 `schema = 2` is required. `required_version` is optional. If present, it must be
@@ -419,17 +419,17 @@ Maintainer checklist:
 
 1. Ensure CI is green on `master`.
 2. Bump `HolbuildVersion.version` in `sml/version.sml` if needed.
-3. Update documentation examples if the version changed.
-4. Create and push an annotated tag:
+3. Create and push an annotated tag:
 
    ```sh
-   git tag -a v0.6.2 -m "holbuild v0.6.2"
-   git push origin v0.6.2
+   version=X.Y.Z
+   git tag -a "v$version" -m "holbuild v$version"
+   git push origin "v$version"
    ```
 
-5. Create a GitHub Release from that tag:
+4. Create a GitHub Release from that tag:
    - GitHub repository → Releases → Draft a new release.
-   - Select the tag, for example `v0.6.2`.
+   - Select the tag, for example `vX.Y.Z`.
    - Use the tag as the title.
    - Summarise user-visible changes.
 
