@@ -37,7 +37,7 @@ fun touch path = FS.setTime(path, NONE) handle OS.SysErr _ => ()
 fun ensure_layout root = HolbuildFSCacheBackend.ensure_layout (filesystem_cache root)
 
 fun get_action root key = HolbuildFSCacheBackend.get_action (filesystem_cache root) key
-fun put_action root request = HolbuildFSCacheBackend.put_action (filesystem_cache root) request
+fun put_action root policy request = HolbuildFSCacheBackend.put_action (filesystem_cache root) policy request
 fun write_action root request = HolbuildFSCacheBackend.write_action (filesystem_cache root) request
 fun remove_action root key = HolbuildFSCacheBackend.remove_action (filesystem_cache root) key
 fun touch_action root key = HolbuildFSCacheBackend.touch_action (filesystem_cache root) key

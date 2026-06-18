@@ -1437,6 +1437,12 @@ fun publish_cache_manifest root cache_key subject staged_sig published_sml stage
     val manifest = manifest_with proof_timeout
     val existing = HolbuildCache.get_action root cache_key
     fun write_manifest text = HolbuildCache.write_action root {key = cache_key, text = text}
+    fun put_new_manifest text =
+      case HolbuildCache.put_action root HolbuildCacheBackend.PutIfAbsentOrSame {key = cache_key, text = text} of
+          HolbuildCacheBackend.Published => ()
+        | HolbuildCacheBackend.AlreadyPresent => HolbuildCache.touch_action root cache_key
+        | HolbuildCacheBackend.Conflict detail => raise Error ("cache manifest publish conflict: " ^ detail)
+        | HolbuildCacheBackend.Skipped => ()
     fun publish_same_outputs old =
       let val old_timeout = cache_manifest_proof_timeout_text cache_key old
           val best_timeout = timeout_min (old_timeout, proof_timeout)
@@ -1453,7 +1459,7 @@ fun publish_cache_manifest root cache_key subject staged_sig published_sml stage
             else cache_conflict_warning cache_key manifest_path subject old manifest
           else
             write_manifest manifest
-      | NONE => write_manifest manifest
+      | NONE => put_new_manifest manifest
   end
 
 fun publish_theory_cache project plan node input_key proof_timeout staged_sig published_sml staged_dat {parents, mldeps} =
