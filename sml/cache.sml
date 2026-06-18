@@ -36,6 +36,12 @@ fun touch path = FS.setTime(path, NONE) handle OS.SysErr _ => ()
 
 fun ensure_layout root = HolbuildFSCacheBackend.ensure_layout (filesystem_cache root)
 
+fun get_action root key = HolbuildFSCacheBackend.get_action (filesystem_cache root) key
+fun put_action root request = HolbuildFSCacheBackend.put_action (filesystem_cache root) request
+fun has_blob root hash = HolbuildFSCacheBackend.has_blob (filesystem_cache root) hash
+fun fetch_blob root request = HolbuildFSCacheBackend.fetch_blob (filesystem_cache root) request
+fun publish_blob root request = HolbuildFSCacheBackend.publish_blob (filesystem_cache root) request
+
 fun children dir =
   if not (path_exists dir) then []
   else

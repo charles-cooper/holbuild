@@ -1137,10 +1137,12 @@ fun file_hash_matches path hash =
 fun cache_blob root path =
   let
     val hash = file_hash path
-    val blob = HolbuildCache.blob_path root hash
   in
-    if file_hash_matches blob hash then () else copy_binary path blob;
-    hash
+    case HolbuildCache.publish_blob root {hash = hash, src = path} of
+        HolbuildCacheBackend.Published => hash
+      | HolbuildCacheBackend.AlreadyPresent => hash
+      | HolbuildCacheBackend.Conflict detail => raise Error ("could not publish cache blob " ^ hash ^ ": " ^ detail)
+      | HolbuildCacheBackend.Skipped => hash
   end
 
 fun cache_manifest_text {input_key, sig_hash, sml_hash, dat_hash, parents, mldeps, proof_timeout} =
@@ -1322,9 +1324,9 @@ fun cache_entry_usable root input_key text =
     val {sig_hash, sml_hash, dat_hash, ...} =
       cache_manifest_blobs_from_lines input_key (cache_manifest_lines text)
   in
-    file_hash_matches (HolbuildCache.blob_path root sig_hash) sig_hash andalso
-    file_hash_matches (HolbuildCache.blob_path root sml_hash) sml_hash andalso
-    file_hash_matches (HolbuildCache.blob_path root dat_hash) dat_hash
+    HolbuildCache.has_blob root sig_hash andalso
+    HolbuildCache.has_blob root sml_hash andalso
+    HolbuildCache.has_blob root dat_hash
   end
   handle _ => false
 
@@ -1354,14 +1356,10 @@ fun cache_conflict_warning cache_key manifest_path subject old_manifest new_mani
           "\n  existing cache entry: " ^ manifest_path)
 
 fun copy_blob root hash dst =
-  let val blob = HolbuildCache.blob_path root hash
-  in
-    if file_hash_matches blob hash then
-      (copy_binary blob dst;
-       if file_hash_matches dst hash then ()
-       else raise Error ("cache materialization hash mismatch: " ^ hash))
-    else raise Error ("cache blob missing or corrupt: " ^ hash)
-  end
+  case HolbuildCache.fetch_blob root {hash = hash, dst = dst} of
+      HolbuildCacheBackend.Hit => ()
+    | HolbuildCacheBackend.Miss => raise Error ("cache blob missing: " ^ hash)
+    | HolbuildCacheBackend.Corrupt detail => raise Error ("cache blob missing or corrupt: " ^ hash ^ " (" ^ detail ^ ")")
 
 fun file_strings path =
   let
