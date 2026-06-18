@@ -242,6 +242,21 @@ name = "minimum_version_current"
 TOML
 (cd "$tmpdir/minimum_version_current" && "$HOLBUILD_BIN" context) > "$tmpdir/minimum_version_current.log"
 
+make_project required_version_current
+cat > "$tmpdir/required_version_current/holproject.toml" <<TOML
+[holbuild]
+schema = 2
+required_version = "$holbuild_version"
+
+[dependencies.hol]
+git = "$schema2_repo"
+rev = "$schema2_rev"
+
+[project]
+name = "required_version_current"
+TOML
+(cd "$tmpdir/required_version_current" && "$HOLBUILD_BIN" context) > "$tmpdir/required_version_current.log"
+
 future_holbuild_version=999.0.0
 make_project minimum_version_future
 cat > "$tmpdir/minimum_version_future/holproject.toml" <<TOML
@@ -258,6 +273,21 @@ name = "minimum_version_future"
 TOML
 expect_context_failure minimum_version_future "project requires holbuild >= $future_holbuild_version, but this is holbuild $holbuild_version"
 
+make_project required_version_future
+cat > "$tmpdir/required_version_future/holproject.toml" <<TOML
+[holbuild]
+schema = 2
+required_version = "$future_holbuild_version"
+
+[dependencies.hol]
+git = "$schema2_repo"
+rev = "$schema2_rev"
+
+[project]
+name = "required_version_future"
+TOML
+expect_context_failure required_version_future "project requires holbuild >= $future_holbuild_version, but this is holbuild $holbuild_version"
+
 make_project minimum_version_invalid
 cat > "$tmpdir/minimum_version_invalid/holproject.toml" <<TOML
 [holbuild]
@@ -272,6 +302,37 @@ rev = "$schema2_rev"
 name = "minimum_version_invalid"
 TOML
 expect_context_failure minimum_version_invalid "invalid holbuild.minimum_version: expected MAJOR.MINOR.PATCH, got '>=0.2'"
+
+make_project required_version_invalid
+cat > "$tmpdir/required_version_invalid/holproject.toml" <<TOML
+[holbuild]
+schema = 2
+required_version = ">=0.2"
+
+[dependencies.hol]
+git = "$schema2_repo"
+rev = "$schema2_rev"
+
+[project]
+name = "required_version_invalid"
+TOML
+expect_context_failure required_version_invalid "invalid holbuild.required_version: expected MAJOR.MINOR.PATCH, got '>=0.2'"
+
+make_project required_version_both_set
+cat > "$tmpdir/required_version_both_set/holproject.toml" <<TOML
+[holbuild]
+schema = 2
+minimum_version = "$holbuild_version"
+required_version = "$holbuild_version"
+
+[dependencies.hol]
+git = "$schema2_repo"
+rev = "$schema2_rev"
+
+[project]
+name = "required_version_both_set"
+TOML
+expect_context_failure required_version_both_set "holbuild.minimum_version and holbuild.required_version may not both be set"
 
 make_project schema2_missing_rev
 write_manifest schema2_missing_rev <<'TOML'

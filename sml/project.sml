@@ -374,18 +374,36 @@ fun schema_version table =
               if n = IntInf.fromInt 2 then 2
               else die "only holproject schema 2 is supported"
 
+fun version_field_at holbuild name =
+  case string_at holbuild [name] of
+      NONE => NONE
+    | SOME "" => NONE
+    | SOME text => SOME (name, text)
+
+fun configured_required_version holbuild =
+  case (lookup holbuild ["minimum_version"], lookup holbuild ["required_version"]) of
+      (SOME _, SOME _) => die "holbuild.minimum_version and holbuild.required_version may not both be set"
+    | _ =>
+        (case (version_field_at holbuild "minimum_version", version_field_at holbuild "required_version") of
+             (NONE, NONE) => NONE
+           | (SOME version, NONE) => SOME version
+           | (NONE, SOME version) => SOME version
+           | (SOME _, SOME _) => raise Fail "unreachable version field state")
+
+fun validate_required_version holbuild =
+  case configured_required_version holbuild of
+      NONE => ()
+    | SOME (name, required) =>
+        (HolbuildVersion.require_at_least required
+         handle HolbuildVersion.Error msg => die ("invalid holbuild." ^ name ^ ": " ^ msg))
+
 fun validate_schema table =
   case table_field table ["holbuild"] of
       NONE => ()
     | SOME holbuild =>
-        (require_known_fields "holbuild" ["schema", "minimum_version"] holbuild;
+        (require_known_fields "holbuild" ["schema", "minimum_version", "required_version"] holbuild;
          ignore (schema_version table);
-         case string_at holbuild ["minimum_version"] of
-             NONE => ()
-           | SOME "" => ()
-           | SOME required =>
-               (HolbuildVersion.require_at_least required
-                handle HolbuildVersion.Error msg => die ("invalid holbuild.minimum_version: " ^ msg)))
+         validate_required_version holbuild)
 
 fun validate_dependency_table (name, table) =
   let
