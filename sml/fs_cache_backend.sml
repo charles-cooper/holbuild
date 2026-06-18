@@ -116,6 +116,7 @@ fun put_action cache {key, text} =
 
 fun has_blob cache hash = file_hash_matches (blob_path cache hash) hash
 
+(* dst is a local filesystem path where the caller wants the blob materialized. *)
 fun fetch_blob cache {hash, dst} =
   let val blob = blob_path cache hash
   in
@@ -129,6 +130,7 @@ fun fetch_blob cache {hash, dst} =
   handle Error msg => HolbuildCacheBackend.Corrupt msg
        | e => HolbuildCacheBackend.Corrupt (General.exnMessage e)
 
+(* src is a local filesystem path containing bytes to store under hash. *)
 fun publish_blob cache {hash, src} =
   let val blob = blob_path cache hash
   in

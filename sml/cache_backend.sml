@@ -1,6 +1,11 @@
 structure HolbuildCacheBackend =
 struct
 
+type action_key = string
+type blob_hash = string
+type manifest_text = string
+type local_path = string
+
 datatype publish_result = Published | AlreadyPresent | Conflict of string | Skipped
 
 datatype fetch_result = Hit | Miss | Corrupt of string
@@ -11,12 +16,18 @@ signature HOLBUILD_CACHE_BACKEND =
 sig
   type t
 
-  val get_action : t -> string -> string option
-  val put_action : t -> {key : string, text : string} -> HolbuildCacheBackend.publish_result
+  val get_action : t -> HolbuildCacheBackend.action_key -> HolbuildCacheBackend.manifest_text option
+  val put_action : t -> {key : HolbuildCacheBackend.action_key,
+                         text : HolbuildCacheBackend.manifest_text} -> HolbuildCacheBackend.publish_result
 
-  val has_blob : t -> string -> bool
-  val fetch_blob : t -> {hash : string, dst : string} -> HolbuildCacheBackend.fetch_result
-  val publish_blob : t -> {hash : string, src : string} -> HolbuildCacheBackend.publish_result
+  val has_blob : t -> HolbuildCacheBackend.blob_hash -> bool
+
+  (* Blob transfer crosses the backend/local-filesystem boundary.  dst and src
+     are local filesystem paths, not backend object names. *)
+  val fetch_blob : t -> {hash : HolbuildCacheBackend.blob_hash,
+                         dst : HolbuildCacheBackend.local_path} -> HolbuildCacheBackend.fetch_result
+  val publish_blob : t -> {hash : HolbuildCacheBackend.blob_hash,
+                           src : HolbuildCacheBackend.local_path} -> HolbuildCacheBackend.publish_result
 end
 
 signature HOLBUILD_FS_CACHE_BACKEND =
