@@ -55,7 +55,7 @@ SML
 (cd "$project" && "$HOLBUILD_BIN" build ATheory) > "$tmpdir/build.log" 2>&1 &
 holbuild_pid=$!
 
-for _ in $(seq 1 100); do
+for _ in $(seq 1 600); do
   [[ -s "$pid_file" && -f "$started" ]] && break
   sleep 0.1
 done
