@@ -16,25 +16,25 @@ fun quote s =
 
 fun path_exists path = FS.access(path, []) handle OS.SysErr _ => false
 
-fun filesystem_cache root = HolbuildCacheBackend.filesystem root
+fun filesystem_cache root = HolbuildFSCacheBackend.filesystem root
 
 fun default_backend () =
-  HolbuildCacheBackend.default ()
-  handle HolbuildCacheBackend.Error msg => raise Error msg
+  HolbuildFSCacheBackend.default ()
+  handle HolbuildFSCacheBackend.Error msg => raise Error msg
 
-fun cache_root () = HolbuildCacheBackend.root (default_backend ())
+fun cache_root () = HolbuildFSCacheBackend.root (default_backend ())
 
-fun actions_dir root = HolbuildCacheBackend.actions_dir (filesystem_cache root)
-fun blobs_dir root = HolbuildCacheBackend.blobs_dir (filesystem_cache root)
-fun tmp_dir root = HolbuildCacheBackend.tmp_dir (filesystem_cache root)
-fun locks_dir root = HolbuildCacheBackend.locks_dir (filesystem_cache root)
-fun action_dir root key = HolbuildCacheBackend.action_dir (filesystem_cache root) key
-fun action_manifest root key = HolbuildCacheBackend.action_manifest (filesystem_cache root) key
-fun blob_path root hash = HolbuildCacheBackend.blob_path (filesystem_cache root) hash
+fun actions_dir root = HolbuildFSCacheBackend.actions_dir (filesystem_cache root)
+fun blobs_dir root = HolbuildFSCacheBackend.blobs_dir (filesystem_cache root)
+fun tmp_dir root = HolbuildFSCacheBackend.tmp_dir (filesystem_cache root)
+fun locks_dir root = HolbuildFSCacheBackend.locks_dir (filesystem_cache root)
+fun action_dir root key = HolbuildFSCacheBackend.action_dir (filesystem_cache root) key
+fun action_manifest root key = HolbuildFSCacheBackend.action_manifest (filesystem_cache root) key
+fun blob_path root hash = HolbuildFSCacheBackend.blob_path (filesystem_cache root) hash
 
 fun touch path = FS.setTime(path, NONE) handle OS.SysErr _ => ()
 
-fun ensure_layout root = HolbuildCacheBackend.ensure_layout (filesystem_cache root)
+fun ensure_layout root = HolbuildFSCacheBackend.ensure_layout (filesystem_cache root)
 
 fun children dir =
   if not (path_exists dir) then []
@@ -239,7 +239,7 @@ fun with_lock root f =
   end
 
 fun with_action_publish_lock root key publish skip =
-  HolbuildCacheBackend.with_action_publish_lock (filesystem_cache root) key publish skip
+  HolbuildFSCacheBackend.with_action_publish_lock (filesystem_cache root) key publish skip
 
 fun gc_root root days =
   if not (path_exists root) then

@@ -1,4 +1,4 @@
-structure HolbuildCacheBackend =
+structure HolbuildFSCacheBackend =
 struct
 
 structure Path = OS.Path
