@@ -23,6 +23,8 @@ fun usage () = print
   \  holbuild [--json] [--quiet|--verbose|--verbosity LEVEL] [--source-dir PATH] [--cache-dir PATH] [--maxheap MB] [-jN] heap NAME\n\
   \  holbuild [--json] [--quiet|--verbose|--verbosity LEVEL] [--source-dir PATH] [--cache-dir PATH] [--maxheap MB] run [ARG ...]\n\
   \  holbuild [--json] [--quiet|--verbose|--verbosity LEVEL] [--source-dir PATH] [--cache-dir PATH] [--maxheap MB] repl [ARG ...]\n\
+  \  holbuild [--json] [--quiet|--verbose|--verbosity LEVEL] [--source-dir PATH] [--cache-dir PATH] [--maxheap MB] export [--build] -o FILE [TARGET ...]\n\
+  \  holbuild [--json] [--quiet|--verbose|--verbosity LEVEL] [--source-dir PATH] [--cache-dir PATH] import FILE\n\
   \  holbuild [--source-dir PATH] [--cache-dir PATH] buildhol\n\
   \  holbuild [--cache-dir PATH] gc [--retention-days DAYS] [--max-checkpoints-gb GB] [--clean-only|--cache-only]\n\n\
   \Projects must use schema 2 and declare dependencies.hol. Commands that need HOL\n\
@@ -514,6 +516,167 @@ fun build tc cli_jobs args =
     else HolbuildBuildExec.with_project_lock project "build" execute_build
   end
 
+datatype export_args = ExportArgs of {build_first : bool, output : string, targets : string list}
+
+fun parse_export_args args =
+  let
+    fun done build_first output targets =
+      case output of
+          SOME path => ExportArgs {build_first = build_first, output = path, targets = rev targets}
+        | NONE => raise Error "usage: holbuild export [--build] -o FILE [TARGET ...]"
+    fun loop build_first output targets rest =
+      case rest of
+          [] => done build_first output targets
+        | "--build" :: xs => loop true output targets xs
+        | "-o" :: path :: xs => loop build_first (SOME path) targets xs
+        | "--output" :: path :: xs => loop build_first (SOME path) targets xs
+        | "-o" :: [] => raise Error "export -o requires FILE"
+        | "--output" :: [] => raise Error "export --output requires FILE"
+        | arg :: xs =>
+            if String.isPrefix "--output=" arg then
+              loop build_first (SOME (String.extract(arg, size "--output=", NONE))) targets xs
+            else if String.isPrefix "--" arg then
+              raise Error ("unknown export option: " ^ arg)
+            else loop build_first output (arg :: targets) xs
+  in
+    loop false NONE [] args
+  end
+
+fun root_package_name project =
+  HolbuildProject.package_name (HolbuildProject.project_package project)
+
+fun export_build_options project index entry_plan plan =
+  let
+    fun default_tactic_timeout () =
+      case #build_tactic_timeout project of
+          NONE => SOME 2.5
+        | some => some
+  in
+    {use_cache = true,
+     force = HolbuildBuildExec.ForceNone,
+     force_targets = [],
+     skip_checkpoints = false,
+     goalfrag = true,
+     new_ir = true,
+     node_tactic_timeouts = HolbuildTacticTimeoutPolicy.entry_timeouts project index entry_plan (default_tactic_timeout ()),
+     goalfrag_plan = NONE,
+     goalfrag_trace = false,
+     repl_on_failure = false}
+  end
+
+fun theory_node node =
+  #kind (HolbuildBuildPlan.source_of node) = HolbuildSourceIndex.TheoryScript
+
+fun cache_key_usable root key =
+  case HolbuildCache.get_action root key of
+      SOME text => HolbuildBuildExec.cache_entry_usable root key text
+    | NONE => false
+
+fun any_usable_cache_key root keys = List.exists (cache_key_usable root) keys
+
+fun portable_cache_key_for_node project plan root keys node =
+  let
+    val logical = HolbuildBuildPlan.logical_name node
+    val input_key = HolbuildBuildPlan.input_key_for keys node
+    val cache_keys = HolbuildBuildExec.theory_cache_keys project plan node input_key
+  in
+    case cache_keys of
+        [] => raise Error ("internal error: no cache keys for " ^ logical)
+      | portable_key :: path_dependent_keys =>
+          if cache_key_usable root portable_key then portable_key
+          else if any_usable_cache_key root path_dependent_keys then
+            raise Error ("target " ^ logical ^ " only has a path-dependent cache entry; portable export requires rebuilding it without transient stage paths")
+          else
+            raise Error ("target " ^ logical ^
+                         " is not built in the cache; run `holbuild build " ^
+                         logical ^ "` first, or use `holbuild export --build`")
+  end
+
+fun export_entry_for_node project plan root keys node =
+  let
+    val cache_key = portable_cache_key_for_node project plan root keys node
+    val source = HolbuildBuildPlan.source_of node
+    val package = HolbuildBuildPlan.package node
+  in
+    {key = cache_key,
+     package = package,
+     logical = HolbuildBuildPlan.logical_name node,
+     source_path = #relative_path source,
+     root = package = root_package_name project}
+  end
+
+fun export_entries project plan keys =
+  let
+    val root = HolbuildCache.cache_root ()
+    val theory_nodes = List.filter theory_node (HolbuildBuildPlan.selected_nodes plan)
+    val _ = if null theory_nodes then raise Error "export found no theory build outputs in the selected targets" else ()
+  in
+    map (export_entry_for_node project plan root keys) theory_nodes
+  end
+  handle HolbuildBuildExec.Error msg => raise Error msg
+
+fun fs_cache_source cache : HolbuildCacheTransfer.source =
+  {get_action = HolbuildFSCacheBackend.get_action cache,
+   fetch_blob = HolbuildFSCacheBackend.fetch_blob cache}
+
+fun export_archive tc jobs args =
+  let
+    val ExportArgs {build_first, output, targets} = parse_export_args args
+    val _ = if build_first then build tc jobs targets else ()
+    val project = timed_phase "project.discover" load_project
+    val index = timed_phase "source.discover" (fn () => HolbuildSourceIndex.discover project)
+    val targets = timed_phase "targets.default" (fn () => default_build_targets project index targets)
+    val _ = reject_object_targets targets
+    val plan = timed_phase "build.plan" (fn () => HolbuildBuildPlan.plan (#holdir tc) index targets)
+    val entry_targets = map #2 (HolbuildTacticTimeoutPolicy.declared_entries project index)
+    val entry_plan = timed_phase "entry_timeout.plan" (fn () => HolbuildBuildPlan.plan (#holdir tc) index entry_targets)
+    val toolchain_key = timed_phase "toolchain.key" (fn () => HolbuildToolchain.toolchain_key tc)
+    val options = export_build_options project index entry_plan plan
+    val keys = HolbuildBuildPlan.input_keys (HolbuildBuildExec.build_config_lines_for_node options project) toolchain_key plan
+    val entries = export_entries project plan keys
+    val cache = HolbuildFSCacheBackend.default () handle HolbuildFSCacheBackend.Error msg => raise Error msg
+  in
+    HolbuildCacheArchive.create_export {archive_path = output,
+                                        source = fs_cache_source cache,
+                                        entries = entries,
+                                        targets = targets};
+    print ("exported " ^ Int.toString (length entries) ^ " cache action(s) to " ^ output ^ "\n")
+  end
+
+fun fs_cache_destination cache : HolbuildCacheTransfer.destination =
+  {put_action = HolbuildFSCacheBackend.put_action cache,
+   publish_blob = HolbuildFSCacheBackend.publish_blob cache}
+
+fun import_archive args =
+  case args of
+      [archive_path] =>
+        let
+          val destination = HolbuildFSCacheBackend.default () handle HolbuildFSCacheBackend.Error msg => raise Error msg
+          val _ = HolbuildFSCacheBackend.ensure_layout destination
+          val result_count = ref 0
+          fun validate_action source key =
+            case #get_action source key of
+                SOME text =>
+                  ignore (HolbuildBuildExec.cache_manifest_blobs_from_lines key
+                            (HolbuildBuildExec.cache_manifest_lines text))
+              | NONE => raise Error ("archive action missing: " ^ key)
+          fun copy {source, keys} =
+            let
+              val _ = List.app (validate_action source) keys
+              val results = HolbuildCacheTransfer.copy_entries
+                              {source = source,
+                               destination = fs_cache_destination destination,
+                               tmp_dir = HolbuildFSCacheBackend.tmp_dir destination}
+                              keys
+            in
+              result_count := length results
+            end
+        in
+          HolbuildCacheArchive.with_entries {archive_path = archive_path, f = copy};
+          print ("imported " ^ Int.toString (!result_count) ^ " cache action(s) from " ^ archive_path ^ "\n")
+        end
+    | _ => raise Error "usage: holbuild import FILE"
+
 fun clean_targets args =
   let
     val project = timed_phase "project.discover" load_project
@@ -626,6 +789,8 @@ fun dispatch tc jobs args =
     | "heap" :: _ => raise Error "usage: holbuild heap NAME"
     | "run" :: rest => (reject_json "run"; run_hol tc "run" rest)
     | "repl" :: rest => (reject_json "repl"; repl_hol tc rest)
+    | "export" :: rest => (reject_json "export"; export_archive tc jobs rest)
+    | "import" :: rest => (reject_json "import"; import_archive rest)
     | cmd :: _ => raise Error ("unknown command: " ^ cmd)
 
 fun parse_gc_args args =
@@ -729,6 +894,7 @@ fun dispatch_with_options {holdir, source_dir, cache_dir, jobs, maxheap, json, v
    case args of
        "gc" :: rest => (reject_json "gc"; gc rest)
      | "cache" :: rest => (reject_json "cache"; HolbuildCache.dispatch rest)
+     | "import" :: rest => (reject_json "import"; import_archive rest)
      | "buildhol" :: [] => buildhol holdir maxheap
      | "goalfrag-plan" :: _ => raise Error "goalfrag-plan has been removed; use execution-plan THEORY:THEOREM"
      | "build" :: rest =>
@@ -774,6 +940,8 @@ fun main raw_args =
        | HolbuildBuildExec.ErrorWithDebugArtifacts (msg, artifacts) => err_with_debug_artifacts msg artifacts
        | HolbuildHolSharedCache.Error msg => err msg
        | HolbuildCache.Error msg => err msg
+       | HolbuildCacheArchive.Error msg => err msg
+       | HolbuildCacheTransfer.Error msg => err msg
        | HolbuildCacheConfig.Error msg => err msg
        | e => if is_broken_pipe e then OS.Process.exit OS.Process.success
               else err (General.exnMessage e)

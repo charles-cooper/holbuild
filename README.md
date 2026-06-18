@@ -134,6 +134,8 @@ holbuild context
 holbuild build
 holbuild build MyTheory
 holbuild build --dry-run MyTheory
+holbuild export -o build-output.hbx MyTheory
+holbuild import build-output.hbx
 holbuild clean MyTheory
 holbuild execution-plan MyTheory:my_theorem
 holbuild heap main
@@ -363,6 +365,20 @@ $HOLBUILD_CACHE/hol-toolchains/       # built HOL toolchains and analysers
 The global build cache stores selected semantic artefacts such as `Theory.sig`,
 `Theory.sml`, and `Theory.dat` by action key. Cache hits materialise validated
 artefacts into the local `.holbuild/` tree.
+
+Portable build-output archives use the same cache representation:
+
+```sh
+holbuild build MyTheory
+holbuild export -o my-build.hbx MyTheory
+holbuild --cache-dir /path/to/other/cache import my-build.hbx
+```
+
+`export` includes the selected target closure by default and does not run a
+build unless `--build` is passed. The archive stores a global deduplicated blob
+area plus `project/` and `deps/<package>/` package views for the exported action
+manifests. `import` hydrates the global cache; a later `holbuild build MyTheory`
+materialises outputs through the normal cache-restore path.
 
 Clean old project and cache state with:
 
