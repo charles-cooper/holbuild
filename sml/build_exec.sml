@@ -1137,10 +1137,12 @@ fun file_hash_matches path hash =
 fun cache_blob root path =
   let
     val hash = file_hash path
-    val blob = HolbuildCache.blob_path root hash
   in
-    if file_hash_matches blob hash then () else copy_binary path blob;
-    hash
+    case HolbuildCache.publish_blob root {hash = hash, src = path} of
+        HolbuildCacheBackend.Published => hash
+      | HolbuildCacheBackend.AlreadyPresent => hash
+      | HolbuildCacheBackend.Conflict detail => raise Error ("could not publish cache blob " ^ hash ^ ": " ^ detail)
+      | HolbuildCacheBackend.Skipped => hash
   end
 
 fun cache_manifest_text {input_key, sig_hash, sml_hash, dat_hash, parents, mldeps, proof_timeout} =
@@ -1214,14 +1216,14 @@ fun transient_stage_mldep_in_manifest text =
           | _ => NONE)
     (cache_manifest_lines text)
 
-fun drop_cache_manifest_if_unchanged root input_key manifest old_text =
+fun drop_cache_manifest_if_unchanged root input_key old_text =
   let
     val dropped = ref false
     fun drop () =
-      case current_metadata manifest of
+      case HolbuildCache.get_action root input_key of
           SOME current =>
             if current = old_text then
-              (remove_file manifest; dropped := true)
+              (HolbuildCache.remove_action root input_key; dropped := true)
             else ()
         | NONE => ()
     val _ = HolbuildCache.with_action_publish_lock root input_key drop (fn () => ())
@@ -1231,7 +1233,7 @@ fun drop_cache_manifest_if_unchanged root input_key manifest old_text =
 
 fun transient_cache_manifest_error root input_key manifest manifest_text dep =
   let
-    val dropped = drop_cache_manifest_if_unchanged root input_key manifest manifest_text
+    val dropped = drop_cache_manifest_if_unchanged root input_key manifest_text
     val action = if dropped then "; deleted cache manifest" else "; cache manifest not deleted because action lock is busy or manifest changed"
   in
     raise Error ("cache manifest contains transient stage mldep: " ^ dep ^ action)
@@ -1298,8 +1300,9 @@ fun cache_manifest_blobs_from_lines input_key lines =
   end
 
 fun cache_manifest_blobs root input_key =
-  let val manifest = HolbuildCache.action_manifest root input_key
-  in cache_manifest_blobs_from_lines input_key (cache_manifest_lines (read_text manifest)) end
+  case HolbuildCache.get_action root input_key of
+      SOME manifest_text => cache_manifest_blobs_from_lines input_key (cache_manifest_lines manifest_text)
+    | NONE => raise Error ("cache manifest missing: " ^ input_key)
 
 fun cache_manifest_proof_timeout lines = legacy_proof_timeout lines "proof-timeout"
 
@@ -1322,9 +1325,9 @@ fun cache_entry_usable root input_key text =
     val {sig_hash, sml_hash, dat_hash, ...} =
       cache_manifest_blobs_from_lines input_key (cache_manifest_lines text)
   in
-    file_hash_matches (HolbuildCache.blob_path root sig_hash) sig_hash andalso
-    file_hash_matches (HolbuildCache.blob_path root sml_hash) sml_hash andalso
-    file_hash_matches (HolbuildCache.blob_path root dat_hash) dat_hash
+    HolbuildCache.has_blob root sig_hash andalso
+    HolbuildCache.has_blob root sml_hash andalso
+    HolbuildCache.has_blob root dat_hash
   end
   handle _ => false
 
@@ -1354,14 +1357,10 @@ fun cache_conflict_warning cache_key manifest_path subject old_manifest new_mani
           "\n  existing cache entry: " ^ manifest_path)
 
 fun copy_blob root hash dst =
-  let val blob = HolbuildCache.blob_path root hash
-  in
-    if file_hash_matches blob hash then
-      (copy_binary blob dst;
-       if file_hash_matches dst hash then ()
-       else raise Error ("cache materialization hash mismatch: " ^ hash))
-    else raise Error ("cache blob missing or corrupt: " ^ hash)
-  end
+  case HolbuildCache.fetch_blob root {hash = hash, dst = dst} of
+      HolbuildCacheBackend.Hit => ()
+    | HolbuildCacheBackend.Miss => raise Error ("cache blob missing: " ^ hash)
+    | HolbuildCacheBackend.Corrupt detail => raise Error ("cache blob missing or corrupt: " ^ hash ^ " (" ^ detail ^ ")")
 
 fun file_strings path =
   let
@@ -1436,24 +1435,25 @@ fun publish_cache_manifest root cache_key subject staged_sig published_sml stage
                            mldeps = cache_mldeps,
                            proof_timeout = timeout}
     val manifest = manifest_with proof_timeout
-    val existing = current_metadata manifest_path
+    val existing = HolbuildCache.get_action root cache_key
+    fun write_manifest text = HolbuildCache.write_action root {key = cache_key, text = text}
     fun publish_same_outputs old =
       let val old_timeout = cache_manifest_proof_timeout_text cache_key old
           val best_timeout = timeout_min (old_timeout, proof_timeout)
       in
-        if timeout_equal (old_timeout, best_timeout) then HolbuildCache.touch manifest_path
-        else write_text manifest_path (manifest_with best_timeout)
+        if timeout_equal (old_timeout, best_timeout) then HolbuildCache.touch_action root cache_key
+        else write_manifest (manifest_with best_timeout)
       end
   in
     case existing of
         SOME old =>
-          if old = manifest then HolbuildCache.touch manifest_path
+          if old = manifest then HolbuildCache.touch_action root cache_key
           else if cache_entry_usable root cache_key old then
             if cache_manifest_outputs_equal cache_key old manifest then publish_same_outputs old
             else cache_conflict_warning cache_key manifest_path subject old manifest
           else
-            write_text manifest_path manifest
-      | NONE => write_text manifest_path manifest
+            write_manifest manifest
+      | NONE => write_manifest manifest
   end
 
 fun publish_theory_cache project plan node input_key proof_timeout staged_sig published_sml staged_dat {parents, mldeps} =
@@ -1465,7 +1465,7 @@ fun publish_theory_cache project plan node input_key proof_timeout staged_sig pu
     val context_key = parent_output_cache_key plan node input_key
     val path_dependent = List.exists transient_stage_mldep mldeps andalso dat_mentions_stage_key context_key staged_dat
     val cache_key = if path_dependent then path_dependent_cache_key project context_key else context_key
-    fun drop_stale_manifest key = remove_file (HolbuildCache.action_manifest root key)
+    fun drop_stale_manifest key = HolbuildCache.remove_action root key
     val subject = cache_warning_subject node
     fun publish () = publish_cache_manifest root cache_key subject staged_sig published_sml staged_dat cache_parents cache_mldeps proof_timeout
     fun skip_locked_publish () = ()
@@ -1570,10 +1570,11 @@ fun materialize_theory_cache_key project plan input_key requested_timeout cache_
     val root = cache_root ()
     val manifest = HolbuildCache.action_manifest root cache_key
     val role = cache_key_role project plan node input_key cache_key
-    val _ = if file_exists manifest then ()
-            else (cache_trace ("cache miss: " ^ logical_name node ^ " " ^ role ^ "=" ^ cache_key ^ " (no manifest)");
-                  raise Error "cache entry not found")
-    val manifest_text = read_text manifest
+    val manifest_text =
+      case HolbuildCache.get_action root cache_key of
+          SOME text => text
+        | NONE => (cache_trace ("cache miss: " ^ logical_name node ^ " " ^ role ^ "=" ^ cache_key ^ " (no manifest)");
+                   raise Error "cache entry not found")
     val _ =
       case transient_stage_mldep_in_manifest manifest_text of
           SOME dep => transient_cache_manifest_error root cache_key manifest manifest_text dep
@@ -1596,7 +1597,7 @@ fun materialize_theory_cache_key project plan input_key requested_timeout cache_
        write_text sml_path (replace_all cache_sml_token data_path (read_text sml_path));
        write_text (hfs_remapped_path sml_path) (read_text sml_path);
        write_local_theory_manifests plan node {parents = parents, mldeps = mldeps};
-       HolbuildCache.touch manifest;
+       HolbuildCache.touch_action root cache_key;
        cache_trace ("cache hit: " ^ logical_name node ^ " " ^ role ^ "=" ^ cache_key);
        true)
   in

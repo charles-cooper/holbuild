@@ -16,26 +16,34 @@ fun quote s =
 
 fun path_exists path = FS.access(path, []) handle OS.SysErr _ => false
 
-fun ensure_dir path =
-  if path = "" orelse path = "." then ()
-  else if path_exists path then ()
-  else (ensure_dir (Path.dir path); FS.mkDir path handle OS.SysErr _ => ())
+fun filesystem_cache root = HolbuildFSCacheBackend.filesystem root
 
-fun cache_root () =
-  HolbuildCacheConfig.cache_root ()
-  handle HolbuildCacheConfig.Error msg => raise Error msg
+fun default_backend () =
+  HolbuildFSCacheBackend.default ()
+  handle HolbuildFSCacheBackend.Error msg => raise Error msg
 
-fun actions_dir root = Path.concat(root, "actions")
-fun blobs_dir root = Path.concat(root, "blobs")
-fun tmp_dir root = Path.concat(root, "tmp")
-fun action_dir root key = Path.concat(actions_dir root, key)
-fun action_manifest root key = Path.concat(action_dir root key, "manifest")
-fun blob_path root hash = Path.concat(blobs_dir root, hash)
+fun cache_root () = HolbuildFSCacheBackend.root (default_backend ())
+
+fun actions_dir root = HolbuildFSCacheBackend.actions_dir (filesystem_cache root)
+fun blobs_dir root = HolbuildFSCacheBackend.blobs_dir (filesystem_cache root)
+fun tmp_dir root = HolbuildFSCacheBackend.tmp_dir (filesystem_cache root)
+fun locks_dir root = HolbuildFSCacheBackend.locks_dir (filesystem_cache root)
+fun action_dir root key = HolbuildFSCacheBackend.action_dir (filesystem_cache root) key
+fun action_manifest root key = HolbuildFSCacheBackend.action_manifest (filesystem_cache root) key
+fun blob_path root hash = HolbuildFSCacheBackend.blob_path (filesystem_cache root) hash
 
 fun touch path = FS.setTime(path, NONE) handle OS.SysErr _ => ()
 
-fun ensure_layout root =
-  (ensure_dir (actions_dir root); ensure_dir (blobs_dir root); ensure_dir (tmp_dir root))
+fun ensure_layout root = HolbuildFSCacheBackend.ensure_layout (filesystem_cache root)
+
+fun get_action root key = HolbuildFSCacheBackend.get_action (filesystem_cache root) key
+fun put_action root request = HolbuildFSCacheBackend.put_action (filesystem_cache root) request
+fun write_action root request = HolbuildFSCacheBackend.write_action (filesystem_cache root) request
+fun remove_action root key = HolbuildFSCacheBackend.remove_action (filesystem_cache root) key
+fun touch_action root key = HolbuildFSCacheBackend.touch_action (filesystem_cache root) key
+fun has_blob root hash = HolbuildFSCacheBackend.has_blob (filesystem_cache root) hash
+fun fetch_blob root request = HolbuildFSCacheBackend.fetch_blob (filesystem_cache root) request
+fun publish_blob root request = HolbuildFSCacheBackend.publish_blob (filesystem_cache root) request
 
 fun children dir =
   if not (path_exists dir) then []
@@ -182,7 +190,6 @@ fun sweep_blobs cutoff live_blobs blobs_dir =
     0
     (children blobs_dir)
 
-fun locks_dir root = Path.concat(root, "locks")
 fun gc_lock_path root = Path.concat(locks_dir root, "gc.lock")
 fun gc_lock_owner_path lock = lock ^ ".owner"
 
@@ -240,24 +247,8 @@ fun with_lock root f =
     handle e => (release_gc_lock lock; raise e)
   end
 
-datatype action_lock_handle = ActionLockHandle of HolbuildFileLock.t
-
-fun action_lock root key = Path.concat(locks_dir root, "action-" ^ key ^ ".lock")
-
-fun try_acquire_action_lock root key =
-  (case HolbuildFileLock.try_acquire_path {path = action_lock root key, obsolete_kind = SOME "action cache"} of
-       SOME lock => SOME (ActionLockHandle lock)
-     | NONE => NONE)
-  handle HolbuildFileLock.Error _ => NONE
-
-fun release_action_lock (ActionLockHandle lock) = HolbuildFileLock.release lock
-
 fun with_action_publish_lock root key publish skip =
-  case try_acquire_action_lock root key of
-      SOME lock =>
-        ((publish () before release_action_lock lock)
-         handle e => (release_action_lock lock; raise e))
-    | NONE => skip ()
+  HolbuildFSCacheBackend.with_action_publish_lock (filesystem_cache root) key publish skip
 
 fun gc_root root days =
   if not (path_exists root) then
