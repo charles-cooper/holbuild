@@ -598,6 +598,11 @@ fun step proof_step =
         apply_gentle_then1_step label list_suffix first_program second_program
     | HolbuildProofIr.StepBranch {label, program, phase, ...} => apply_branch_step label program phase
     | HolbuildProofIr.StepBranchList {label, program, ...} => apply_branch_list_suffix_step label program
+    | HolbuildProofIr.StepEachBegin _ => raise Fail "structured each proof step is not implemented yet"
+    | HolbuildProofIr.StepSelectFirstSolveBegin _ => raise Fail "structured select proof step is not implemented yet"
+    | HolbuildProofIr.StepCasesBegin _ => raise Fail "structured cases proof step is not implemented yet"
+    | HolbuildProofIr.StepCase _ => raise Fail "structured case proof step is not implemented yet"
+    | HolbuildProofIr.StepEnd _ => raise Fail "structured end proof step is not implemented yet"
     | HolbuildProofIr.StepPlain _ => raise Fail "plain proof step must cover the whole theorem"
 
 fun inspection_matches wanted name =

@@ -279,6 +279,16 @@ fun parse_proof_step fields =
                                     phase = phase_field phase}
     | ["proof-step", "branch-list", a, b, label, program] =>
         HolbuildProofIr.StepBranchList {start_pos = int_field a, end_pos = int_field b, label = label, program = program}
+    | ["proof-step", "each", a, b] =>
+        HolbuildProofIr.StepEachBegin {start_pos = int_field a, end_pos = int_field b}
+    | ["proof-step", "select-first-solve", a, b] =>
+        HolbuildProofIr.StepSelectFirstSolveBegin {start_pos = int_field a, end_pos = int_field b}
+    | ["proof-step", "cases", a, b] =>
+        HolbuildProofIr.StepCasesBegin {start_pos = int_field a, end_pos = int_field b}
+    | ["proof-step", "case", a, b, index] =>
+        HolbuildProofIr.StepCase {start_pos = int_field a, end_pos = int_field b, index = int_field index}
+    | ["proof-step", "end", a, b] =>
+        HolbuildProofIr.StepEnd {start_pos = int_field a, end_pos = int_field b}
     | ["proof-step", "plain", a, b, label, program] =>
         HolbuildProofIr.StepPlain {start_pos = int_field a, end_pos = int_field b, label = label, program = program}
     | _ => raise Error ("bad proof-ir step response")

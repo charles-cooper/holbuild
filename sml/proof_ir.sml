@@ -221,9 +221,9 @@ and parse_map_first whole f xs =
     | NONE => atomic whole)
 and parse_tactic_infix left opn right whole =
   case opn of
-      ">>" => TacThen (flatten_then left @ flatten_then right)
-    | "\\\\" => TacThen (flatten_then left @ flatten_then right)
-    | "THEN" => TacThen (flatten_then left @ flatten_then right)
+      ">>" => TacThen (flatten_then left @ flatten_then_suffix right)
+    | "\\\\" => TacThen (flatten_then left @ flatten_then_suffix right)
+    | "THEN" => TacThen (flatten_then left @ flatten_then_suffix right)
     | ">>>" => TacThenLT (parse_tactic_ast left, parse_list_tactic_ast right)
     | "THEN_LT" => TacThenLT (parse_tactic_ast left, parse_list_tactic_ast right)
     | "THENL" => parse_thenl left right whole
@@ -258,6 +258,20 @@ and flatten_then e =
                if opn = ">>" orelse opn = "\\\\" orelse opn = "THEN" then flatten_then left @ flatten_then right
                else [parse_tactic_ast e]
            | _ => [parse_tactic_ast e])
+and flatten_then_suffix e =
+  case e of
+      Parens {exp, right = SOME _, ...} =>
+        let val t = parse_tactic_ast exp
+        in if tactic_contains_structural t then [TacRepairGroup (span e, t)] else flatten_then exp end
+    | _ => flatten_then e
+and tactic_contains_structural tactic =
+  case tactic of
+      TacThen xs => List.exists tactic_contains_structural xs
+    | TacThen1 _ => true
+    | TacThenL _ => true
+    | TacSufficesBy _ => true
+    | TacRepairGroup (_, inner) => tactic_contains_structural inner
+    | _ => false
 and flatten_orelse e =
   case strip_closed_parens e of
       SOME inner => flatten_orelse inner
@@ -462,6 +476,7 @@ and list_tactic_span lt =
     | LtAtomic (_, sp) => sp
 
 fun tactic_label source (TacThen []) = "ALL_TAC"
+  | tactic_label source (TacSubgoal sp) = "sg " ^ source_text source sp
   | tactic_label source (TacApply (f, arg)) = source_text source f ^ " " ^ source_text source arg
   | tactic_label source (TacRepairGroup (_, inner)) = tactic_label source inner
   | tactic_label source tactic = source_text source (tactic_span tactic)
@@ -496,6 +511,12 @@ fun branch_step sp label phase program =
 
 fun branch_list_step sp label program =
   StepBranchList {start_pos = #1 sp, end_pos = #2 sp, label = label, program = program}
+
+fun each_begin sp = StepEachBegin {start_pos = #1 sp, end_pos = #2 sp}
+fun select_first_solve_begin sp = StepSelectFirstSolveBegin {start_pos = #1 sp, end_pos = #2 sp}
+fun cases_begin sp = StepCasesBegin {start_pos = #1 sp, end_pos = #2 sp}
+fun case_step sp index = StepCase {start_pos = #1 sp, end_pos = #2 sp, index = index}
+fun end_step sp = StepEnd {start_pos = #1 sp, end_pos = #2 sp}
 
 fun allgoals_step source tactic =
   let val label = ">> " ^ tactic_label source tactic
@@ -571,16 +592,37 @@ and branch_steps source rhs =
         [list_step (tactic_span rhs) (">- " ^ source_text source (tactic_span rhs))
            ("Tactical.NTH_GOAL (Tactical.THEN(" ^ tactic_program source rhs ^ ", Tactical.NO_TAC)) 1")]
 
-fun plan_tactic source tactic =
+fun needs_structured_each tactic =
+  case tactic of
+      TacThen xs => List.exists needs_structured_each xs
+    | TacThen1 _ => true
+    | TacThenL _ => true
+    | TacSufficesBy _ => true
+    | TacRepairGroup (_, inner) => needs_structured_each inner
+    | _ => false
+
+fun suffix_plan source tactic =
+  if needs_structured_each tactic then each_begin (tactic_span tactic) :: plan_tactic source tactic @ [end_step (tactic_span tactic)]
+  else plan_tactic source tactic
+and plan_tactic source tactic =
   case tactic of
       TacThen [] => [tactic_step source tactic]
-    | TacThen (first :: rest) => plan_tactic source first @ List.concat (map (suffix_steps source) rest)
+    | TacThen (first :: rest) => plan_tactic source first @ List.concat (map (suffix_plan source) rest)
     | TacThen1 (lhs, rhs) =>
-        plan_tactic source lhs @ branch_steps source rhs
-    | TacThenL (lhs, branches) =>
         plan_tactic source lhs @
-        [list_step (tactic_span tactic) ">| [...]"
-           ("Tactical.NULL_OK_LT (Tactical.TACS_TO_LT [" ^ String.concatWith ", " (map (tactic_program source) branches) ^ "])")]
+        [select_first_solve_begin (tactic_span rhs)] @
+        plan_tactic source rhs @
+        [end_step (tactic_span rhs)]
+    | TacThenL (lhs, branches) =>
+        let
+          fun branch_steps (i, branch) = case_step (tactic_span branch) i :: plan_tactic source branch
+          val indexed = ListPair.zip (List.tabulate(length branches, fn i => i + 1), branches)
+        in
+          plan_tactic source lhs @
+          [cases_begin (tactic_span tactic)] @
+          List.concat (map branch_steps indexed) @
+          [end_step (tactic_span tactic)]
+        end
     | TacThenLT (lhs, lt) => plan_tactic source lhs @ plan_list_tactic source ">>>" lt
     | TacReverse (sp, inner) =>
         plan_tactic source inner @ plan_list_tactic source ">>>" (LtReverse sp)
@@ -590,7 +632,15 @@ fun plan_tactic source tactic =
     | TacFirstProve (_, xs) => [choice_step (tactic_span tactic) "FIRST_PROVE" (tactic_program source tactic) (map (tactic_label source) xs)]
     | TacMapFirst (_, xs) => [choice_step (tactic_span tactic) "FIRST" (tactic_program source tactic) (map (tactic_label source) xs)]
     | TacSufficesBy (q, rhs) =>
-        [suffices_branch_step source q rhs false]
+        let val sp = (#1 q, #2 q)
+        in
+          [StepTactic {start_pos = #1 q, end_pos = #2 q,
+                       label = "qsuff_tac " ^ source_text source q,
+                       program = suffices_tactic_program source q},
+           select_first_solve_begin (tactic_span rhs)] @
+          plan_tactic source rhs @
+          [end_step (tactic_span rhs)]
+        end
     | TacRepairGroup (_, inner) => plan_tactic source inner
     | _ => [tactic_step source tactic]
 and plan_list_tactic source prefix lt =

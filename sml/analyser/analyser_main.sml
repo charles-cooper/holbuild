@@ -117,6 +117,16 @@ fun step_sml step =
     | HolbuildProofIr.StepBranchList {start_pos, end_pos, label, program} =>
         "HolbuildProofIr.StepBranchList {start_pos=" ^ sml_int start_pos ^ ", end_pos=" ^ sml_int end_pos ^
         ", label=" ^ sml_string label ^ ", program=" ^ sml_string program ^ "}"
+    | HolbuildProofIr.StepEachBegin {start_pos, end_pos} =>
+        "HolbuildProofIr.StepEachBegin {start_pos=" ^ sml_int start_pos ^ ", end_pos=" ^ sml_int end_pos ^ "}"
+    | HolbuildProofIr.StepSelectFirstSolveBegin {start_pos, end_pos} =>
+        "HolbuildProofIr.StepSelectFirstSolveBegin {start_pos=" ^ sml_int start_pos ^ ", end_pos=" ^ sml_int end_pos ^ "}"
+    | HolbuildProofIr.StepCasesBegin {start_pos, end_pos} =>
+        "HolbuildProofIr.StepCasesBegin {start_pos=" ^ sml_int start_pos ^ ", end_pos=" ^ sml_int end_pos ^ "}"
+    | HolbuildProofIr.StepCase {start_pos, end_pos, index} =>
+        "HolbuildProofIr.StepCase {start_pos=" ^ sml_int start_pos ^ ", end_pos=" ^ sml_int end_pos ^ ", index=" ^ sml_int index ^ "}"
+    | HolbuildProofIr.StepEnd {start_pos, end_pos} =>
+        "HolbuildProofIr.StepEnd {start_pos=" ^ sml_int start_pos ^ ", end_pos=" ^ sml_int end_pos ^ "}"
     | HolbuildProofIr.StepPlain {start_pos, end_pos, label, program} =>
         "HolbuildProofIr.StepPlain {start_pos=" ^ sml_int start_pos ^ ", end_pos=" ^ sml_int end_pos ^
         ", label=" ^ sml_string label ^ ", program=" ^ sml_string program ^ "}"
@@ -143,6 +153,16 @@ fun emit_step step =
         P.join ["proof-step", "branch", Int.toString start_pos, Int.toString end_pos, label, program, branch_phase_text phase]
     | HolbuildProofIr.StepBranchList {start_pos, end_pos, label, program} =>
         P.join ["proof-step", "branch-list", Int.toString start_pos, Int.toString end_pos, label, program]
+    | HolbuildProofIr.StepEachBegin {start_pos, end_pos} =>
+        P.join ["proof-step", "each", Int.toString start_pos, Int.toString end_pos]
+    | HolbuildProofIr.StepSelectFirstSolveBegin {start_pos, end_pos} =>
+        P.join ["proof-step", "select-first-solve", Int.toString start_pos, Int.toString end_pos]
+    | HolbuildProofIr.StepCasesBegin {start_pos, end_pos} =>
+        P.join ["proof-step", "cases", Int.toString start_pos, Int.toString end_pos]
+    | HolbuildProofIr.StepCase {start_pos, end_pos, index} =>
+        P.join ["proof-step", "case", Int.toString start_pos, Int.toString end_pos, Int.toString index]
+    | HolbuildProofIr.StepEnd {start_pos, end_pos} =>
+        P.join ["proof-step", "end", Int.toString start_pos, Int.toString end_pos]
     | HolbuildProofIr.StepPlain {start_pos, end_pos, label, program} =>
         P.join ["proof-step", "plain", Int.toString start_pos, Int.toString end_pos, label, program]
 
