@@ -308,11 +308,10 @@ Proof
 QED
 SML
 check_plan suffix_by_plan <<'EXPECTED'
-holbuild proof-ir plan ATheory:suffix_by_plan source=src/AScript.sml (4 steps)
+holbuild proof-ir plan ATheory:suffix_by_plan source=src/AScript.sml (3 steps)
   00 ALL_TAC
-  01 >> `T`
-  02   >- ACCEPT_TAC TRUTH
-  03 >> ACCEPT_TAC TRUTH
+  01 >> `T` by ACCEPT_TAC TRUTH
+  02 >> ACCEPT_TAC TRUTH
 EXPECTED
 
 cat >> "$project/src/AScript.sml" <<'SML'
@@ -326,15 +325,14 @@ Proof
 QED
 SML
 check_plan nested_branch_by_plan <<'EXPECTED'
-holbuild proof-ir plan ATheory:nested_branch_by_plan source=src/AScript.sml (8 steps)
+holbuild proof-ir plan ATheory:nested_branch_by_plan source=src/AScript.sml (7 steps)
   00 CONJ_TAC
-  01 >- `T`
-  02 >- ACCEPT_TAC TRUTH
-  03    >> ACCEPT_TAC TRUTH
-  04    >- solved
-  05 >> Q_TAC SUFF_TAC `T`
-  06   >- simp[]
-  07 >> ACCEPT_TAC TRUTH
+  01 >- `T` by ACCEPT_TAC TRUTH
+  02    >> ACCEPT_TAC TRUTH
+  03    >- solved
+  04 >> Q_TAC SUFF_TAC `T`
+  05   >- simp[]
+  06 >> ACCEPT_TAC TRUTH
 EXPECTED
 
 cat >> "$project/src/AScript.sml" <<'SML'

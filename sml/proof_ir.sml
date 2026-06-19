@@ -80,6 +80,7 @@ datatype tactic =
   | TacRepeat of (int * int) * tactic
   | TacReverse of (int * int) * tactic
   | TacSubgoal of int * int
+  | TacBy of int * int
   | TacMapEvery of (int * int) * (int * int) list
   | TacApply of (int * int) * (int * int)
   | TacMapFirst of (int * int) * tactic list
@@ -131,6 +132,7 @@ fun tactic_end (TacThen []) = 0
   | tactic_end (TacRepeat (sp, _)) = span_end sp
   | tactic_end (TacReverse (sp, _)) = span_end sp
   | tactic_end (TacSubgoal sp) = span_end sp
+  | tactic_end (TacBy sp) = span_end sp
   | tactic_end (TacApply (_, arg)) = span_end arg
   | tactic_end (TacMapEvery (_, [])) = 0
   | tactic_end (TacMapEvery (_, args)) = span_end (List.last args)
@@ -230,7 +232,7 @@ and parse_tactic_infix left opn right whole =
     | ">|" => parse_thenl left right whole
     | ">-" => TacThen1 (parse_tactic_ast left, parse_branch_rhs_ast right)
     | "THEN1" => TacThen1 (parse_tactic_ast left, parse_branch_rhs_ast right)
-    | "by" => TacThen1 (TacSubgoal (span left), parse_branch_rhs_ast right)
+    | "by" => TacBy (span whole)
     | "suffices_by" => TacSufficesBy (span left, parse_branch_rhs_ast right)
     | "ORELSE" => TacOrelse (flatten_orelse left @ flatten_orelse right)
     | ">~" => TacThenLT (parse_tactic_ast left, LtSelectGoal (span right))
@@ -366,6 +368,7 @@ fun tactic_program source tactic =
     | TacRepeat (_, t) => "Tactical.REPEAT(" ^ tactic_program source t ^ ")"
     | TacReverse (_, t) => "Tactical.REVERSE(" ^ tactic_program source t ^ ")"
     | TacSubgoal sp => "sg " ^ source_text source sp
+    | TacBy sp => parenthesize (source_text source sp)
     | TacApply (f, arg) => parenthesize (source_text source f) ^ " " ^ parenthesize (source_text source arg)
     | TacMapEvery _ => parenthesize (source_text source (tactic_span tactic))
     | TacMapFirst (_, ts) => "Tactical.FIRST [" ^ String.concatWith ", " (map (tactic_program source) ts) ^ "]"
@@ -422,6 +425,7 @@ and tactic_span tactic =
     | TacRepeat (sp, _) => sp
     | TacReverse (sp, _) => sp
     | TacSubgoal sp => sp
+    | TacBy sp => sp
     | TacApply (f, arg) => (#1 f, #2 arg)
     | TacMapEvery (f, []) => f
     | TacMapEvery (f, xs) => (#1 f, #2 (List.last xs))
