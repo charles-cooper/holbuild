@@ -94,6 +94,35 @@ Proof
   `T` suffices_by (DISCH_TAC >> ACCEPT_TAC TRUTH) >>
   ACCEPT_TAC TRUTH
 QED
+
+Theorem each_scope_discriminates:
+  (P ==> P /\ T) /\ (Q ==> Q /\ T)
+Proof
+  CONJ_TAC >>
+  (strip_tac >>
+   CONJ_TAC >- FIRST_ASSUM ACCEPT_TAC >>
+   ACCEPT_TAC TRUTH)
+QED
+
+Theorem branch_local_each_discriminates:
+  ((P ==> P /\ T) /\ (Q ==> Q /\ T)) /\ T
+Proof
+  CONJ_TAC >-
+    (CONJ_TAC >>
+     (strip_tac >>
+      CONJ_TAC >- FIRST_ASSUM ACCEPT_TAC >>
+      ACCEPT_TAC TRUTH)) >>
+  ACCEPT_TAC TRUTH
+QED
+
+Theorem cases_discriminates:
+  T /\ (0 = 0)
+Proof
+  CONJ_TAC >| [
+    ACCEPT_TAC TRUTH,
+    REFL_TAC
+  ]
+QED
 SML
 
 steps_success_log=$tmpdir/success-steps.log
@@ -169,6 +198,28 @@ check_failure_project \
   'selected goals were not solved' \
   'plan position: 03 end'
 
+cases_failure_project=$tmpdir/cases-failure-project
+write_project_toml "$cases_failure_project" "cases-failure"
+cat > "$cases_failure_project/src/CasesFailScript.sml" <<'SML'
+Theory CasesFail
+
+Theorem target:
+  T /\ (0 = 0)
+Proof
+  CONJ_TAC >| [
+    ACCEPT_TAC TRUTH,
+    FAIL_TAC "case failure"
+  ]
+QED
+SML
+cases_failure_log=$tmpdir/cases-failure.log
+if (cd "$cases_failure_project" && "$HOLBUILD_BIN" build CasesFailTheory) > "$cases_failure_log" 2>&1; then
+  echo "expected cases failure project to fail" >&2
+  exit 1
+fi
+require_grep 'FAIL_TAC "case failure"' "$cases_failure_log"
+require_grep 'plan position: 05 step FAIL_TAC "case failure"' "$cases_failure_log"
+
 # Timeout attribution should point at the branch-local slow tactic.
 timeout_project=$tmpdir/timeout-project
 write_project_toml "$timeout_project" "proof-ir-branch-composition-timeout"
@@ -193,6 +244,31 @@ fi
 require_grep "slow_tac" "$timeout_log"
 require_grep "timed out" "$timeout_log"
 require_grep "plan position: 02 step slow_tac" "$timeout_log"
+
+each_timeout_project=$tmpdir/each-timeout-project
+write_project_toml "$each_timeout_project" "proof-ir-each-timeout"
+cat > "$each_timeout_project/src/EachTimeoutScript.sml" <<'SML'
+Theory EachTimeout
+
+fun slow_tac g = (OS.Process.sleep (Time.fromSeconds 5); ALL_TAC g)
+
+Theorem each_timeout:
+  (T /\ T) /\ (T /\ T)
+Proof
+  CONJ_TAC >>
+  (CONJ_TAC >- slow_tac >>
+   ACCEPT_TAC TRUTH)
+QED
+SML
+
+each_timeout_log=$tmpdir/each-timeout.log
+if (cd "$each_timeout_project" && "$HOLBUILD_BIN" build --tactic-timeout 1 EachTimeoutTheory) > "$each_timeout_log" 2>&1; then
+  echo "expected each timeout build to fail" >&2
+  exit 1
+fi
+require_grep "slow_tac" "$each_timeout_log"
+require_grep "timed out" "$each_timeout_log"
+require_grep "plan position: 04 step slow_tac" "$each_timeout_log"
 
 # Failed-prefix replay should resume cleanly after a branch has closed.  The
 # edited suffix must not re-enter a stale branch/focus state.

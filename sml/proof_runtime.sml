@@ -32,7 +32,8 @@ val compiled_tactic_ref = ref Tactical.ALL_TAC
 val compiled_list_tactic_ref = ref Tactical.ALL_LT
 val proof_history_ref = ref (NONE : goalStack.gstk History.history option)
 val branch_tail_count_ref = ref ([] : int list)
-val structural_frame_ref = ref ([] : string list)
+datatype focus_frame_kind = SelectSolveFrame | EachFrame | CaseFrame
+val focus_stack_ref = ref ([] : {prefix : int, suffix : int, kind : focus_frame_kind} list)
 val reverse_group_lengths_ref = ref (NONE : int list option)
 
 fun env_bool name =
@@ -370,16 +371,49 @@ fun no_open_goals () =
 
 fun allgoals_suffix_label label = String.isPrefix ">> " label
 
+fun total_goals () = length (history_top_goals()) handle _ => 0
+
+fun current_focus_bounds () =
+  case !focus_stack_ref of
+      [] => {prefix = 0, suffix = 0}
+    | {prefix, suffix, ...} :: _ => {prefix = prefix, suffix = suffix}
+
+fun current_focus_count () =
+  let val {prefix, suffix} = current_focus_bounds()
+  in Int.max(0, total_goals() - prefix - suffix) end
+
+fun focus_goals () =
+  let
+    val goals = history_top_goals()
+    val {prefix, suffix} = current_focus_bounds()
+    val focus_n = Int.max(0, length goals - prefix - suffix)
+    val (_, rest) = Lib.split_after prefix goals
+    val (focus, _) = Lib.split_after focus_n rest
+  in focus end
+
+fun scoped_list_tactic ltac =
+  let
+    val {prefix, suffix} = current_focus_bounds()
+    val focus_n = current_focus_count()
+  in
+    if prefix = 0 andalso suffix = 0 then ltac
+    else Tactical.SPLIT_LT prefix (Tactical.ALL_LT, Tactical.SPLIT_LT focus_n (ltac, Tactical.ALL_LT))
+  end
+
+fun apply_focused_list_tactic label ltac =
+  if current_focus_count() = 0 then ()
+  else
+    let val input_goals = focus_goals()
+    in
+      append_history_with_timeout label (goalStack.expand_listf (scoped_list_tactic ltac))
+      handle e => report_step_failure_with_goals label input_goals e
+    end
+
 fun apply_list_tactic_step label program =
   if allgoals_suffix_label label andalso no_open_goals () then ()
   else
-    let
-      val input_goals = history_top_goals()
-      val list_tactic = compile_list_tactic label program
-    in
-      append_history_with_timeout label (goalStack.expand_listf list_tactic)
-      handle e => report_step_failure_with_goals label input_goals e
-    end
+    let val list_tactic = compile_list_tactic label program
+    in apply_focused_list_tactic label list_tactic end
 
 fun gentle_then1 tac1 tac2 goal =
   let
@@ -579,47 +613,34 @@ fun apply_branch_step label program phase =
     | HolbuildProofIr.BranchClose => apply_branch_close_step label
 
 fun apply_tactic_step label program =
-  if not (null (!branch_tail_count_ref)) then
-    let val tactic = compile_tactic label program
-    in apply_branch_suffix_list_tactic label (Tactical.ALLGOALS tactic) end
-  else if no_open_goals () then ()
-  else
-    let
-      val input_goals = history_top_goals()
-      val tactic = compile_tactic label program
-    in
-      append_history_with_timeout label (goalStack.expand_listf (Tactical.ALLGOALS tactic))
-      handle e => report_step_failure_with_goals label input_goals e
-    end
-
-fun push_structural_frame name = structural_frame_ref := name :: !structural_frame_ref
-
-fun pop_structural_frame label =
-  case !structural_frame_ref of
-      [] => raise Fail ("structural end without active frame: " ^ label)
-    | frame :: rest => (structural_frame_ref := rest; frame)
+  let val tactic = compile_tactic label program
+  in apply_focused_list_tactic label (Tactical.ALLGOALS tactic) end
 
 fun apply_select_first_solve_begin label =
   let
-    val goals = history_top_goals()
-    val before_count = length goals
-    val tail_count = before_count - 1
+    val {prefix, suffix} = current_focus_bounds()
+    val focus_n = current_focus_count()
   in
-    if before_count <= 0 then raise Fail ("select first solve with no open goals: " ^ label) else ();
-    push_branch_tail_count tail_count;
-    push_structural_frame "select"
+    if focus_n <= 0 then raise Fail ("select first solve with no open goals: " ^ label) else ();
+    focus_stack_ref := {prefix = prefix, suffix = suffix + focus_n - 1, kind = SelectSolveFrame} :: !focus_stack_ref
   end
 
-fun apply_each_begin () = push_structural_frame "each"
-fun apply_cases_begin () = push_structural_frame "cases"
+fun apply_each_begin () = focus_stack_ref := {prefix = #prefix (current_focus_bounds()), suffix = #suffix (current_focus_bounds()), kind = EachFrame} :: !focus_stack_ref
+fun apply_cases_begin () = focus_stack_ref := {prefix = #prefix (current_focus_bounds()), suffix = #suffix (current_focus_bounds()), kind = CaseFrame} :: !focus_stack_ref
 fun apply_case_step _ = ()
 
+fun pop_focus_frame label =
+  case !focus_stack_ref of
+      [] => raise Fail ("structural end without active frame: " ^ label)
+    | frame :: rest => (focus_stack_ref := rest; frame)
+
 fun apply_structural_end label =
-  case pop_structural_frame label of
-      "select" => apply_branch_close_step label
-    | "each" => ()
-    | "cases" => ()
-    | _ => ()
+  case !focus_stack_ref of
+      [] => raise Fail ("structural end without active frame: " ^ label)
+    | {kind = SelectSolveFrame, ...} :: rest =>
+        if current_focus_count() = 0 then focus_stack_ref := rest
+        else report_step_failure_with_goals label (focus_goals()) (Fail "selected goals were not solved")
+    | _ :: rest => focus_stack_ref := rest
 
 fun step proof_step =
   case proof_step of
@@ -694,6 +715,83 @@ fun trace_after status elapsed index proof_step =
               " goals=", Int.toString (current_goal_count()),
               " label=", display_label (HolbuildProofIr.step_label proof_step), "\n"]
 
+fun split_structural_body opener rest =
+  let
+    fun is_open step =
+      case step of
+          HolbuildProofIr.StepEachBegin _ => true
+        | HolbuildProofIr.StepSelectFirstSolveBegin _ => true
+        | HolbuildProofIr.StepCasesBegin _ => true
+        | _ => false
+    fun loop _ acc [] = raise Fail "unterminated structural proof step"
+      | loop depth acc (step :: xs) =
+          (case step of
+               HolbuildProofIr.StepEnd _ =>
+                 if depth = 0 then (rev acc, xs)
+                 else loop (depth - 1) (step :: acc) xs
+             | _ => loop (if is_open step then depth + 1 else depth) (step :: acc) xs)
+  in loop 0 [] rest end
+
+fun join_then [] = "Tactical.ALL_TAC"
+  | join_then [x] = x
+  | join_then (x :: xs) = List.foldl (fn (rhs, lhs) => "Tactical.THEN(" ^ lhs ^ ", " ^ rhs ^ ")") x xs
+
+fun body_tactic_program steps =
+  let
+    fun add_tactic program acc = program :: acc
+    fun go acc [] = rev acc
+      | go acc (step :: rest) =
+          (case step of
+               HolbuildProofIr.StepTactic {program, ...} => go (add_tactic program acc) rest
+             | HolbuildProofIr.StepSelectFirstSolveBegin _ =>
+                 let
+                   val (body, rest') = split_structural_body step rest
+                   val rhs = body_tactic_program body
+                 in
+                   case acc of
+                       lhs :: acc_tail => go ("Tactical.THEN1(" ^ lhs ^ ", " ^ rhs ^ ")" :: acc_tail) rest'
+                     | [] => raise Fail "select first solve without preceding tactic in structured body"
+                 end
+             | HolbuildProofIr.StepEachBegin _ =>
+                 let val (_, rest') = split_structural_body step rest
+                 in raise Fail "nested each tactic program is not implemented" end
+             | HolbuildProofIr.StepCasesBegin _ =>
+                 raise Fail "cases inside tactic program is not implemented"
+             | HolbuildProofIr.StepEnd _ => raise Fail "unexpected end in tactic program"
+             | HolbuildProofIr.StepCase _ => raise Fail "unexpected case in tactic program"
+             | _ => go (add_tactic (HolbuildProofIr.step_program step) acc) rest)
+  in join_then (go [] steps) end
+
+fun apply_structured_each_step label body =
+  let
+    val list_tactic = compile_list_tactic label ("Tactical.ALLGOALS(" ^ body_tactic_program body ^ ")")
+  in
+    if not (null (!branch_tail_count_ref)) then apply_branch_suffix_list_tactic label list_tactic
+    else apply_list_tactic_step label ("Tactical.ALLGOALS(" ^ body_tactic_program body ^ ")")
+  end
+
+fun case_bodies_with_offsets steps =
+  let
+    fun flush NONE acc = acc
+      | flush (SOME (_, start_offset, body)) acc = (start_offset, rev body) :: acc
+    fun loop _ current acc [] = rev (flush current acc)
+      | loop offset current acc (step :: rest) =
+          (case step of
+               HolbuildProofIr.StepCase _ => loop (offset + 1) (SOME (step, offset + 1, [])) (flush current acc) rest
+             | _ =>
+                 (case current of
+                      NONE => loop (offset + 1) current acc rest
+                    | SOME (case_step, start_offset, body) => loop (offset + 1) (SOME (case_step, start_offset, step :: body)) acc rest))
+  in loop 0 NONE [] steps end
+
+fun case_bodies steps = map #2 (case_bodies_with_offsets steps)
+
+fun apply_structured_cases_step label body =
+  let
+    val programs = map body_tactic_program (case_bodies body)
+    val program = "Tactical.NULL_OK_LT (Tactical.TACS_TO_LT [" ^ String.concatWith ", " programs ^ "])"
+  in apply_list_tactic_step label program end
+
 fun run_maybe_traced_step index display_index proof_step =
   let
     val old_failed_step_end = !failed_step_end_ref
@@ -725,13 +823,62 @@ fun run_maybe_traced_step index display_index proof_step =
 
 fun run_steps_from_at _ _ [] = ()
   | run_steps_from_at index display_index (proof_step :: rest) =
-      (successful_step_count_ref := index;
-       run_maybe_traced_step index display_index proof_step;
-       successful_step_count_ref := index + 1;
-       successful_prefix_end_ref := HolbuildProofIr.step_end proof_step;
-       run_steps_from_at (index + 1)
-                         (display_index + HolbuildProofIr.display_line_count proof_step)
-                         rest)
+      (case proof_step of
+           HolbuildProofIr.StepEachBegin _ =>
+             let
+               val (body, rest') = split_structural_body proof_step rest
+               val consumed = 2 + length body
+               val parent = current_focus_bounds()
+               val original_n = current_focus_count()
+               fun iter j acc =
+                 if j >= original_n then ()
+                 else
+                   let
+                     val remaining = original_n - j - 1
+                     val frame = {prefix = #prefix parent + acc, suffix = #suffix parent + remaining, kind = EachFrame}
+                     val _ = focus_stack_ref := frame :: !focus_stack_ref
+                     val _ = run_steps_from_at (index + 1) (display_index + 1) body
+                     val gen = current_focus_count()
+                     val _ = (case !focus_stack_ref of _ :: rest => focus_stack_ref := rest | [] => raise Fail "each frame underflow")
+                   in iter (j + 1) (acc + gen) end
+             in
+               iter 0 0;
+               successful_step_count_ref := index + consumed;
+               successful_prefix_end_ref := HolbuildProofIr.step_end proof_step;
+               run_steps_from_at (index + consumed) (display_index + consumed) rest'
+             end
+         | HolbuildProofIr.StepCasesBegin _ =>
+             let
+               val (body, rest') = split_structural_body proof_step rest
+               val consumed = 2 + length body
+               val bodies = case_bodies_with_offsets body
+               val parent = current_focus_bounds()
+               val original_n = current_focus_count()
+               val _ = if length bodies = original_n then () else raise Fail "cases length mismatch"
+               fun iter j acc [] = ()
+                 | iter j acc ((body_offset, case_body) :: more) =
+                   let
+                     val remaining = original_n - j - 1
+                     val frame = {prefix = #prefix parent + acc, suffix = #suffix parent + remaining, kind = CaseFrame}
+                     val _ = focus_stack_ref := frame :: !focus_stack_ref
+                     val _ = run_steps_from_at (index + 1 + body_offset) (display_index + 1 + body_offset) case_body
+                     val gen = current_focus_count()
+                     val _ = (case !focus_stack_ref of _ :: rest => focus_stack_ref := rest | [] => raise Fail "case frame underflow")
+                   in iter (j + 1) (acc + gen) more end
+             in
+               iter 0 0 bodies;
+               successful_step_count_ref := index + consumed;
+               successful_prefix_end_ref := HolbuildProofIr.step_end proof_step;
+               run_steps_from_at (index + consumed) (display_index + consumed) rest'
+             end
+         | _ =>
+             (successful_step_count_ref := index;
+              run_maybe_traced_step index display_index proof_step;
+              successful_step_count_ref := index + 1;
+              successful_prefix_end_ref := HolbuildProofIr.step_end proof_step;
+              run_steps_from_at (index + 1)
+                                (display_index + HolbuildProofIr.display_line_count proof_step)
+                                rest))
 
 fun run_steps_from index display_index steps = run_steps_from_at index display_index steps
 
@@ -743,7 +890,7 @@ fun run_steps steps =
   (successful_step_count_ref := 0;
    successful_prefix_end_ref := 0;
    branch_tail_count_ref := [];
-   structural_frame_ref := [];
+   focus_stack_ref := [];
    reverse_group_lengths_ref := NONE;
    run_steps_from 0 0 steps)
 
