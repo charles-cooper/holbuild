@@ -363,14 +363,45 @@ fun compile_list_tactic label program =
   else
     raise Fail ("list tactic fragment did not compile: " ^ label)
 
-fun apply_tactic_step label program =
+fun history_is_proved () =
+  ((project_history goalStack.extract_thm; true) handle _ => false)
+
+fun active_focus_snapshot label =
+  case !branch_tail_count_ref of
+      [] =>
+        let val goals = history_top_goals()
+        in {goals = goals, total_count = length goals, generated_count = length goals, tail_count = 0} end
+        handle e => if history_is_proved () then {goals = [], total_count = 0, generated_count = 0, tail_count = 0} else raise e
+    | tail_count :: _ =>
+        let
+          val goals = history_top_goals()
+          val total_count = length goals
+          val generated_count = total_count - tail_count
+        in
+          if generated_count < 0 then raise Fail ("focus tail count exceeds open goals: " ^ label)
+          else {goals = goals, total_count = total_count, generated_count = generated_count, tail_count = tail_count}
+        end
+        handle e => if tail_count = 0 andalso history_is_proved () then {goals = [], total_count = 0, generated_count = 0, tail_count = tail_count} else raise e
+
+fun apply_focus_list_tactic label list_tactic =
   let
-    val input_goals = top_input_goals()
-    val tactic = compile_tactic label program
+    val {goals, total_count, generated_count, ...} = active_focus_snapshot label
+    val input_goals = take_goals generated_count goals
+    val scoped_list_tactic =
+      case !branch_tail_count_ref of
+          [] => list_tactic
+        | _ => Tactical.SPLIT_LT generated_count (list_tactic, Tactical.ALL_LT)
   in
-    append_history_with_timeout label (goalStack.expandf tactic)
+    (if generated_count = 0 then
+       (if total_count = 0 then () else append_history (goalStack.expand_listf Tactical.ALL_LT))
+     else
+       append_history_with_timeout label (goalStack.expand_listf scoped_list_tactic))
     handle e => report_step_failure_with_goals label input_goals e
   end
+
+fun apply_tactic_step label program =
+  let val tactic = compile_tactic label program
+  in apply_focus_list_tactic label (Tactical.ALLGOALS tactic) end
 
 fun no_open_goals () =
   ((history_top_goals (); false)
@@ -381,13 +412,8 @@ fun allgoals_suffix_label label = String.isPrefix ">> " label
 fun apply_list_tactic_step label program =
   if allgoals_suffix_label label andalso no_open_goals () then ()
   else
-    let
-      val input_goals = history_top_goals()
-      val list_tactic = compile_list_tactic label program
-    in
-      append_history_with_timeout label (goalStack.expand_listf list_tactic)
-      handle e => report_step_failure_with_goals label input_goals e
-    end
+    let val list_tactic = compile_list_tactic label program
+    in apply_focus_list_tactic label list_tactic end
 
 fun gentle_then1 tac1 tac2 goal =
   let
@@ -501,9 +527,6 @@ fun current_branch_tail_count label =
       [] => raise Fail ("branch suffix without active branch: " ^ label)
     | tail_count :: _ => tail_count
 
-fun history_is_proved () =
-  ((project_history goalStack.extract_thm; true) handle _ => false)
-
 fun branch_goal_snapshot label =
   let
     val tail_count = current_branch_tail_count label
@@ -580,16 +603,32 @@ fun apply_branch_close_step label =
     handle e => report_step_failure_with_goals label input_goals e
   end
 
+fun push_first_focus label =
+  let
+    val {generated_count, tail_count, ...} = active_focus_snapshot label
+    val _ = if generated_count <= 0 then raise Fail ("select with no focused goals: " ^ label) else ()
+  in push_branch_tail_count (tail_count + generated_count - 1) end
+
+fun focused_goal_count label = #generated_count (active_focus_snapshot label)
+
+fun close_focus label HolbuildProofIr.SelectKeep = pop_branch_tail_count label
+  | close_focus label HolbuildProofIr.SelectSolve =
+      let val remaining = focused_goal_count label
+      in
+        if remaining = 0 then pop_branch_tail_count label
+        else raise Fail "selected goals were not solved"
+      end
+
 fun step proof_step =
   case proof_step of
       HolbuildProofIr.StepTactic {label, program, ...} => apply_tactic_step label program
     | HolbuildProofIr.StepList {label, program, ...} => apply_list_tactic_step label program
-    | HolbuildProofIr.StepEach _ => raise Fail "structural proof-ir runtime not implemented yet: each"
-    | HolbuildProofIr.StepSelect _ => raise Fail "structural proof-ir runtime not implemented yet: select"
-    | HolbuildProofIr.StepCases _ => raise Fail "structural proof-ir runtime not implemented yet: cases"
-    | HolbuildProofIr.StepChoice _ => raise Fail "structural proof-ir runtime not implemented yet: choice"
-    | HolbuildProofIr.StepRepeat _ => raise Fail "structural proof-ir runtime not implemented yet: repeat"
-    | HolbuildProofIr.StepTry _ => raise Fail "structural proof-ir runtime not implemented yet: try"
+    | HolbuildProofIr.StepEach _ => raise Fail "internal error: StepEach is handled by structural runner"
+    | HolbuildProofIr.StepSelect _ => raise Fail "internal error: StepSelect is handled by structural runner"
+    | HolbuildProofIr.StepCases _ => raise Fail "internal error: StepCases is handled by structural runner"
+    | HolbuildProofIr.StepChoice _ => raise Fail "internal error: StepChoice is handled by structural runner"
+    | HolbuildProofIr.StepRepeat _ => raise Fail "internal error: StepRepeat is handled by structural runner"
+    | HolbuildProofIr.StepTry _ => raise Fail "internal error: StepTry is handled by structural runner"
 
 fun inspection_matches wanted name =
   case wanted of NONE => false | SOME selected => selected = name
@@ -674,40 +713,94 @@ fun run_maybe_traced_step index display_index proof_step =
     else (step proof_step; restore ())
   end
 
-fun run_steps_from_at _ _ [] = ()
-  | run_steps_from_at index display_index (proof_step :: rest) =
-      (successful_step_count_ref := index;
-       run_maybe_traced_step index display_index proof_step;
-       successful_step_count_ref := index + 1;
-       successful_prefix_end_ref := HolbuildProofIr.step_end proof_step;
-       run_steps_from_at (index + 1)
-                         (display_index + HolbuildProofIr.display_line_count proof_step)
-                         rest)
+fun run_structural_steps display_index steps =
+  let
+    fun run_list _ [] = ()
+      | run_list d (proof_step :: rest) =
+          let val next = run_one d proof_step
+          in run_list next rest end
+    and run_leaf d proof_step =
+      let val n = !successful_step_count_ref
+      in
+        run_maybe_traced_step n d proof_step;
+        successful_step_count_ref := n + 1;
+        successful_prefix_end_ref := HolbuildProofIr.step_end proof_step;
+        d + HolbuildProofIr.display_line_count proof_step
+      end
+    and run_select d label mode body =
+      let
+        val _ = push_first_focus label
+        val result = (run_list (d + 1) body; NONE) handle e => SOME e
+      in
+        case result of
+            SOME e => (pop_branch_tail_count label handle _ => (); raise e)
+          | NONE => (close_focus label mode; d + HolbuildProofIr.display_line_count (HolbuildProofIr.StepSelect {start_pos = 0, end_pos = 0, selector = HolbuildProofIr.SelectFirst, mode = mode, body = body}))
+      end
+    and run_each d body =
+      let
+        val count = focused_goal_count "each"
+        fun loop 0 = ()
+          | loop n = (push_first_focus "each"; run_list (d + 1) body; close_focus "each" HolbuildProofIr.SelectSolve; loop (n - 1))
+      in loop count; d + 2 + List.foldl (fn (s, n) => n + HolbuildProofIr.display_line_count s) 0 body end
+    and run_cases d cases =
+      let
+        fun loop _ [] = ()
+          | loop n (body :: rest) = (push_first_focus ("case " ^ Int.toString n); run_list (d + 2) body; close_focus ("case " ^ Int.toString n) HolbuildProofIr.SelectSolve; loop (n + 1) rest)
+      in loop 1 cases; d + HolbuildProofIr.display_line_count (HolbuildProofIr.StepCases {start_pos = 0, end_pos = 0, cases = cases}) end
+    and run_choice d label alternatives =
+      let
+        fun attempt _ [] last = (case last of SOME e => raise e | NONE => raise Fail ("choice has no alternatives: " ^ label))
+          | attempt n (body :: rest) _ =
+              let val saved = current_history()
+                  val result = (run_list (d + 2) body; NONE) handle e => SOME e
+              in
+                case result of
+                    NONE => ()
+                  | SOME e => (set_history saved; attempt (n + 1) rest (SOME e))
+              end
+      in attempt 1 alternatives NONE; d + HolbuildProofIr.display_line_count (HolbuildProofIr.StepChoice {start_pos = 0, end_pos = 0, label = label, alternatives = alternatives}) end
+    and run_try d body =
+      let val saved = current_history()
+          val result = (run_list (d + 1) body; NONE) handle e => SOME e
+      in case result of NONE => () | SOME _ => set_history saved;
+         d + HolbuildProofIr.display_line_count (HolbuildProofIr.StepTry {start_pos = 0, end_pos = 0, body = body}) end
+    and run_repeat d body =
+      let
+        fun loop guard =
+          if guard > 10000 then raise Fail "repeat proof step exceeded iteration guard"
+          else let val before = current_goal_count()
+                   val saved = current_history()
+                   val result = (run_list (d + 1) body; NONE) handle e => SOME e
+                   val after = current_goal_count()
+               in case result of
+                      SOME _ => set_history saved
+                    | NONE => if after = before then () else loop (guard + 1)
+               end
+      in loop 0; d + HolbuildProofIr.display_line_count (HolbuildProofIr.StepRepeat {start_pos = 0, end_pos = 0, body = body}) end
+    and run_one d proof_step =
+      case proof_step of
+          HolbuildProofIr.StepTactic _ => run_leaf d proof_step
+        | HolbuildProofIr.StepList _ => run_leaf d proof_step
+        | HolbuildProofIr.StepSelect {mode, body, ...} => run_select d (HolbuildProofIr.step_label proof_step) mode body
+        | HolbuildProofIr.StepEach {body, ...} => run_each d body
+        | HolbuildProofIr.StepCases {cases, ...} => run_cases d cases
+        | HolbuildProofIr.StepChoice {label, alternatives, ...} => run_choice d label alternatives
+        | HolbuildProofIr.StepTry {body, ...} => run_try d body
+        | HolbuildProofIr.StepRepeat {body, ...} => run_repeat d body
+  in run_list display_index steps end
 
-fun run_steps_from index display_index steps = run_steps_from_at index display_index steps
+fun run_steps_from _ display_index steps = run_structural_steps display_index steps
 
-fun drop_steps 0 steps = steps
-  | drop_steps _ [] = []
-  | drop_steps n (_ :: rest) = drop_steps (n - 1) rest
+fun drop_steps _ steps = steps
 
 fun run_steps steps =
   (successful_step_count_ref := 0;
    successful_prefix_end_ref := 0;
    branch_tail_count_ref := [];
    reverse_group_lengths_ref := NONE;
-   run_steps_from 0 0 steps)
+   run_structural_steps 0 steps)
 
-fun display_index_at_count count steps =
-  let
-    fun loop _ display_index [] = display_index
-      | loop remaining display_index (proof_step :: rest) =
-          if remaining <= 0 then display_index
-          else loop (remaining - 1)
-                    (display_index + HolbuildProofIr.display_line_count proof_step)
-                    rest
-  in
-    loop count 0 steps
-  end
+fun display_index_at_count _ _ = 0
 datatype 'a traced_result = TraceOk of 'a | TraceError of exn
 
 fun run_whole_tactic g label tac =
@@ -747,7 +840,7 @@ fun proof_ir_prove name end_path end_ok checkpoint_depth g original_tac tactic_t
     val _ = stop_after_plan_if_requested ()
   in
     let
-            val _ = init_history g (length plan + 1)
+            val _ = init_history g (HolbuildProofIr.display_step_count plan + 1)
             val _ = run_steps plan
             val th = history_top_thm g
                      handle e => (ignore (print_finish_goal_state name); raise e)
@@ -813,7 +906,7 @@ fun finish_failed_prefix name old_prefix_text old_step_count tactic_text failed_
         let
           val _ = active_tactic_text_ref := tactic_text
           val plan = case !active_plan_ref of SOME p => p | NONE => raise Fail "internal error: proof-IR plan is not installed"
-          val _ = ensure_history_limit (Int.max(length plan + 1, old_step_count + 1))
+          val _ = ensure_history_limit (Int.max(HolbuildProofIr.display_step_count plan + 1, old_step_count + 1))
           val _ = trace_plan name plan
           val _ = stop_after_plan_if_requested ()
           val skip_count = safe_failed_prefix_skip old_prefix_text old_step_count tactic_text failed_prefix_path plan

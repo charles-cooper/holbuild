@@ -5,6 +5,23 @@ datatype selector = SelectFirst | SelectMatchingFirst of string | SelectMatching
 
 datatype select_mode = SelectSolve | SelectKeep
 
+datatype proof_path_component =
+    PathStep of int
+  | PathEach of int
+  | PathSelect
+  | PathCase of int
+  | PathAlternative of int
+  | PathTry
+  | PathRepeat of int
+
+type proof_path = proof_path_component list
+
+datatype dynamic_event =
+    ChoiceEvent of proof_path * int
+  | TryEvent of proof_path * bool
+  | RepeatIterEvent of proof_path * int
+  | RepeatStopEvent of proof_path * int
+
 datatype step =
     StepTactic of {start_pos : int, end_pos : int, label : string, program : string}
   | StepList of {start_pos : int, end_pos : int, label : string, program : string}
