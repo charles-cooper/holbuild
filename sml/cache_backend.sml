@@ -8,6 +8,8 @@ type local_path = string
 
 datatype publish_result = Published | AlreadyPresent | Conflict of string | Skipped
 
+datatype action_publish_policy = PutIfAbsent | PutIfAbsentOrSame
+
 datatype fetch_result = Hit | Miss | Corrupt of string
 
 end
@@ -17,8 +19,9 @@ sig
   type t
 
   val get_action : t -> HolbuildCacheBackend.action_key -> HolbuildCacheBackend.manifest_text option
-  val put_action : t -> {key : HolbuildCacheBackend.action_key,
-                         text : HolbuildCacheBackend.manifest_text} -> HolbuildCacheBackend.publish_result
+  val put_action : t -> HolbuildCacheBackend.action_publish_policy ->
+                    {key : HolbuildCacheBackend.action_key,
+                     text : HolbuildCacheBackend.manifest_text} -> HolbuildCacheBackend.publish_result
 
   val has_blob : t -> HolbuildCacheBackend.blob_hash -> bool
 

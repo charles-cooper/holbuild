@@ -104,13 +104,18 @@ fun touch_action cache key = FS.setTime(action_manifest cache key, NONE) handle 
 fun get_action cache key =
   SOME (read_text (action_manifest cache key)) handle _ => NONE
 
-fun put_action cache {key, text} =
+fun existing_action_result policy path expected actual =
+  case policy of
+      HolbuildCacheBackend.PutIfAbsent => HolbuildCacheBackend.Conflict path
+    | HolbuildCacheBackend.PutIfAbsentOrSame =>
+        if actual = expected then HolbuildCacheBackend.AlreadyPresent
+        else HolbuildCacheBackend.Conflict path
+
+fun put_action cache policy {key, text} =
   let val path = action_manifest cache key
   in
     case get_action cache key of
-        SOME old =>
-          if old = text then HolbuildCacheBackend.AlreadyPresent
-          else HolbuildCacheBackend.Conflict path
+        SOME old => existing_action_result policy path text old
       | NONE => (write_action cache {key = key, text = text}; HolbuildCacheBackend.Published)
   end
 
