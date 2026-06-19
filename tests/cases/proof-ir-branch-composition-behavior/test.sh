@@ -361,3 +361,49 @@ if grep -q "branch suffix without active branch\|selected goals were not solved\
   echo "failed-prefix replay after prefix edit resumed from inconsistent branch/focus state" >&2
   exit 1
 fi
+
+# Failed-prefix replay after a failure in a later `each` iteration must rewind to
+# a balanced structural prefix.  In particular, it must not trust the static
+# inner-body step count as if it were a one-to-one history depth.
+each_replay_project=$tmpdir/each-replay-project
+write_project_toml "$each_replay_project" "proof-ir-each-replay"
+cat > "$each_replay_project/src/EachReplayScript.sml" <<'SML'
+Theory EachReplay
+
+val counter = ref 0
+fun fail_second g =
+  (counter := !counter + 1;
+   if !counter = 2 then FAIL_TAC "second each iteration" g
+   else ACCEPT_TAC TRUTH g)
+
+Theorem target:
+  (T /\ T) /\ (T /\ T)
+Proof
+  CONJ_TAC >>
+  (CONJ_TAC >- ACCEPT_TAC TRUTH >>
+   fail_second)
+QED
+SML
+
+each_replay_first_log=$tmpdir/each-replay-first.log
+if (cd "$each_replay_project" && "$HOLBUILD_BIN" build EachReplayTheory) > "$each_replay_first_log" 2>&1; then
+  echo "expected first each-replay build to fail" >&2
+  exit 1
+fi
+require_grep 'second each iteration' "$each_replay_first_log"
+require_grep 'step fail_second' "$each_replay_first_log"
+require_file "$(find "$each_replay_project/.holbuild/checkpoints" -name '*target_failed_prefix.save' -print -quit)"
+
+python3 - <<PY
+from pathlib import Path
+path = Path("$each_replay_project/src/EachReplayScript.sml")
+path.write_text(path.read_text().replace('fail_second)', 'ACCEPT_TAC TRUTH)'))
+PY
+each_replay_fixed_log=$tmpdir/each-replay-fixed.log
+(cd "$each_replay_project" && "$HOLBUILD_BIN" build EachReplayTheory) > "$each_replay_fixed_log" 2>&1
+require_grep "from: failed-prefix checkpoint in target" "$each_replay_fixed_log"
+require_grep "EachReplayTheory built" "$each_replay_fixed_log"
+if grep -q "second each iteration\|selected goals were not solved\|frame underflow\|cannot rewind" "$each_replay_fixed_log"; then
+  echo "failed-prefix replay inside each resumed from an inconsistent history/focus state" >&2
+  exit 1
+fi

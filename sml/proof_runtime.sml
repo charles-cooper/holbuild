@@ -33,7 +33,6 @@ val compiled_list_tactic_ref = ref Tactical.ALL_LT
 val proof_history_ref = ref (NONE : goalStack.gstk History.history option)
 datatype focus_frame_kind = SelectSolveFrame | EachFrame | CaseFrame
 val focus_stack_ref = ref ([] : {prefix : int, suffix : int, kind : focus_frame_kind} list)
-val reverse_group_lengths_ref = ref (NONE : int list option)
 
 fun env_bool name =
   case OS.Process.getEnv name of
@@ -414,50 +413,6 @@ fun apply_list_tactic_step label program =
     let val list_tactic = compile_list_tactic label program
     in apply_focused_list_tactic label list_tactic end
 
-fun recording_allgoals tactic goals =
-  let
-    val results = map tactic goals
-    val goal_groups = map (fn (generated, _) => generated) results
-    val validators = map (fn (_, validate) => validate) results
-    val lengths = map length goal_groups
-    val _ = reverse_group_lengths_ref := SOME lengths
-  in
-    (List.concat goal_groups, Lib.mapshape lengths validators)
-  end
-
-fun split_by_lengths lengths xs =
-  let
-    fun loop [] rest = ([], rest)
-      | loop (n :: ns) rest =
-          let
-            val (group, tail) = Lib.split_after n rest
-            val (groups, final_tail) = loop ns tail
-          in
-            (group :: groups, final_tail)
-          end
-  in
-    loop lengths xs
-  end
-
-fun reverse_recorded_groups goals =
-  case !reverse_group_lengths_ref of
-      NONE => raise Fail "reverse_recorded_groups without recorded ALLGOALS groups"
-    | SOME lengths =>
-        let
-          val (goal_groups, remaining_goals) = split_by_lengths lengths goals
-          val _ = if null remaining_goals then () else raise Fail "reverse_recorded_groups saw unexpected extra goals"
-          val _ = reverse_group_lengths_ref := NONE
-          fun validate thms =
-            let
-              val (thm_groups, remaining_thms) = split_by_lengths lengths thms
-              val _ = if null remaining_thms then () else raise Fail "reverse_recorded_groups validation saw unexpected extra theorems"
-            in
-              List.concat (map rev thm_groups)
-            end
-        in
-          (List.concat (map rev goal_groups), validate)
-        end
-
 fun apply_tactic_step label program =
   let val tactic = compile_tactic label program
   in apply_focused_list_tactic label (Tactical.ALLGOALS tactic) end
@@ -470,15 +425,6 @@ fun apply_select_first_solve_begin label =
     if focus_n <= 0 then raise Fail ("select first solve with no open goals: " ^ label) else ();
     focus_stack_ref := {prefix = prefix, suffix = suffix + focus_n - 1, kind = SelectSolveFrame} :: !focus_stack_ref
   end
-
-fun apply_each_begin () = focus_stack_ref := {prefix = #prefix (current_focus_bounds()), suffix = #suffix (current_focus_bounds()), kind = EachFrame} :: !focus_stack_ref
-fun apply_cases_begin () = focus_stack_ref := {prefix = #prefix (current_focus_bounds()), suffix = #suffix (current_focus_bounds()), kind = CaseFrame} :: !focus_stack_ref
-fun apply_case_step _ = ()
-
-fun pop_focus_frame label =
-  case !focus_stack_ref of
-      [] => raise Fail ("structural end without active frame: " ^ label)
-    | frame :: rest => (focus_stack_ref := rest; frame)
 
 fun apply_structural_end label =
   case !focus_stack_ref of
@@ -494,10 +440,10 @@ fun step proof_step =
     | HolbuildProofIr.StepList {label, program, ...} => apply_list_tactic_step label program
     | HolbuildProofIr.StepChoice {label, program, ...} => apply_tactic_step label program
     | HolbuildProofIr.StepListChoice {label, program, ...} => apply_list_tactic_step label program
-    | HolbuildProofIr.StepEachBegin _ => apply_each_begin ()
+    | HolbuildProofIr.StepEachBegin _ => raise Fail "each begin is handled by the structural proof-IR interpreter"
     | HolbuildProofIr.StepSelectFirstSolveBegin _ => apply_select_first_solve_begin "select first solve"
-    | HolbuildProofIr.StepCasesBegin _ => apply_cases_begin ()
-    | HolbuildProofIr.StepCase {index, ...} => apply_case_step index
+    | HolbuildProofIr.StepCasesBegin _ => raise Fail "cases begin is handled by the structural proof-IR interpreter"
+    | HolbuildProofIr.StepCase _ => raise Fail "case marker is handled by the structural proof-IR interpreter"
     | HolbuildProofIr.StepEnd _ => apply_structural_end "end"
     | HolbuildProofIr.StepPlain _ => raise Fail "plain proof step must cover the whole theorem"
 
@@ -585,8 +531,6 @@ fun case_bodies_with_offsets steps =
                       NONE => loop (offset + 1) current acc rest
                     | SOME (case_step, start_offset, body) => loop (offset + 1) (SOME (case_step, start_offset, step :: body)) acc rest))
   in loop 0 NONE [] steps end
-
-fun case_bodies steps = map #2 (case_bodies_with_offsets steps)
 
 fun run_maybe_traced_step index display_index proof_step =
   let
@@ -686,7 +630,6 @@ fun run_steps steps =
   (successful_step_count_ref := 0;
    successful_prefix_end_ref := 0;
    focus_stack_ref := [];
-   reverse_group_lengths_ref := NONE;
    run_steps_from 0 0 steps)
 
 fun display_index_at_count count steps =

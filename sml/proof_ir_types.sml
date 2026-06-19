@@ -74,18 +74,6 @@ fun display_line_count _ = 1
 
 fun format_index i = if i < 10 then "0" ^ Int.toString i else Int.toString i
 
-fun format_choice_lines i label alternatives =
-  let
-    fun alt_lines (_, []) = ""
-      | alt_lines (j, [alt]) = "  " ^ format_index j ^ "   " ^ alt ^ "\n"
-      | alt_lines (j, alt :: rest) =
-          "  " ^ format_index j ^ "   " ^ alt ^ "\n" ^
-          "  " ^ format_index (j + 1) ^ "   |\n" ^
-          alt_lines (j + 2, rest)
-  in
-    "  " ^ format_index i ^ " " ^ label ^ "\n" ^ alt_lines (i + 1, alternatives)
-  end
-
 fun spaces n = String.implode (List.tabulate (Int.max(0, n), fn _ => #" "))
 
 fun format_line i depth text =
@@ -93,8 +81,8 @@ fun format_line i depth text =
 
 fun format_step i depth step =
   case step of
-      StepChoice {label, alternatives, ...} => format_choice_lines i label alternatives
-    | StepListChoice {label, alternatives, ...} => format_choice_lines i label alternatives
+      StepChoice {label, ...} => format_line i depth ("choice " ^ label)
+    | StepListChoice {label, ...} => format_line i depth ("list-choice " ^ label)
     | StepTactic {label, ...} => format_line i depth ("step " ^ label)
     | StepList {label, ...} => format_line i depth ("list-step " ^ label)
     | StepEachBegin _ => format_line i depth "each"
