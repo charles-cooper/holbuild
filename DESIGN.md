@@ -715,13 +715,21 @@ The pretty form must remain faithful to the IR: each numbered line is one execut
 and parenthesized body text are formatting only. List-step labels describe the
 list tactic itself, without legacy `>> list_tac` prefixes; the `list-step` kind
 already records that the leaf executes as a list tactic. Structural `each` nodes
-represent RHS tactics of `THEN` that must be applied independently to each focused
-goal, especially when the RHS contains dynamic control or branches. A future
-optimization may elide or fast-path `each` when the runtime (or static planning)
-knows there is exactly one focused goal, but any such optimization must preserve
-the same diagnostic and failed-prefix path semantics. The goal is that a
-developer can debug a divergence by inspecting the plan and knowing the HOL tactic
-combinator semantics.
+represent decomposed RHS tactics of `THEN` that must be applied independently to
+each focused goal. Atomic tactic leaves after `>>` do not need an explicit
+`each`: they are still executed as HOL tactic fragments, so HOL/proof-manager
+sequencing preserves the usual per-goal `THEN` semantics. The explicit `each` is
+needed only when holbuild has decomposed the RHS into Proof-IR control such as
+`try`, `choice`, or assertion/branch structure. For example,
+`CONJ_TAC >> simp[] >> `F` by tac >> rw[]` should plan as an atomic `simp[]`
+step followed by an `each` block containing `sg `F`` and its solving branch, then
+an atomic `rw[]` step. The `each` makes the assertion-and-branch body run once for
+each goal produced by the preceding tactics rather than once over the aggregate
+focused goal list. A future optimization may elide or fast-path `each` when the
+runtime (or static planning) knows there is exactly one focused goal, but any such
+optimization must preserve the same diagnostic and failed-prefix path semantics.
+The goal is that a developer can debug a divergence by inspecting the plan and
+knowing the HOL tactic combinator semantics.
 
 `--trace-steps` executes the build and records runtime plans plus before/after
 trace lines for all instrumented proofs in the child log. On failure, holbuild
