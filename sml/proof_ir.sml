@@ -582,7 +582,7 @@ and plan_list_tactic source prefix lt =
     | LtRepeat _ =>
         [list_step (list_tactic_span lt) (list_tactic_label source lt) (list_tactic_program source lt)]
     | LtOrelse _ =>
-        [list_step (list_tactic_span lt) "ORELSE_LT" (list_tactic_program source lt)]
+        [list_step (list_tactic_span lt) (source_text source (list_tactic_span lt)) (list_tactic_program source lt)]
     | LtSelectGoal sp =>
         [StepSelect {start_pos = #1 sp, end_pos = #2 sp,
                      selector = SelectMatchingFirst (source_text source sp),
