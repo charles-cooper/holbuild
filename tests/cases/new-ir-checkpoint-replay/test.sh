@@ -127,10 +127,8 @@ if (cd "$prefix_edit_project" && "$HOLBUILD_BIN" build ATheory) > "$prefix_edit_
   echo "expected edited prefix proof still to fail at NO_TAC" >&2
   exit 1
 fi
-if grep -q "from: failed-prefix checkpoint in replay_after_prefix_edit" "$prefix_edit_second_log"; then
-  echo "prefix-changing edit reused stale failed-prefix checkpoint" >&2
-  exit 1
-fi
+require_grep "discarding failed-prefix checkpoint after failed resume" "$prefix_edit_second_log"
+require_grep "from: deps-loaded checkpoint" "$prefix_edit_second_log"
 if grep -q "fragment: >> strip_tac" "$prefix_edit_second_log"; then
   echo "failed-prefix replay after prefix edit resumed from an inconsistent proof state" >&2
   exit 1
