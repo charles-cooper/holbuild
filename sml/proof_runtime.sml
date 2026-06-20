@@ -41,6 +41,7 @@ val resume_events_ref = ref ([] : HolbuildProofIr.dynamic_event list)
 val failed_step_end_ref = ref NONE : int option ref
 val failed_step_span_ref = ref NONE : (int * int) option ref
 val failed_plan_position_ref = ref NONE : (int * string * string) option ref
+val failed_goal_state_printed_ref = ref false
 val suppress_expected_failure_diagnostics_ref = ref false
 val compiled_tactic_ref = ref Tactical.ALL_TAC
 val compiled_list_tactic_ref = ref Tactical.ALL_LT
@@ -501,7 +502,8 @@ fun diagnostic_fragment_label label =
   end
 
 fun print_goal_state label goals =
-  TextIO.output(TextIO.stdErr,
+  (failed_goal_state_printed_ref := true;
+   TextIO.output(TextIO.stdErr,
     String.concat ["\nholbuild goal state at failed fragment: ", diagnostic_fragment_label label,
                    failed_theorem_line (),
                    failed_step_end_line (),
@@ -511,7 +513,7 @@ fun print_goal_state label goals =
                    "holbuild failed tactic top input goal:\n",
                    top_goal_text goals,
                    "holbuild end failed tactic top input goal\n",
-                   all_goals_text goals])
+                   all_goals_text goals]))
 
 fun print_current_goal_state label =
   print_goal_state label (history_top_goals() handle _ => [])
@@ -1238,7 +1240,7 @@ fun proof_ir_prove name end_path end_ok checkpoint_depth g original_tac tactic_t
     let
             val _ = init_history g (HolbuildProofIr.display_step_count plan + 1)
             val _ = run_steps plan
-                     handle e => (ignore (print_finish_goal_state name); raise e)
+                     handle e => (if !failed_goal_state_printed_ref then () else ignore (print_finish_goal_state name); raise e)
             val th = history_top_thm g
                      handle e => (ignore (print_finish_goal_state name); raise e)
             val _ = save_checkpoint "end_of_proof" false end_path end_ok checkpoint_depth
@@ -1512,6 +1514,7 @@ fun install ({checkpoint_enabled, tactic_timeout, timeout_marker, plan_theorem, 
    failed_step_end_ref := NONE;
    failed_step_span_ref := NONE;
    failed_plan_position_ref := NONE;
+   failed_goal_state_printed_ref := false;
    failed_prefix_resume_active_ref := false;
    proving_with_proof_ir_ref := false;
    Tactical.set_prover proof_ir_prover)
