@@ -559,7 +559,7 @@ fun checkpoint_clean_artifact path =
   has_suffix ".save" path orelse has_suffix ".save.ok" path orelse
   has_suffix ".save.tmp" path orelse has_suffix ".save.ok.tmp" path orelse
   has_suffix ".save.bak" path orelse has_suffix ".save.ok.bak" path orelse
-  has_suffix ".meta" path orelse has_suffix ".prefix" path
+  has_suffix ".meta" path
 
 fun remove_empty_dir path = FS.rmDir path handle OS.SysErr _ => ()
 
@@ -576,7 +576,6 @@ fun checkpoint_save_artifact_base path =
   else if has_suffix ".save.tmp" path then SOME (drop_suffix ".tmp" path)
   else if has_suffix ".save.bak" path then SOME (drop_suffix ".bak" path)
   else if has_suffix ".meta" path then SOME (drop_suffix ".meta" path)
-  else if has_suffix ".prefix" path then SOME (drop_suffix ".prefix" path)
   else if has_suffix ".save" path then SOME path
   else NONE
 
@@ -1892,12 +1891,12 @@ fun failed_prefix_metadata path =
                    lines
               end
         in
-          case value "proof_ir_failed_prefix_version" of
-              SOME "1" => Option.mapPartial Int.fromString (value "step_count")
+          case (value "proof_ir_failed_prefix_version", value "step_count", value "prefix_end", value "path") of
+              (SOME "1", SOME step_count_text, SOME _, SOME _) =>
+                Option.map (fn step_count => {step_count = step_count, metadata_text = text})
+                  (Int.fromString step_count_text)
             | _ => NONE
         end
-
-fun failed_prefix_text path = current_metadata (path ^ ".prefix")
 
 fun without_proof_timeout text =
   String.concatWith "\n"
@@ -1913,11 +1912,10 @@ fun checkpoint_ok_text_matches_ordered requested_timeout path expected_text =
 
 fun failed_prefix_checkpoint requested_timeout checkpoint =
   if checkpoint_ok_text_matches_ordered requested_timeout (#failed_prefix_path checkpoint) (#failed_prefix_ok checkpoint) then
-    case (failed_prefix_metadata (#failed_prefix_path checkpoint),
-          failed_prefix_text (#failed_prefix_path checkpoint)) of
-        (SOME step_count, SOME prefix_text) =>
-          SOME {checkpoint = checkpoint, step_count = step_count, prefix_text = prefix_text}
-      | _ => NONE
+    case failed_prefix_metadata (#failed_prefix_path checkpoint) of
+        SOME {step_count, metadata_text} =>
+          SOME {checkpoint = checkpoint, step_count = step_count, metadata_text = metadata_text}
+      | NONE => NONE
   else NONE
 
 fun remove_failed_prefix_checkpoint ({failed_prefix_path, ...} : HolbuildTheoryCheckpoints.checkpoint) =
@@ -1990,38 +1988,6 @@ fun instrumented_source policy timeout_marker plan_only_marker source_text start
 fun replay_candidate policy project node theorem_checkpoints declaration_checkpoints =
   best_replay_candidate (tactic_timeout policy) project node theorem_checkpoints declaration_checkpoints
 
-fun common_prefix_size old_text new_text =
-  let
-    val old_n = size old_text
-    val new_n = size new_text
-    val limit = Int.min(old_n, new_n)
-    fun loop i =
-      if i >= limit then i
-      else if String.sub(old_text, i) = String.sub(new_text, i) then loop (i + 1)
-      else i
-  in
-    loop 0
-  end
-
-fun skip_tactic_resume_prefix text offset =
-  let
-    val n = size text
-    fun is_ws c = c = #" " orelse c = #"\n" orelse c = #"\t" orelse c = #"\r"
-    fun skip_ws i = if i < n andalso is_ws (String.sub(text, i)) then skip_ws (i + 1) else i
-    fun starts_with i token =
-      let val m = size token
-      in i + m <= n andalso String.substring(text, i, m) = token end
-    fun skip_separator i =
-      let val j = skip_ws i
-      in
-        if starts_with j ">>" then skip_ws (j + 2)
-        else if starts_with j ">-" then skip_ws (j + 2)
-        else j
-      end
-  in
-    skip_separator (Int.min(n, Int.max(0, offset)))
-  end
-
 fun source_location_text source_path source_text offset =
   let
     val bounded = Int.min(size source_text, Int.max(0, offset))
@@ -2043,22 +2009,12 @@ fun source_context_resume_message node source_text kind safe_name boundary =
     ["from: " ^ kind ^ " checkpoint after " ^ safe_name,
      "continuing at: " ^ source_location_text (source_file node) source_text boundary]
 
-fun failed_prefix_resume_message node source_text checkpoint prefix_text =
-  let
-    val tactic_offset = common_prefix_size prefix_text (#tactic_text checkpoint)
-    val replay_tactic_offset = skip_tactic_resume_prefix (#tactic_text checkpoint) tactic_offset
-    val replay_source_offset = #tactic_start checkpoint + replay_tactic_offset
-  in
-    let val resume_location = source_location_text (source_file node) source_text replay_source_offset
-    in
-      checkpoint_resume_message node
-        ["from: failed-prefix checkpoint in " ^ #safe_name checkpoint,
-         "matched proof prefix through: " ^ resume_location,
-         "replaying remaining proof from: " ^ resume_location]
-    end
-  end
+fun failed_prefix_resume_message node source_text checkpoint step_count =
+  checkpoint_resume_message node
+    ["from: failed-prefix checkpoint in " ^ #safe_name checkpoint,
+     "restoring proof-ir prefix with " ^ Int.toString step_count ^ " successful leaf steps"]
 
-fun failed_prefix_resume_source policy timeout_marker plan_only_marker source checkpoints declaration_checkpoints terminations checkpoint step_count prefix_text =
+fun failed_prefix_resume_source policy timeout_marker plan_only_marker source checkpoints declaration_checkpoints terminations checkpoint metadata_text =
   let
     val runtime_config =
       {checkpoint_enabled = checkpoint_enabled policy,
@@ -2075,8 +2031,7 @@ fun failed_prefix_resume_source policy timeout_marker plan_only_marker source ch
       String.concat
         ["HolbuildProofRuntime.finish_failed_prefix ",
          HolbuildToolchain.sml_string (#name checkpoint), " ",
-         HolbuildToolchain.sml_string prefix_text, " ",
-         Int.toString step_count, " ",
+         HolbuildToolchain.sml_string metadata_text, " ",
          HolbuildToolchain.sml_string (#tactic_text checkpoint),
          " " ^ HolbuildToolchain.sml_string (#failed_prefix_path checkpoint) ^
          " " ^ HolbuildToolchain.sml_string (#failed_prefix_ok checkpoint)]
@@ -2200,12 +2155,12 @@ fun write_theory_script policy project base_context plan keys input_key toolchai
          write_preload plan node deps_loaded deps_ok preload;
          write_text staged_script (instrumented_source policy (SOME timeout_marker) plan_only_marker source_text 0 checkpoints declaration_checkpoints terminations);
          {context = base_context, files = [preload, staged_script], failure_checkpoints = [], failed_prefix_context = NONE})
-      fun run_from_failed_prefix {checkpoint, step_count, prefix_text} =
+      fun run_from_failed_prefix {checkpoint, step_count, metadata_text} =
         let
           val path = #failed_prefix_path checkpoint
           val _ = ensure_source_checkpoint_parents ()
-          val _ = write_text staged_script (failed_prefix_resume_source policy timeout_marker plan_only_marker source_text checkpoints declaration_checkpoints terminations checkpoint step_count prefix_text)
-          val _ = failed_prefix_resume_message node source_text checkpoint prefix_text
+          val _ = write_text staged_script (failed_prefix_resume_source policy timeout_marker plan_only_marker source_text checkpoints declaration_checkpoints terminations checkpoint metadata_text)
+          val _ = failed_prefix_resume_message node source_text checkpoint step_count
         in
           {context = HolState path, files = [staged_script], failure_checkpoints = [path, deps_loaded], failed_prefix_context = SOME (path, step_count)}
         end

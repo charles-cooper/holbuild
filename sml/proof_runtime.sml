@@ -101,13 +101,6 @@ fun write_text_file path text =
   let val out = TextIO.openOut path
   in TextIO.output(out, text); TextIO.closeOut out end
 
-fun take_at_most n xs =
-  let
-    fun loop 0 _ acc = rev acc
-      | loop _ [] acc = rev acc
-      | loop k (x :: rest) acc = loop (k - 1) rest (x :: acc)
-  in loop (Int.max(0, n)) xs [] end
-
 fun path_component_text component =
   case component of
       HolbuildProofIr.PathStep n => "step:" ^ Int.toString n
@@ -127,38 +120,111 @@ fun dynamic_event_text event =
     | HolbuildProofIr.RepeatIterEvent (path, n) => "repeat-iter\t" ^ path_text path ^ "\t" ^ Int.toString n
     | HolbuildProofIr.RepeatStopEvent (path, n) => "repeat-stop\t" ^ path_text path ^ "\t" ^ Int.toString n
 
-fun encode_step_signature proof_step =
-  let val (kind, program) = HolbuildProofIr.step_signature proof_step
-  in kind ^ "\t" ^ String.toString program ^ "\n" end
+fun parse_path_component text =
+  case text of
+      "select" => SOME HolbuildProofIr.PathSelect
+    | "try" => SOME HolbuildProofIr.PathTry
+    | _ =>
+        (case String.fields (fn c => c = #":") text of
+             ["step", n] => Option.map HolbuildProofIr.PathStep (Int.fromString n)
+           | ["each", n] => Option.map HolbuildProofIr.PathEach (Int.fromString n)
+           | ["case", n] => Option.map HolbuildProofIr.PathCase (Int.fromString n)
+           | ["alternative", n] => Option.map HolbuildProofIr.PathAlternative (Int.fromString n)
+           | ["repeat", n] => Option.map HolbuildProofIr.PathRepeat (Int.fromString n)
+           | _ => NONE)
 
-fun save_failed_prefix_steps path plan step_count =
+fun parse_path_text "" = SOME []
+  | parse_path_text text =
+      let
+        fun loop [] acc = SOME (rev acc)
+          | loop (part :: rest) acc =
+              case parse_path_component part of
+                  SOME component => loop rest (component :: acc)
+                | NONE => NONE
+      in loop (String.fields (fn c => c = #"/") text) [] end
+
+fun parse_dynamic_event_text text =
+  case String.fields (fn c => c = #"\t") text of
+      ["choice", path_text', n_text] =>
+        (case (parse_path_text path_text', Int.fromString n_text) of
+             (SOME path, SOME n) => SOME (HolbuildProofIr.ChoiceEvent (path, n))
+           | _ => NONE)
+    | ["try", path_text', taken_text] =>
+        (case (parse_path_text path_text', taken_text) of
+             (SOME path, "1") => SOME (HolbuildProofIr.TryEvent (path, true))
+           | (SOME path, "0") => SOME (HolbuildProofIr.TryEvent (path, false))
+           | _ => NONE)
+    | ["repeat-iter", path_text', n_text] =>
+        (case (parse_path_text path_text', Int.fromString n_text) of
+             (SOME path, SOME n) => SOME (HolbuildProofIr.RepeatIterEvent (path, n))
+           | _ => NONE)
+    | ["repeat-stop", path_text', n_text] =>
+        (case (parse_path_text path_text', Int.fromString n_text) of
+             (SOME path, SOME n) => SOME (HolbuildProofIr.RepeatStopEvent (path, n))
+           | _ => NONE)
+    | _ => NONE
+
+fun path_has_prefix prefix path =
   let
-    val text = String.concat (map encode_step_signature (take_at_most step_count plan))
-  in write_text_file (path ^ ".steps") text end
-  handle _ => ()
+    fun loop [] _ = true
+      | loop _ [] = false
+      | loop (a :: rest_a) (b :: rest_b) = a = b andalso loop rest_a rest_b
+  in loop prefix path end
 
-fun decode_step_signature line =
-  case String.fields (fn c => c = #"\t") line of
-      kind :: rest =>
-        let val encoded_program = String.concatWith "\t" rest
-        in Option.map (fn program => (kind, program)) (String.fromString encoded_program) end
-    | [] => NONE
-
-fun read_failed_prefix_steps path =
+fun path_display_index plan target_path =
   let
-    val input = TextIO.openIn (path ^ ".steps")
-    fun loop acc =
-      case TextIO.inputLine input of
-          NONE => (TextIO.closeIn input; SOME (rev acc))
-        | SOME line =>
-            let val trimmed = String.substring(line, 0, Int.max(0, size line - (if size line > 0 andalso String.sub(line, size line - 1) = #"\n" then 1 else 0)))
-            in
-              case decode_step_signature trimmed of
-                  SOME sig_pair => loop (sig_pair :: acc)
-                | NONE => (TextIO.closeIn input; NONE)
-            end
-  in loop [] end
-  handle _ => NONE
+    exception Found of int
+    fun run_list d path i [] = d
+      | run_list d path i (proof_step :: rest) =
+          let val step_path = path @ [HolbuildProofIr.PathStep i]
+              val next = run_one d step_path proof_step
+          in run_list next path (i + 1) rest end
+    and run_one d path proof_step =
+      (if path = target_path then raise Found d else ();
+       case proof_step of
+           HolbuildProofIr.StepTactic _ => d + HolbuildProofIr.display_line_count proof_step
+         | HolbuildProofIr.StepList _ => d + HolbuildProofIr.display_line_count proof_step
+         | HolbuildProofIr.StepSelect {body, ...} =>
+             let val _ = run_list (d + 1) (path @ [HolbuildProofIr.PathSelect]) 0 body
+             in d + HolbuildProofIr.display_line_count proof_step end
+         | HolbuildProofIr.StepEach {body, ...} =>
+             let
+               val child_path =
+                 if path_has_prefix path target_path then
+                   case List.drop(target_path, length path) of
+                       HolbuildProofIr.PathEach n :: _ => SOME (path @ [HolbuildProofIr.PathEach n])
+                     | _ => NONE
+                 else NONE
+               val _ = case child_path of
+                           SOME p => if path_has_prefix p target_path then ignore (run_list (d + 1) p 0 body) else ()
+                         | NONE => ()
+             in d + HolbuildProofIr.display_line_count proof_step end
+         | HolbuildProofIr.StepCases {cases, ...} =>
+             let fun loop _ [] = ()
+                   | loop n (body :: rest) = (ignore (run_list (d + 2) (path @ [HolbuildProofIr.PathCase n]) 0 body); loop (n + 1) rest)
+                 val _ = loop 1 cases
+             in d + HolbuildProofIr.display_line_count proof_step end
+         | HolbuildProofIr.StepChoice {alternatives, ...} =>
+             let fun loop _ [] = ()
+                   | loop n (body :: rest) = (ignore (run_list (d + 2) (path @ [HolbuildProofIr.PathAlternative n]) 0 body); loop (n + 1) rest)
+                 val _ = loop 1 alternatives
+             in d + HolbuildProofIr.display_line_count proof_step end
+         | HolbuildProofIr.StepRepeat {body, ...} =>
+             let
+               val child_path =
+                 if path_has_prefix path target_path then
+                   case List.drop(target_path, length path) of
+                       HolbuildProofIr.PathRepeat n :: _ => SOME (path @ [HolbuildProofIr.PathRepeat n])
+                     | _ => NONE
+                 else NONE
+               val _ = case child_path of
+                           SOME p => if path_has_prefix p target_path then ignore (run_list (d + 1) p 0 body) else ()
+                         | NONE => ()
+             in d + HolbuildProofIr.display_line_count proof_step end
+         | HolbuildProofIr.StepTry {body, ...} =>
+             let val _ = run_list (d + 1) (path @ [HolbuildProofIr.PathTry]) 0 body
+             in d + HolbuildProofIr.display_line_count proof_step end)
+  in (ignore (run_list 0 [] 0 plan); NONE) handle Found d => SOME d end
 
 fun save_failed_prefix_checkpoint () =
   case !theorem_info_ref of
@@ -170,7 +236,6 @@ fun save_failed_prefix_checkpoint () =
         else
           let
             val prefix_end = !successful_prefix_end_ref
-            val prefix_text = String.substring(!active_tactic_text_ref, 0, prefix_end)
             val step_count = !successful_step_count_ref
             val meta_text =
               String.concat (["proof_ir_failed_prefix_version=1\n",
@@ -185,9 +250,6 @@ fun save_failed_prefix_checkpoint () =
                      proof_history_ref := SOME (History.set_limit history (Int.max(15, step_count + 1))))
             val _ = save_checkpoint "failed_prefix" false failed_prefix_path failed_prefix_ok depth
             val _ = write_text_file (failed_prefix_path ^ ".meta") meta_text
-            val _ = write_text_file (failed_prefix_path ^ ".prefix") prefix_text
-            val plan = case !active_plan_ref of SOME p => p | NONE => raise Fail "internal error: proof-IR plan is not installed"
-            val _ = save_failed_prefix_steps failed_prefix_path plan step_count
           in () end
 
 fun restore_failed_prefix_checkpoint_info (name, tactic_text, failed_prefix_path, failed_prefix_ok) =
@@ -813,9 +875,7 @@ fun run_structural_steps display_index steps =
         | HolbuildProofIr.StepRepeat {body, ...} => run_repeat d path proof_step body
   in run_list display_index [] 0 steps end
 
-fun run_steps_from _ display_index steps = run_structural_steps display_index steps
-
-fun drop_steps _ steps = steps
+fun run_steps_from_path display_index steps = run_structural_steps display_index steps
 
 fun run_steps steps =
   (successful_step_count_ref := 0;
@@ -828,7 +888,6 @@ fun run_steps steps =
    reverse_group_lengths_ref := NONE;
    run_structural_steps 0 steps)
 
-fun display_index_at_count _ _ = 0
 datatype 'a traced_result = TraceOk of 'a | TraceError of exn
 
 fun run_whole_tactic g label tac =
@@ -877,53 +936,40 @@ fun proof_ir_prove name end_path end_ok checkpoint_depth g original_tac tactic_t
           in th end
   end
 
-fun common_prefix_size old_text new_text =
-  let
-    val old_n = size old_text
-    val new_n = size new_text
-    val limit = Int.min(old_n, new_n)
-    fun loop i =
-      if i >= limit then i
-      else if String.sub(old_text, i) = String.sub(new_text, i) then loop (i + 1)
-      else i
-  in
-    loop 0
+fun metadata_value key lines =
+  let val prefix = key ^ "="
+  in case List.find (String.isPrefix prefix) lines of
+         SOME line => SOME (String.extract(line, size prefix, NONE))
+       | NONE => NONE
   end
 
-fun step_count_at_prefix common_bytes plan =
-  let
-    fun loop count [] = count
-      | loop count (proof_step :: rest) =
-          if HolbuildProofIr.step_end proof_step <= common_bytes then loop (count + 1) rest else count
+fun parse_failed_prefix_metadata text =
+  let val lines = String.tokens (fn c => c = #"\n") text
+      val event_prefix = "event="
+      val event_texts = List.mapPartial (fn line =>
+        if String.isPrefix event_prefix line then SOME (String.extract(line, size event_prefix, NONE)) else NONE) lines
+      fun parse_events [] acc = SOME (rev acc)
+        | parse_events (event_text :: rest) acc =
+            case parse_dynamic_event_text event_text of
+                SOME event => parse_events rest (event :: acc)
+              | NONE => NONE
   in
-    loop 0 plan
+    case metadata_value "proof_ir_failed_prefix_version" lines of
+        SOME "1" =>
+          (case (metadata_value "step_count" lines,
+                 metadata_value "prefix_end" lines,
+                 metadata_value "path" lines,
+                 parse_events event_texts []) of
+               (SOME count_text, SOME end_text, SOME path_text', SOME events) =>
+                 (case (Int.fromString count_text, Int.fromString end_text, parse_path_text path_text') of
+                      (SOME step_count, SOME prefix_end, SOME path) =>
+                        SOME {step_count = step_count, prefix_end = prefix_end, path = path, events = events}
+                    | _ => NONE)
+             | _ => NONE)
+      | _ => NONE
   end
 
-fun common_step_prefix old_signatures new_plan =
-  let
-    fun loop n [] _ = n
-      | loop n _ [] = n
-      | loop n (old :: old_rest) (new :: new_rest) =
-          if old = HolbuildProofIr.step_signature new then loop (n + 1) old_rest new_rest else n
-  in loop 0 old_signatures new_plan end
-
-fun safe_failed_prefix_skip old_prefix_text old_step_count tactic_text failed_prefix_path plan =
-  case read_failed_prefix_steps failed_prefix_path of
-      SOME old_signatures => common_step_prefix (take_at_most old_step_count old_signatures) plan
-    | NONE =>
-        (* Compatibility with old checkpoints that lack step signatures: only
-           trust the old byte-prefix heuristic when the saved prefix is still a
-           literal prefix of the new tactic text. Otherwise restart from the
-           theorem goal by rewinding the retained history to step 0. *)
-        if String.isPrefix old_prefix_text tactic_text then
-          step_count_at_prefix (size old_prefix_text) plan
-        else 0
-
-fun prefix_end_after_steps 0 _ = 0
-  | prefix_end_after_steps _ [] = 0
-  | prefix_end_after_steps n plan = HolbuildProofIr.step_end (List.last (take_at_most n plan))
-
-fun finish_failed_prefix name old_prefix_text old_step_count tactic_text failed_prefix_path failed_prefix_ok =
+fun finish_failed_prefix name metadata_text tactic_text failed_prefix_path failed_prefix_ok =
   let
     val old_resume_active = !failed_prefix_resume_active_ref
     fun restore_resume_flag () = failed_prefix_resume_active_ref := old_resume_active
@@ -934,21 +980,25 @@ fun finish_failed_prefix name old_prefix_text old_step_count tactic_text failed_
         let
           val _ = active_tactic_text_ref := tactic_text
           val plan = case !active_plan_ref of SOME p => p | NONE => raise Fail "internal error: proof-IR plan is not installed"
-          val _ = ensure_history_limit (Int.max(HolbuildProofIr.display_step_count plan + 1, old_step_count + 1))
+          val metadata =
+            case parse_failed_prefix_metadata metadata_text of
+                SOME m => m
+              | NONE => raise Fail "invalid proof-ir failed-prefix metadata"
+          val _ = ensure_history_limit (HolbuildProofIr.display_step_count plan + 1)
           val _ = trace_plan name plan
           val _ = stop_after_plan_if_requested ()
-          val skip_count = safe_failed_prefix_skip old_prefix_text old_step_count tactic_text failed_prefix_path plan
-          val backup_count = Int.max(0, old_step_count - skip_count)
+          val resume_display =
+            case path_display_index plan (#path metadata) of
+                SOME d => d
+              | NONE => raise Fail "failed-prefix proof path is not present in current proof-ir plan"
+          val _ = successful_step_count_ref := #step_count metadata
+          val _ = successful_prefix_end_ref := #prefix_end metadata
+          val _ = successful_path_ref := #path metadata
+          val _ = dynamic_events_ref := #events metadata
           val _ =
-            (backup_n backup_count
-             handle History.CANT_BACKUP_ANYMORE =>
-               raise Fail (String.concat ["failed-prefix checkpoint cannot rewind ",
-                                          Int.toString backup_count,
-                                          " proof IR steps; checkpoint history retained fewer steps than its metadata step_count=",
-                                          Int.toString old_step_count]))
-          val _ = successful_step_count_ref := skip_count
-          val _ = successful_prefix_end_ref := prefix_end_after_steps skip_count plan
-          val _ = run_steps_from skip_count (display_index_at_count skip_count plan) (drop_steps skip_count plan)
+            if #step_count metadata = 0 then run_steps_from_path 0 plan
+            else raise Fail (String.concat ["structural failed-prefix continuation is not implemented yet; saved proof path display index=",
+                                            HolbuildProofIr.format_index resume_display])
           val th = history_top_thm (project_history goalStack.initial_goal)
                    handle e => (ignore (print_finish_goal_state name); raise e)
           val _ = drop_all()
