@@ -519,8 +519,7 @@ and plan_tactic source tactic =
     | TacThenL (lhs, branches) =>
         plan_tactic source lhs @ [cases_step (tactic_span tactic) (map (plan_tactic source) branches)]
     | TacThenLT (lhs, lt) => plan_tactic source lhs @ plan_list_tactic source ">>>" lt
-    | TacReverse (sp, inner) =>
-        plan_tactic source inner @ plan_list_tactic source ">>>" (LtReverse sp)
+    | TacReverse _ => [tactic_step source tactic]
     | TacOrelse xs => [choice_step (tactic_span tactic) (tactic_label source tactic) (map (fn t => plan_tactic source t) xs)]
     | TacTry (_, t) => [try_step (tactic_span tactic) (plan_tactic source t)]
     | TacRepeat _ => [tactic_step source tactic]
