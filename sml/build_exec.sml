@@ -1898,9 +1898,11 @@ fun failed_prefix_metadata path =
               end
         in
           case (value "proof_ir_failed_prefix_version", value "step_count", value "prefix_end", value "path", value "focus") of
-              (SOME "1", SOME step_count_text, SOME _, SOME _, SOME _) =>
-                Option.map (fn step_count => {step_count = step_count, metadata_text = text})
-                  (strict_nonnegative_int step_count_text)
+              (SOME version, SOME step_count_text, SOME _, SOME _, SOME _) =>
+                if version = "1" orelse version = "2" then
+                  Option.map (fn step_count => {step_count = step_count, metadata_text = text})
+                    (strict_nonnegative_int step_count_text)
+                else NONE
             | _ => NONE
         end
 

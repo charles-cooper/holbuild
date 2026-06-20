@@ -139,6 +139,8 @@ fun format_plan_lines steps =
     val (_, lines) = steps_lines 0 0 steps []
   in String.concat lines end
 
-fun display_step_count plan = List.foldl (fn (step, n) => n + display_line_count step) 0 plan
+fun display_line_count_list steps = List.foldl (fn (step, n) => n + display_line_count step) 0 steps
+
+fun display_step_count plan = display_line_count_list plan
 
 end
