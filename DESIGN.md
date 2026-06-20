@@ -654,8 +654,10 @@ Tactic-level `REPEAT`/`rpt` currently remains an opaque tactic leaf even though
 repeats per generated goal via `THEN`, so a correct structural implementation
 needs repeat traversal/frame metadata for failed-prefix resume. Until that is
 implemented, keeping tactic repeats opaque preserves HOL execution semantics and
-safe leaf-level checkpointing. List-level `REPEAT_LT` likewise remains an opaque
-list-step.
+safe leaf-level checkpointing. Tactic-level goal reordering such as
+`REVERSE tac` is likewise kept opaque; explicit list-level reordering such as
+`REVERSE_LT` remains a list-step when it is written as a list tactic. List-level
+`REPEAT_LT` likewise remains an opaque list-step.
 
 Attributed proofs and declarations with no parsed tactic body use a conservative
 whole-tactic prover path. Normal theorem bodies should not fall back to timing the
@@ -709,12 +711,17 @@ but local metadata/cache records the timeout a successful build satisfied; a suc
 discovers sources, finds the named theorem in the named theory script, pretty-prints
 the executable proof-IR step plan, and exits without acquiring the project build lock,
 planning dependencies, consulting cache/up-to-date state, or executing the proof.
-The pretty form must remain faithful to the IR: each numbered line is one executable tactic/list-tactic operation; indentation
-and parenthesized body text are formatting only. For example, a `>>~-` source
-fragment may display as one numbered `list_tac Q.SELECT_GOALS_LT_THEN1 ...` step
-when that is what the runtime executes, not as an ordinary `>-` branch. The goal
-is that a developer can debug a divergence by inspecting the plan and knowing the
-HOL tactic combinator semantics.
+The pretty form must remain faithful to the IR: each numbered line is one executable tactic/list-tactic operation or structural delimiter; indentation
+and parenthesized body text are formatting only. List-step labels describe the
+list tactic itself, without legacy `>> list_tac` prefixes; the `list-step` kind
+already records that the leaf executes as a list tactic. Structural `each` nodes
+represent RHS tactics of `THEN` that must be applied independently to each focused
+goal, especially when the RHS contains dynamic control or branches. A future
+optimization may elide or fast-path `each` when the runtime (or static planning)
+knows there is exactly one focused goal, but any such optimization must preserve
+the same diagnostic and failed-prefix path semantics. The goal is that a
+developer can debug a divergence by inspecting the plan and knowing the HOL tactic
+combinator semantics.
 
 `--trace-steps` executes the build and records runtime plans plus before/after
 trace lines for all instrumented proofs in the child log. On failure, holbuild
