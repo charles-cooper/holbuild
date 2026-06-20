@@ -37,6 +37,8 @@ val compiled_list_tactic_ref = ref Tactical.ALL_LT
 val proof_history_ref = ref (NONE : goalStack.gstk History.history option)
 val branch_tail_count_ref = ref ([] : int list)
 val reverse_group_lengths_ref = ref (NONE : int list option)
+val default_repeat_iteration_limit = 10000
+val repeat_iteration_limit_ref = ref default_repeat_iteration_limit
 
 fun env_bool name =
   case OS.Process.getEnv name of
@@ -47,6 +49,22 @@ fun env_bool name =
     | SOME "false" => SOME false
     | SOME "no" => SOME false
     | _ => NONE
+
+fun env_positive_int name =
+  case OS.Process.getEnv name of
+      NONE => NONE
+    | SOME value =>
+        (case Int.fromString value of
+             SOME n => if n > 0 then SOME n
+                       else raise Fail (name ^ " must be a positive integer")
+           | NONE => raise Fail (name ^ " must be a positive integer"))
+
+fun repeat_iteration_limit () =
+  Option.getOpt(env_positive_int "HOLBUILD_PROOF_IR_REPEAT_LIMIT", !repeat_iteration_limit_ref)
+
+fun repeat_iteration_guard_message limit =
+  String.concat ["proof-ir repeat exceeded ", Int.toString limit,
+                 " successful iterations; possible nonterminating rpt"]
 
 fun seconds (a, b) = Time.toReal (Time.-(b, a))
 fun fmt_ms t = Real.fmt (StringCvt.FIX (SOME 3)) (1000.0 * t)
@@ -765,19 +783,22 @@ fun run_structural_steps display_index steps =
          d + HolbuildProofIr.display_line_count proof_step end
     and run_repeat d path proof_step body =
       let
+        val limit = repeat_iteration_limit()
+        val span = (HolbuildProofIr.step_start proof_step, HolbuildProofIr.step_end proof_step)
+        fun guard_failure () =
+          with_plan_position d "repeat" (HolbuildProofIr.step_label proof_step) span
+            (fn () => raise Fail (repeat_iteration_guard_message limit))
         fun loop iter =
-          if iter > 10000 then raise Fail "repeat proof step exceeded iteration guard"
-          else let val before = current_goal_count()
-                   val saved = runtime_state_snapshot()
+          if iter >= limit then guard_failure()
+          else let val saved = runtime_state_snapshot()
                    val result = (with_expected_failures_suppressed (fn () => run_list (d + 1) (path @ [HolbuildProofIr.PathRepeat iter]) 0 body); NONE) handle e => SOME e
-                   val after = current_goal_count()
                in case result of
                       SOME _ =>
                         (restore_runtime_state saved;
                          dynamic_events_ref := HolbuildProofIr.RepeatStopEvent (path, iter) :: !dynamic_events_ref)
                     | NONE =>
-                        if after = before then dynamic_events_ref := HolbuildProofIr.RepeatStopEvent (path, iter) :: !dynamic_events_ref
-                        else (dynamic_events_ref := HolbuildProofIr.RepeatIterEvent (path, iter) :: !dynamic_events_ref; loop (iter + 1))
+                        (dynamic_events_ref := HolbuildProofIr.RepeatIterEvent (path, iter) :: !dynamic_events_ref;
+                         loop (iter + 1))
                end
       in loop 0; d + HolbuildProofIr.display_line_count proof_step end
     and run_one d path proof_step =

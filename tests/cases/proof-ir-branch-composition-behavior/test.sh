@@ -95,6 +95,12 @@ Proof
   ACCEPT_TAC TRUTH
 QED
 
+Theorem repeat_same_goal_count_progress_success:
+  !x:num. x = x ==> x = x
+Proof
+  rpt strip_tac >> ASM_REWRITE_TAC[]
+QED
+
 Theorem by_sugar_success:
   T
 Proof
@@ -150,6 +156,16 @@ skip_success_log=$tmpdir/success-skip.log
 (cd "$skip_project" && "$HOLBUILD_BIN" build --skip-proof-steps BranchTheory) > "$skip_success_log" 2>&1
 require_grep "BranchTheory" "$skip_success_log"
 require_file "$skip_project/.holbuild/obj/src/BranchTheory.dat"
+
+repeat_limit_project=$tmpdir/repeat-limit-project
+cp -R "$success_project" "$repeat_limit_project"
+rm -rf "$repeat_limit_project/.holbuild"
+repeat_limit_log=$tmpdir/repeat-limit.log
+if (cd "$repeat_limit_project" && HOLBUILD_PROOF_IR_REPEAT_LIMIT=1 "$HOLBUILD_BIN" build --force BranchTheory) > "$repeat_limit_log" 2>&1; then
+  echo "expected repeat limit build to fail" >&2
+  exit 1
+fi
+require_grep 'proof-ir repeat exceeded 1 successful iterations; possible nonterminating rpt' "$repeat_limit_log"
 
 check_failure_project() {
   local name=$1
