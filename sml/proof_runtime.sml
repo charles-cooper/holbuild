@@ -572,19 +572,19 @@ fun history_is_proved () =
 fun active_focus_snapshot label =
   case !branch_tail_count_ref of
       [] =>
-        let val goals = history_top_goals()
-        in {goals = goals, total_count = length goals, generated_count = length goals, tail_count = 0} end
-        handle e => if history_is_proved () then {goals = [], total_count = 0, generated_count = 0, tail_count = 0} else raise e
+        (let val goals = history_top_goals()
+         in {goals = goals, total_count = length goals, generated_count = length goals, tail_count = 0} end
+         handle e => if history_is_proved () then {goals = [], total_count = 0, generated_count = 0, tail_count = 0} else raise e)
     | tail_count :: _ =>
-        let
-          val goals = history_top_goals()
-          val total_count = length goals
-          val generated_count = total_count - tail_count
-        in
-          if generated_count < 0 then raise Fail ("focus tail count exceeds open goals: " ^ label)
-          else {goals = goals, total_count = total_count, generated_count = generated_count, tail_count = tail_count}
-        end
-        handle e => if tail_count = 0 andalso history_is_proved () then {goals = [], total_count = 0, generated_count = 0, tail_count = tail_count} else raise e
+        (let
+           val goals = history_top_goals()
+           val total_count = length goals
+           val generated_count = total_count - tail_count
+         in
+           if generated_count < 0 then raise Fail ("focus tail count exceeds open goals: " ^ label)
+           else {goals = goals, total_count = total_count, generated_count = generated_count, tail_count = tail_count}
+         end
+         handle e => if tail_count = 0 andalso history_is_proved () then {goals = [], total_count = 0, generated_count = 0, tail_count = tail_count} else raise e)
 
 fun apply_focus_list_tactic label list_tactic =
   let
@@ -890,7 +890,7 @@ fun run_maybe_traced_step index display_index proof_step =
 
 fun run_structural_steps_with_resume resume_after_path display_index steps =
   let
-    val resume_reached_ref = ref (Option.isNone resume_after_path)
+    val resume_reached_ref = ref (not (Option.isSome resume_after_path))
     fun target_in_path path =
       case resume_after_path of
           NONE => false
@@ -1001,7 +1001,7 @@ fun run_structural_steps_with_resume resume_after_path display_index steps =
             val entering_from_resume = not (!resume_reached_ref) andalso Option.isSome resume_frame andalso
                                        (case resume_frame of SOME (EachFrame (_, iter', r)) => iter' = iter andalso r = remaining | _ => false)
             val _ = if entering_from_resume then () else push_structural_frame frame
-            val _ = if entering_from_resume then () else push_first_focus "each"
+            val _ = if entering_from_resume then () else ignore (push_first_focus "each")
             val result = (run_list (d + 1) (path @ [HolbuildProofIr.PathEach iter]) 0 body; NONE) handle e => SOME e
           in
             case result of
@@ -1039,7 +1039,7 @@ fun run_structural_steps_with_resume resume_after_path display_index steps =
             val entering_from_resume = not (!resume_reached_ref) andalso Option.isSome resume_frame andalso
                                        (case resume_frame of SOME (CaseFrame (_, n', r)) => n' = n andalso r = remaining | _ => false)
             val _ = if entering_from_resume then () else push_structural_frame frame
-            val _ = if entering_from_resume then () else push_first_focus label
+            val _ = if entering_from_resume then () else ignore (push_first_focus label)
             val result = (run_list body_display (path @ [HolbuildProofIr.PathCase n]) 0 body; NONE) handle e => SOME e
           in
             case result of
@@ -1288,7 +1288,7 @@ fun parse_failed_prefix_metadata text =
                                   SOME text => parse_step_signature_text text
                                 | NONE => NONE
                           in
-                            if version = "2" andalso step_count > 0 andalso Option.isNone leaf_signature then NONE
+                            if version = "2" andalso step_count > 0 andalso not (Option.isSome leaf_signature) then NONE
                             else SOME {step_count = step_count, prefix_end = prefix_end, path = path, focus = focus,
                                        leaf_signature = leaf_signature, events = events, frames = frames}
                           end
