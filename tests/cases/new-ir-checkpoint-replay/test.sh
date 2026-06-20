@@ -55,7 +55,7 @@ first_count=$(wc -c < "$counter" | tr -d ' ')
 [[ "$first_count" = "2" ]] || { echo "expected first run to execute slow prefix twice, got $first_count" >&2; exit 1; }
 require_grep "FAIL_TAC \"first suffix failure\"" "$first_log"
 require_grep "failed tactic top input goal:" "$first_log"
-require_grep "plan position: 02 list_tactic >> FAIL_TAC" "$first_log"
+require_grep 'plan position: 02 step FAIL_TAC "first suffix failure"' "$first_log"
 require_grep "failed tactic input goals: 1" "$first_log"
 require_file "$(find "$project/.holbuild/checkpoints" -name '*slow_prefix_failure_failed_prefix.save' -print -quit)"
 
@@ -73,7 +73,7 @@ edited_count=$(wc -c < "$counter" | tr -d ' ')
 [[ "$edited_count" = "2" ]] || { echo "new-ir failed-prefix replay reran unchanged slow prefix after suffix edit; count $edited_count" >&2; exit 1; }
 require_grep "from: failed-prefix checkpoint in slow_prefix_failure" "$edited_log"
 require_grep "edited suffix failure" "$edited_log"
-require_grep "plan position: 02 list_tactic >> FAIL_TAC" "$edited_log"
+require_grep 'plan position: 02 step FAIL_TAC "edited suffix failure"' "$edited_log"
 require_grep "failed tactic input goals: 1" "$edited_log"
 
 python3 - <<PY
@@ -114,7 +114,7 @@ if (cd "$prefix_edit_project" && "$HOLBUILD_BIN" build ATheory) > "$prefix_edit_
   echo "expected prefix-edit replay seed to fail" >&2
   exit 1
 fi
-require_grep "plan position: 04 branch_suffix" "$prefix_edit_first_log"
+require_grep "plan position: 07 step NO_TAC" "$prefix_edit_first_log"
 require_file "$(find "$prefix_edit_project/.holbuild/checkpoints" -name '*replay_after_prefix_edit_failed_prefix.save' -print -quit)"
 
 python3 - <<PY
@@ -127,7 +127,10 @@ if (cd "$prefix_edit_project" && "$HOLBUILD_BIN" build ATheory) > "$prefix_edit_
   echo "expected edited prefix proof still to fail at NO_TAC" >&2
   exit 1
 fi
-require_grep "from: failed-prefix checkpoint in replay_after_prefix_edit" "$prefix_edit_second_log"
+if grep -q "from: failed-prefix checkpoint in replay_after_prefix_edit" "$prefix_edit_second_log"; then
+  echo "prefix-changing edit reused stale failed-prefix checkpoint" >&2
+  exit 1
+fi
 if grep -q "fragment: >> strip_tac" "$prefix_edit_second_log"; then
   echo "failed-prefix replay after prefix edit resumed from an inconsistent proof state" >&2
   exit 1
@@ -136,7 +139,7 @@ if grep -q "branch suffix without active branch" "$prefix_edit_second_log"; then
   echo "failed-prefix replay after prefix edit lost branch state" >&2
   exit 1
 fi
-require_grep "plan position: 05 branch_suffix" "$prefix_edit_second_log"
+require_grep "plan position: 08 step NO_TAC" "$prefix_edit_second_log"
 
 resume_project=$tmpdir/resume-project
 resume_counter=$tmpdir/resume-count.txt
