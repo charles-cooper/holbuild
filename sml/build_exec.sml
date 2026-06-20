@@ -1891,8 +1891,8 @@ fun failed_prefix_metadata path =
                    lines
               end
         in
-          case (value "proof_ir_failed_prefix_version", value "step_count", value "prefix_end", value "path") of
-              (SOME "1", SOME step_count_text, SOME _, SOME _) =>
+          case (value "proof_ir_failed_prefix_version", value "step_count", value "prefix_end", value "path", value "focus") of
+              (SOME "1", SOME step_count_text, SOME _, SOME _, SOME _) =>
                 Option.map (fn step_count => {step_count = step_count, metadata_text = text})
                   (Int.fromString step_count_text)
             | _ => NONE

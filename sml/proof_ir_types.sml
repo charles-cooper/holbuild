@@ -79,8 +79,6 @@ fun step_kind (StepTactic _) = "step"
   | step_kind (StepRepeat _) = "repeat"
   | step_kind (StepTry _) = "try"
 
-fun step_signature proof_step = (step_kind proof_step, step_program proof_step)
-
 fun display_line_count step =
   let
     fun body_count xs = List.foldl (fn (s, n) => n + display_line_count s) 0 xs

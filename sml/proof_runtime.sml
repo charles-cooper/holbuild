@@ -25,8 +25,14 @@ val active_tactic_text_ref = ref ""
 val active_plan_ref = ref (NONE : HolbuildProofIr.step list option)
 val successful_step_count_ref = ref 0
 val successful_prefix_end_ref = ref 0
+datatype structural_frame = EachFrame of HolbuildProofIr.proof_path * int * int | CaseFrame of HolbuildProofIr.proof_path * int * int
+
 val current_path_ref = ref ([] : HolbuildProofIr.proof_path)
 val successful_path_ref = ref ([] : HolbuildProofIr.proof_path)
+val current_frames_ref = ref ([] : structural_frame list)
+val successful_frames_ref = ref ([] : structural_frame list)
+val resume_frames_ref = ref ([] : structural_frame list)
+val successful_branch_tail_counts_ref = ref ([] : int list)
 val dynamic_events_ref = ref ([] : HolbuildProofIr.dynamic_event list)
 val failed_step_end_ref = ref NONE : int option ref
 val failed_step_span_ref = ref NONE : (int * int) option ref
@@ -120,6 +126,23 @@ fun dynamic_event_text event =
     | HolbuildProofIr.RepeatIterEvent (path, n) => "repeat-iter\t" ^ path_text path ^ "\t" ^ Int.toString n
     | HolbuildProofIr.RepeatStopEvent (path, n) => "repeat-stop\t" ^ path_text path ^ "\t" ^ Int.toString n
 
+fun int_list_text xs = String.concatWith "," (map Int.toString xs)
+
+fun parse_int_list_text "" = SOME []
+  | parse_int_list_text text =
+      let
+        fun loop [] acc = SOME (rev acc)
+          | loop (part :: rest) acc =
+              case Int.fromString part of
+                  SOME n => loop rest (n :: acc)
+                | NONE => NONE
+      in loop (String.fields (fn c => c = #",") text) [] end
+
+fun structural_frame_text frame =
+  case frame of
+      EachFrame (path, iter, remaining) => "each\t" ^ path_text path ^ "\t" ^ Int.toString iter ^ "\t" ^ Int.toString remaining
+    | CaseFrame (path, n, remaining) => "case\t" ^ path_text path ^ "\t" ^ Int.toString n ^ "\t" ^ Int.toString remaining
+
 fun parse_path_component text =
   case text of
       "select" => SOME HolbuildProofIr.PathSelect
@@ -142,6 +165,18 @@ fun parse_path_text "" = SOME []
                   SOME component => loop rest (component :: acc)
                 | NONE => NONE
       in loop (String.fields (fn c => c = #"/") text) [] end
+
+fun parse_structural_frame_text text =
+  case String.fields (fn c => c = #"\t") text of
+      ["each", path_text', iter_text, remaining_text] =>
+        (case (parse_path_text path_text', Int.fromString iter_text, Int.fromString remaining_text) of
+             (SOME path, SOME iter, SOME remaining) => SOME (EachFrame (path, iter, remaining))
+           | _ => NONE)
+    | ["case", path_text', n_text, remaining_text] =>
+        (case (parse_path_text path_text', Int.fromString n_text, Int.fromString remaining_text) of
+             (SOME path, SOME n, SOME remaining) => SOME (CaseFrame (path, n, remaining))
+           | _ => NONE)
+    | _ => NONE
 
 fun parse_dynamic_event_text text =
   case String.fields (fn c => c = #"\t") text of
@@ -241,7 +276,9 @@ fun save_failed_prefix_checkpoint () =
               String.concat (["proof_ir_failed_prefix_version=1\n",
                               "step_count=", Int.toString step_count, "\n",
                               "prefix_end=", Int.toString prefix_end, "\n",
-                              "path=", path_text (!successful_path_ref), "\n"] @
+                              "path=", path_text (!successful_path_ref), "\n",
+                              "focus=", int_list_text (!successful_branch_tail_counts_ref), "\n"] @
+                             map (fn frame => "frame=" ^ structural_frame_text frame ^ "\n") (rev (!successful_frames_ref)) @
                              map (fn event => "event=" ^ dynamic_event_text event ^ "\n") (rev (!dynamic_events_ref)))
             val _ =
               (case !proof_history_ref of
@@ -678,18 +715,27 @@ fun runtime_state_snapshot () =
   {history = current_history(),
    current_path = !current_path_ref,
    successful_path = !successful_path_ref,
+   current_frames = !current_frames_ref,
+   successful_frames = !successful_frames_ref,
+   resume_frames = !resume_frames_ref,
+   successful_branch_tail_counts = !successful_branch_tail_counts_ref,
    successful_count = !successful_step_count_ref,
    successful_end = !successful_prefix_end_ref,
    events = !dynamic_events_ref,
    branch_tail_counts = !branch_tail_count_ref,
    reverse_group_lengths = !reverse_group_lengths_ref}
 
-fun restore_runtime_state {history, current_path, successful_path, successful_count,
+fun restore_runtime_state {history, current_path, successful_path, current_frames,
+                           successful_frames, resume_frames, successful_branch_tail_counts, successful_count,
                            successful_end, events, branch_tail_counts,
                            reverse_group_lengths} =
   (set_history history;
    current_path_ref := current_path;
    successful_path_ref := successful_path;
+   current_frames_ref := current_frames;
+   successful_frames_ref := successful_frames;
+   resume_frames_ref := resume_frames;
+   successful_branch_tail_counts_ref := successful_branch_tail_counts;
    successful_step_count_ref := successful_count;
    successful_prefix_end_ref := successful_end;
    dynamic_events_ref := events;
@@ -752,22 +798,12 @@ fun run_structural_steps_with_resume resume_after_path display_index steps =
       case resume_after_path of
           NONE => false
         | SOME target => path = target
-    fun require_resume_supported path =
-      let
-        fun unsupported component =
-          case component of
-              HolbuildProofIr.PathEach _ => true
-            | HolbuildProofIr.PathCase _ => true
-            | HolbuildProofIr.PathAlternative _ => true
-            | HolbuildProofIr.PathTry => true
-            | HolbuildProofIr.PathRepeat _ => true
-            | _ => false
-      in
-        if List.exists unsupported path then
-          raise Fail "structural failed-prefix continuation for each/cases/dynamic paths is not implemented yet"
-        else ()
-      end
+    fun require_resume_supported _ = ()
     val _ = case resume_after_path of NONE => () | SOME path => require_resume_supported path
+    fun resume_child_after path =
+      case resume_after_path of
+          SOME target => if path_has_prefix path target then SOME (List.drop(target, length path)) else NONE
+        | NONE => NONE
     fun run_list _ _ _ [] = ()
       | run_list d path i (proof_step :: rest) =
           let val next = run_one d (path @ [HolbuildProofIr.PathStep i]) proof_step
@@ -793,6 +829,8 @@ fun run_structural_steps_with_resume resume_after_path display_index steps =
                 (successful_step_count_ref := n + 1;
                  successful_prefix_end_ref := HolbuildProofIr.step_end proof_step;
                  successful_path_ref := path;
+                 successful_frames_ref := !current_frames_ref;
+                 successful_branch_tail_counts_ref := !branch_tail_count_ref;
                  d + HolbuildProofIr.display_line_count proof_step)
         end
     and run_select d path proof_step mode body =
@@ -814,52 +852,80 @@ fun run_structural_steps_with_resume resume_after_path display_index steps =
     and run_each d path proof_step body =
       skip_or_enter_structural d path proof_step (fn () =>
       let
+        fun resume_each_frame () =
+          List.find (fn frame => case frame of EachFrame (p, _, _) => p = path | _ => false) (!resume_frames_ref)
         val count = focused_goal_count "each"
+        val resume_frame = if !resume_reached_ref then NONE else resume_each_frame()
         fun run_one_each iter remaining =
           let
-            val _ = push_first_focus "each"
+            val frame = EachFrame (path, iter, remaining)
+            val entering_from_resume = not (!resume_reached_ref) andalso Option.isSome resume_frame andalso
+                                       (case resume_frame of SOME (EachFrame (_, iter', r)) => iter' = iter andalso r = remaining | _ => false)
+            val _ = current_frames_ref := frame :: !current_frames_ref
+            val _ = if entering_from_resume then () else push_first_focus "each"
             val result = (run_list (d + 1) (path @ [HolbuildProofIr.PathEach iter]) 0 body; NONE) handle e => SOME e
           in
             case result of
-                SOME e => (pop_branch_tail_count "each" handle _ => (); raise e)
+                SOME e => (current_frames_ref := List.tl (!current_frames_ref); (pop_branch_tail_count "each" handle _ => ()); raise e)
               | NONE =>
                   let val generated = focused_goal_count "each"
-                  in close_focus "each" HolbuildProofIr.SelectKeep;
+                  in current_frames_ref := List.tl (!current_frames_ref);
+                     close_focus "each" HolbuildProofIr.SelectKeep;
                      reorder_focused_front_after "each" generated (remaining - 1)
                   end
           end
         fun loop _ 0 = ()
           | loop iter remaining = (run_one_each iter remaining; loop (iter + 1) (remaining - 1))
-      in loop 0 count; d + HolbuildProofIr.display_line_count proof_step end)
+      in case resume_frame of
+             SOME (EachFrame (_, iter, remaining)) => loop iter remaining
+           | _ => loop 0 count;
+         d + HolbuildProofIr.display_line_count proof_step end)
     and run_cases d path proof_step cases =
       skip_or_enter_structural d path proof_step (fn () =>
       let
+        fun resume_case_frame () =
+          List.find (fn frame => case frame of CaseFrame (p, _, _) => p = path | _ => false) (!resume_frames_ref)
         val count = focused_goal_count "cases"
         val case_count = length cases
-        val _ = if case_count = count then ()
+        val resume_frame = if !resume_reached_ref then NONE else resume_case_frame()
+        val _ = if Option.isSome resume_frame orelse case_count = count then ()
                 else raise Fail (String.concat ["case count mismatch: ", Int.toString case_count,
                                                 " cases for ", Int.toString count, " focused goals"])
         fun run_one_case n remaining body =
           let
             val label = "case " ^ Int.toString n
-            val _ = push_first_focus label
+            val frame = CaseFrame (path, n, remaining)
+            val entering_from_resume = not (!resume_reached_ref) andalso Option.isSome resume_frame andalso
+                                       (case resume_frame of SOME (CaseFrame (_, n', r)) => n' = n andalso r = remaining | _ => false)
+            val _ = current_frames_ref := frame :: !current_frames_ref
+            val _ = if entering_from_resume then () else push_first_focus label
             val result = (run_list (d + 2) (path @ [HolbuildProofIr.PathCase n]) 0 body; NONE) handle e => SOME e
           in
             case result of
-                SOME e => (pop_branch_tail_count label handle _ => (); raise e)
+                SOME e => (current_frames_ref := List.tl (!current_frames_ref); (pop_branch_tail_count label handle _ => ()); raise e)
               | NONE =>
                   let val generated = focused_goal_count label
-                  in close_focus label HolbuildProofIr.SelectKeep;
+                  in current_frames_ref := List.tl (!current_frames_ref);
+                     close_focus label HolbuildProofIr.SelectKeep;
                      reorder_focused_front_after label generated (remaining - 1)
                   end
           end
+        fun drop_cases 1 xs = xs
+          | drop_cases n (_ :: rest) = drop_cases (n - 1) rest
+          | drop_cases _ [] = []
         fun loop _ _ [] = ()
           | loop n remaining (body :: rest) =
               (run_one_case n remaining body; loop (n + 1) (remaining - 1) rest)
-      in loop 1 count cases; d + HolbuildProofIr.display_line_count proof_step end)
+      in case resume_frame of
+             SOME (CaseFrame (_, n, remaining)) => loop n remaining (drop_cases n cases)
+           | _ => loop 1 count cases;
+         d + HolbuildProofIr.display_line_count proof_step end)
     and run_choice d path proof_step label alternatives =
       skip_or_enter_structural d path proof_step (fn () =>
       let
+        fun nth_body 1 (body :: _) = SOME body
+          | nth_body n (_ :: rest) = nth_body (n - 1) rest
+          | nth_body _ [] = NONE
         fun attempt _ [] last = (case last of SOME e => raise e | NONE => raise Fail ("choice has no alternatives: " ^ label))
           | attempt n (body :: rest) _ =
               let val saved = runtime_state_snapshot()
@@ -871,17 +937,36 @@ fun run_structural_steps_with_resume resume_after_path display_index steps =
                       (restore_runtime_state saved;
                        attempt (n + 1) rest (SOME e))
               end
-      in attempt 1 alternatives NONE; d + HolbuildProofIr.display_line_count proof_step end)
+      in
+        if not (!resume_reached_ref) then
+          (case resume_child_after path of
+               SOME (HolbuildProofIr.PathAlternative n :: _) =>
+                 (case nth_body n alternatives of
+                      SOME body => (run_list (d + 2) (path @ [HolbuildProofIr.PathAlternative n]) 0 body;
+                                    dynamic_events_ref := HolbuildProofIr.ChoiceEvent (path, n) :: !dynamic_events_ref)
+                    | NONE => raise Fail "failed-prefix choice alternative is not present in current proof-ir plan")
+             | _ => attempt 1 alternatives NONE)
+        else attempt 1 alternatives NONE;
+        d + HolbuildProofIr.display_line_count proof_step
+      end)
     and run_try d path proof_step body =
       skip_or_enter_structural d path proof_step (fn () =>
       let val saved = runtime_state_snapshot()
-          val result = (with_expected_failures_suppressed (fn () => run_list (d + 1) (path @ [HolbuildProofIr.PathTry]) 0 body); NONE) handle e => SOME e
-      in (case result of
-              NONE => dynamic_events_ref := HolbuildProofIr.TryEvent (path, true) :: !dynamic_events_ref
-            | SOME _ =>
-                (restore_runtime_state saved;
-                 dynamic_events_ref := HolbuildProofIr.TryEvent (path, false) :: !dynamic_events_ref));
-         d + HolbuildProofIr.display_line_count proof_step end)
+      in
+        if not (!resume_reached_ref) andalso
+           (case resume_child_after path of SOME (HolbuildProofIr.PathTry :: _) => true | _ => false) then
+          (run_list (d + 1) (path @ [HolbuildProofIr.PathTry]) 0 body;
+           dynamic_events_ref := HolbuildProofIr.TryEvent (path, true) :: !dynamic_events_ref)
+        else
+          let val result = (with_expected_failures_suppressed (fn () => run_list (d + 1) (path @ [HolbuildProofIr.PathTry]) 0 body); NONE) handle e => SOME e
+          in case result of
+                 NONE => dynamic_events_ref := HolbuildProofIr.TryEvent (path, true) :: !dynamic_events_ref
+               | SOME _ =>
+                   (restore_runtime_state saved;
+                    dynamic_events_ref := HolbuildProofIr.TryEvent (path, false) :: !dynamic_events_ref)
+          end;
+        d + HolbuildProofIr.display_line_count proof_step
+      end)
     and run_repeat d path proof_step body =
       skip_or_enter_structural d path proof_step (fn () =>
       let
@@ -902,7 +987,19 @@ fun run_structural_steps_with_resume resume_after_path display_index steps =
                         (dynamic_events_ref := HolbuildProofIr.RepeatIterEvent (path, iter) :: !dynamic_events_ref;
                          loop (iter + 1))
                end
-      in loop 0; d + HolbuildProofIr.display_line_count proof_step end)
+        fun resume_loop iter =
+          if iter >= limit then guard_failure()
+          else (run_list (d + 1) (path @ [HolbuildProofIr.PathRepeat iter]) 0 body;
+                dynamic_events_ref := HolbuildProofIr.RepeatIterEvent (path, iter) :: !dynamic_events_ref;
+                loop (iter + 1))
+      in
+        if not (!resume_reached_ref) then
+          (case resume_child_after path of
+               SOME (HolbuildProofIr.PathRepeat iter :: _) => resume_loop iter
+             | _ => loop 0)
+        else loop 0;
+        d + HolbuildProofIr.display_line_count proof_step
+      end)
     and run_one d path proof_step =
       case proof_step of
           HolbuildProofIr.StepTactic _ => run_leaf d path proof_step
@@ -929,6 +1026,10 @@ fun run_steps steps =
    successful_prefix_end_ref := 0;
    current_path_ref := [];
    successful_path_ref := [];
+   current_frames_ref := [];
+   successful_frames_ref := [];
+   resume_frames_ref := [];
+   successful_branch_tail_counts_ref := [];
    dynamic_events_ref := [];
    suppress_expected_failure_diagnostics_ref := false;
    branch_tail_count_ref := [];
@@ -993,12 +1094,20 @@ fun metadata_value key lines =
 fun parse_failed_prefix_metadata text =
   let val lines = String.tokens (fn c => c = #"\n") text
       val event_prefix = "event="
+      val frame_prefix = "frame="
       val event_texts = List.mapPartial (fn line =>
         if String.isPrefix event_prefix line then SOME (String.extract(line, size event_prefix, NONE)) else NONE) lines
+      val frame_texts = List.mapPartial (fn line =>
+        if String.isPrefix frame_prefix line then SOME (String.extract(line, size frame_prefix, NONE)) else NONE) lines
       fun parse_events [] acc = SOME (rev acc)
         | parse_events (event_text :: rest) acc =
             case parse_dynamic_event_text event_text of
                 SOME event => parse_events rest (event :: acc)
+              | NONE => NONE
+      fun parse_frames [] acc = SOME (rev acc)
+        | parse_frames (frame_text :: rest) acc =
+            case parse_structural_frame_text frame_text of
+                SOME frame => parse_frames rest (frame :: acc)
               | NONE => NONE
   in
     case metadata_value "proof_ir_failed_prefix_version" lines of
@@ -1006,11 +1115,13 @@ fun parse_failed_prefix_metadata text =
           (case (metadata_value "step_count" lines,
                  metadata_value "prefix_end" lines,
                  metadata_value "path" lines,
-                 parse_events event_texts []) of
-               (SOME count_text, SOME end_text, SOME path_text', SOME events) =>
-                 (case (Int.fromString count_text, Int.fromString end_text, parse_path_text path_text') of
-                      (SOME step_count, SOME prefix_end, SOME path) =>
-                        SOME {step_count = step_count, prefix_end = prefix_end, path = path, events = events}
+                 metadata_value "focus" lines,
+                 parse_events event_texts [],
+                 parse_frames frame_texts []) of
+               (SOME count_text, SOME end_text, SOME path_text', SOME focus_text, SOME events, SOME frames) =>
+                 (case (Int.fromString count_text, Int.fromString end_text, parse_path_text path_text', parse_int_list_text focus_text) of
+                      (SOME step_count, SOME prefix_end, SOME path, SOME focus) =>
+                        SOME {step_count = step_count, prefix_end = prefix_end, path = path, focus = focus, events = events, frames = frames}
                     | _ => NONE)
              | _ => NONE)
       | _ => NONE
@@ -1041,6 +1152,11 @@ fun finish_failed_prefix name metadata_text tactic_text failed_prefix_path faile
           val _ = successful_step_count_ref := #step_count metadata
           val _ = successful_prefix_end_ref := #prefix_end metadata
           val _ = successful_path_ref := #path metadata
+          val _ = successful_frames_ref := #frames metadata
+          val _ = current_frames_ref := #frames metadata
+          val _ = resume_frames_ref := #frames metadata
+          val _ = branch_tail_count_ref := #focus metadata
+          val _ = successful_branch_tail_counts_ref := #focus metadata
           val _ = dynamic_events_ref := #events metadata
           val _ =
             if #step_count metadata = 0 then run_structural_steps 0 plan
