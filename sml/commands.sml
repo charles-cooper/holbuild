@@ -264,7 +264,9 @@ fun parse_proof_steps fieldss =
         | fields :: more =>
             (case fields of
                  ["proof-step", "end"] =>
-                   if List.exists (fn s => s = "end") stops then (rev acc, more)
+                   if List.exists (fn s => s = "end") stops then
+                     if List.exists (fn s => s = "case" orelse s = "alternative") stops then (rev acc, rest)
+                     else (rev acc, more)
                    else raise Error "proof-ir end outside block"
                | ["proof-step", "case", _] =>
                    if List.exists (fn s => s = "case") stops then (rev acc, rest)

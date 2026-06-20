@@ -100,43 +100,49 @@ fun indent n = String.concat (List.tabulate (n, fn _ => "  "))
 fun format_plan_lines steps =
   let
     fun line i depth text = "  " ^ format_index i ^ " " ^ indent depth ^ text ^ "\n"
-    fun steps_lines i depth [] acc = (i, rev acc)
-      | steps_lines i depth (step :: rest) acc =
-          let val (i', acc') = step_lines i depth step acc
-          in steps_lines i' depth rest acc' end
-    and step_lines i depth step acc =
+    fun steps_lines i depth [] = (i, [])
+      | steps_lines i depth (step :: rest) =
+          let
+            val (i', lines1) = step_lines i depth step
+            val (i'', lines2) = steps_lines i' depth rest
+          in (i'', lines1 @ lines2) end
+    and step_lines i depth step =
       case step of
-          StepTactic {label, ...} => (i + 1, line i depth ("step " ^ label) :: acc)
-        | StepList {label, ...} => (i + 1, line i depth ("list-step " ^ label) :: acc)
+          StepTactic {label, ...} => (i + 1, [line i depth ("step " ^ label)])
+        | StepList {label, ...} => (i + 1, [line i depth ("list-step " ^ label)])
         | StepEach {body, ...} =>
-            let val (j, acc1) = steps_lines (i + 1) (depth + 1) body (line i depth "each" :: acc)
-            in (j + 1, line j depth "end" :: acc1) end
+            let val (j, body_lines) = steps_lines (i + 1) (depth + 1) body
+            in (j + 1, line i depth "each" :: body_lines @ [line j depth "end"]) end
         | StepSelect {selector, mode, body, ...} =>
-            let val (j, acc1) = steps_lines (i + 1) (depth + 1) body (line i depth ("select " ^ selector_text selector ^ " " ^ mode_text mode) :: acc)
-            in (j + 1, line j depth "end" :: acc1) end
+            let val (j, body_lines) = steps_lines (i + 1) (depth + 1) body
+            in (j + 1, line i depth ("select " ^ selector_text selector ^ " " ^ mode_text mode) :: body_lines @ [line j depth "end"]) end
         | StepCases {cases, ...} =>
             let
-              fun case_lines n j [] acc = (j, acc)
-                | case_lines n j (body :: rest) acc =
-                    let val (k, acc1) = steps_lines (j + 1) (depth + 2) body (line j (depth + 1) ("case " ^ Int.toString n) :: acc)
-                    in case_lines (n + 1) k rest acc1 end
-              val (j, acc1) = case_lines 1 (i + 1) cases (line i depth "cases" :: acc)
-            in (j + 1, line j depth "end" :: acc1) end
+              fun case_lines n j [] = (j, [])
+                | case_lines n j (body :: rest) =
+                    let
+                      val (k, body_lines) = steps_lines (j + 1) (depth + 2) body
+                      val (m, rest_lines) = case_lines (n + 1) k rest
+                    in (m, line j (depth + 1) ("case " ^ Int.toString n) :: body_lines @ rest_lines) end
+              val (j, body_lines) = case_lines 1 (i + 1) cases
+            in (j + 1, line i depth "cases" :: body_lines @ [line j depth "end"]) end
         | StepChoice {label, alternatives, ...} =>
             let
-              fun alt_lines n j [] acc = (j, acc)
-                | alt_lines n j (body :: rest) acc =
-                    let val (k, acc1) = steps_lines (j + 1) (depth + 2) body (line j (depth + 1) ("alternative " ^ Int.toString n) :: acc)
-                    in alt_lines (n + 1) k rest acc1 end
-              val (j, acc1) = alt_lines 1 (i + 1) alternatives (line i depth ("choice " ^ label) :: acc)
-            in (j + 1, line j depth "end" :: acc1) end
+              fun alt_lines n j [] = (j, [])
+                | alt_lines n j (body :: rest) =
+                    let
+                      val (k, body_lines) = steps_lines (j + 1) (depth + 2) body
+                      val (m, rest_lines) = alt_lines (n + 1) k rest
+                    in (m, line j (depth + 1) ("alternative " ^ Int.toString n) :: body_lines @ rest_lines) end
+              val (j, body_lines) = alt_lines 1 (i + 1) alternatives
+            in (j + 1, line i depth ("choice " ^ label) :: body_lines @ [line j depth "end"]) end
         | StepRepeat {body, ...} =>
-            let val (j, acc1) = steps_lines (i + 1) (depth + 1) body (line i depth "repeat" :: acc)
-            in (j + 1, line j depth "end" :: acc1) end
+            let val (j, body_lines) = steps_lines (i + 1) (depth + 1) body
+            in (j + 1, line i depth "repeat" :: body_lines @ [line j depth "end"]) end
         | StepTry {body, ...} =>
-            let val (j, acc1) = steps_lines (i + 1) (depth + 1) body (line i depth "try" :: acc)
-            in (j + 1, line j depth "end" :: acc1) end
-    val (_, lines) = steps_lines 0 0 steps []
+            let val (j, body_lines) = steps_lines (i + 1) (depth + 1) body
+            in (j + 1, line i depth "try" :: body_lines @ [line j depth "end"]) end
+    val (_, lines) = steps_lines 0 0 steps
   in String.concat lines end
 
 fun display_line_count_list steps = List.foldl (fn (step, n) => n + display_line_count step) 0 steps
