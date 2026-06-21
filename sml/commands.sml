@@ -60,64 +60,64 @@ fun force_level_value text =
 
 fun split_flags args =
   let
-    fun loop dry force use_cache skip_checkpoints goalfrag new_ir tactic_timeout tactic_timeout_set goalfrag_plan goalfrag_trace repl_on_failure retain_debug_artifacts warn_unreachable rest =
+    fun loop dry force use_cache skip_checkpoints proof_steps new_ir tactic_timeout tactic_timeout_set execution_plan trace_steps repl_on_failure retain_debug_artifacts warn_unreachable rest =
       case rest of
           [] => ({dry_run = dry, force = force, use_cache = use_cache,
                   skip_checkpoints = skip_checkpoints,
-                  goalfrag = goalfrag, new_ir = new_ir,
+                  proof_steps = proof_steps, new_ir = new_ir,
                   tactic_timeout = tactic_timeout,
                   tactic_timeout_set = tactic_timeout_set,
-                  goalfrag_plan = goalfrag_plan,
-                  goalfrag_trace = goalfrag_trace,
+                  execution_plan = execution_plan,
+                  trace_steps = trace_steps,
                   repl_on_failure = repl_on_failure,
                   retain_debug_artifacts = retain_debug_artifacts,
                   warn_unreachable = warn_unreachable}, [])
         | "--dry-run" :: xs =>
-            loop true force use_cache skip_checkpoints goalfrag new_ir tactic_timeout tactic_timeout_set goalfrag_plan goalfrag_trace repl_on_failure retain_debug_artifacts warn_unreachable xs
+            loop true force use_cache skip_checkpoints proof_steps new_ir tactic_timeout tactic_timeout_set execution_plan trace_steps repl_on_failure retain_debug_artifacts warn_unreachable xs
         | "--force" :: xs =>
-            loop dry HolbuildBuildExec.ForceAll use_cache skip_checkpoints goalfrag new_ir tactic_timeout tactic_timeout_set goalfrag_plan goalfrag_trace repl_on_failure retain_debug_artifacts warn_unreachable xs
+            loop dry HolbuildBuildExec.ForceAll use_cache skip_checkpoints proof_steps new_ir tactic_timeout tactic_timeout_set execution_plan trace_steps repl_on_failure retain_debug_artifacts warn_unreachable xs
         | "--force-theory" :: xs =>
-            loop dry HolbuildBuildExec.ForceTargets use_cache skip_checkpoints goalfrag new_ir tactic_timeout tactic_timeout_set goalfrag_plan goalfrag_trace repl_on_failure retain_debug_artifacts warn_unreachable xs
+            loop dry HolbuildBuildExec.ForceTargets use_cache skip_checkpoints proof_steps new_ir tactic_timeout tactic_timeout_set execution_plan trace_steps repl_on_failure retain_debug_artifacts warn_unreachable xs
         | "--force-project" :: xs =>
-            loop dry HolbuildBuildExec.ForceProject use_cache skip_checkpoints goalfrag new_ir tactic_timeout tactic_timeout_set goalfrag_plan goalfrag_trace repl_on_failure retain_debug_artifacts warn_unreachable xs
+            loop dry HolbuildBuildExec.ForceProject use_cache skip_checkpoints proof_steps new_ir tactic_timeout tactic_timeout_set execution_plan trace_steps repl_on_failure retain_debug_artifacts warn_unreachable xs
         | "--force-full" :: xs =>
-            loop dry HolbuildBuildExec.ForceAll use_cache skip_checkpoints goalfrag new_ir tactic_timeout tactic_timeout_set goalfrag_plan goalfrag_trace repl_on_failure retain_debug_artifacts warn_unreachable xs
+            loop dry HolbuildBuildExec.ForceAll use_cache skip_checkpoints proof_steps new_ir tactic_timeout tactic_timeout_set execution_plan trace_steps repl_on_failure retain_debug_artifacts warn_unreachable xs
         | "--no-cache" :: xs =>
-            loop dry force false skip_checkpoints goalfrag new_ir tactic_timeout tactic_timeout_set goalfrag_plan goalfrag_trace repl_on_failure retain_debug_artifacts warn_unreachable xs
+            loop dry force false skip_checkpoints proof_steps new_ir tactic_timeout tactic_timeout_set execution_plan trace_steps repl_on_failure retain_debug_artifacts warn_unreachable xs
         | "--skip-checkpoints" :: xs =>
-            loop dry force use_cache true goalfrag new_ir tactic_timeout tactic_timeout_set goalfrag_plan goalfrag_trace repl_on_failure retain_debug_artifacts warn_unreachable xs
+            loop dry force use_cache true proof_steps new_ir tactic_timeout tactic_timeout_set execution_plan trace_steps repl_on_failure retain_debug_artifacts warn_unreachable xs
         | "--skip-proof-steps" :: xs =>
-            loop dry force use_cache skip_checkpoints false false tactic_timeout tactic_timeout_set goalfrag_plan goalfrag_trace repl_on_failure retain_debug_artifacts warn_unreachable xs
+            loop dry force use_cache skip_checkpoints false false tactic_timeout tactic_timeout_set execution_plan trace_steps repl_on_failure retain_debug_artifacts warn_unreachable xs
         | "--skip-goalfrag" :: xs =>
             (warn "--skip-goalfrag is deprecated; use --skip-proof-steps";
-             loop dry force use_cache skip_checkpoints false false tactic_timeout tactic_timeout_set goalfrag_plan goalfrag_trace repl_on_failure retain_debug_artifacts warn_unreachable xs)
+             loop dry force use_cache skip_checkpoints false false tactic_timeout tactic_timeout_set execution_plan trace_steps repl_on_failure retain_debug_artifacts warn_unreachable xs)
         | "--goalfrag" :: _ =>
             raise Error "--goalfrag has been removed; proof steps are enabled by default"
         | "--new-ir" :: xs =>
             (warn "--new-ir is deprecated and has no effect; proof IR is the default";
-             loop dry force use_cache skip_checkpoints goalfrag true tactic_timeout tactic_timeout_set goalfrag_plan goalfrag_trace repl_on_failure retain_debug_artifacts warn_unreachable xs)
+             loop dry force use_cache skip_checkpoints proof_steps true tactic_timeout tactic_timeout_set execution_plan trace_steps repl_on_failure retain_debug_artifacts warn_unreachable xs)
         | "--goalfrag-plan" :: _ => raise Error "--goalfrag-plan has been removed; use execution-plan THEORY:THEOREM"
         | "--trace-steps" :: xs =>
-            loop dry force use_cache skip_checkpoints goalfrag new_ir tactic_timeout tactic_timeout_set goalfrag_plan true repl_on_failure retain_debug_artifacts warn_unreachable xs
+            loop dry force use_cache skip_checkpoints proof_steps new_ir tactic_timeout tactic_timeout_set execution_plan true repl_on_failure retain_debug_artifacts warn_unreachable xs
         | "--goalfrag-trace" :: xs =>
             (warn "--goalfrag-trace is deprecated; use --trace-steps";
-             loop dry force use_cache skip_checkpoints goalfrag new_ir tactic_timeout tactic_timeout_set goalfrag_plan true repl_on_failure retain_debug_artifacts warn_unreachable xs)
+             loop dry force use_cache skip_checkpoints proof_steps new_ir tactic_timeout tactic_timeout_set execution_plan true repl_on_failure retain_debug_artifacts warn_unreachable xs)
         | "--repl-on-failure" :: xs =>
-            loop dry force use_cache skip_checkpoints goalfrag new_ir tactic_timeout tactic_timeout_set goalfrag_plan goalfrag_trace true retain_debug_artifacts warn_unreachable xs
+            loop dry force use_cache skip_checkpoints proof_steps new_ir tactic_timeout tactic_timeout_set execution_plan trace_steps true retain_debug_artifacts warn_unreachable xs
         | "--retain-debug-artifacts" :: xs =>
-            loop dry force use_cache skip_checkpoints goalfrag new_ir tactic_timeout tactic_timeout_set goalfrag_plan goalfrag_trace repl_on_failure true warn_unreachable xs
+            loop dry force use_cache skip_checkpoints proof_steps new_ir tactic_timeout tactic_timeout_set execution_plan trace_steps repl_on_failure true warn_unreachable xs
         | "--warn-unreachable" :: xs =>
-            loop dry force use_cache skip_checkpoints goalfrag new_ir tactic_timeout tactic_timeout_set goalfrag_plan goalfrag_trace repl_on_failure retain_debug_artifacts true xs
+            loop dry force use_cache skip_checkpoints proof_steps new_ir tactic_timeout tactic_timeout_set execution_plan trace_steps repl_on_failure retain_debug_artifacts true xs
         | "--tactic-timeout" :: seconds :: xs =>
-            loop dry force use_cache skip_checkpoints goalfrag new_ir (tactic_timeout_value seconds) true goalfrag_plan goalfrag_trace repl_on_failure retain_debug_artifacts warn_unreachable xs
+            loop dry force use_cache skip_checkpoints proof_steps new_ir (tactic_timeout_value seconds) true execution_plan trace_steps repl_on_failure retain_debug_artifacts warn_unreachable xs
         | "--tactic-timeout" :: [] => raise Error "--tactic-timeout requires SECONDS"
         | x :: xs =>
             if String.isPrefix "--force=" x then
-              loop dry (force_level_value (String.extract (x, size "--force=", NONE))) use_cache skip_checkpoints goalfrag new_ir tactic_timeout tactic_timeout_set goalfrag_plan goalfrag_trace repl_on_failure retain_debug_artifacts warn_unreachable xs
+              loop dry (force_level_value (String.extract (x, size "--force=", NONE))) use_cache skip_checkpoints proof_steps new_ir tactic_timeout tactic_timeout_set execution_plan trace_steps repl_on_failure retain_debug_artifacts warn_unreachable xs
             else if String.isPrefix "--tactic-timeout=" x then
-              loop dry force use_cache skip_checkpoints goalfrag new_ir
+              loop dry force use_cache skip_checkpoints proof_steps new_ir
                    (tactic_timeout_value (String.extract (x, size "--tactic-timeout=", NONE)))
-                   true goalfrag_plan goalfrag_trace repl_on_failure retain_debug_artifacts warn_unreachable xs
+                   true execution_plan trace_steps repl_on_failure retain_debug_artifacts warn_unreachable xs
             else if String.isPrefix "--goalfrag-plan=" x then
               raise Error "--goalfrag-plan has been removed; use execution-plan THEORY:THEOREM"
             else if String.isPrefix "--trace-steps=" x then
@@ -127,7 +127,7 @@ fun split_flags args =
             else if String.isPrefix "--" x then
               raise Error ("unknown build option: " ^ x)
             else
-              let val (flags, ys) = loop dry force use_cache skip_checkpoints goalfrag new_ir tactic_timeout tactic_timeout_set goalfrag_plan goalfrag_trace repl_on_failure retain_debug_artifacts warn_unreachable xs
+              let val (flags, ys) = loop dry force use_cache skip_checkpoints proof_steps new_ir tactic_timeout tactic_timeout_set execution_plan trace_steps repl_on_failure retain_debug_artifacts warn_unreachable xs
               in (flags, x :: ys) end
   in
     loop false HolbuildBuildExec.ForceNone true false true true NONE false NONE false false false false args
@@ -199,7 +199,7 @@ fun theory_source source = #kind source = HolbuildSourceIndex.TheoryScript
 fun describe_source source =
   #package source ^ ":" ^ #relative_path source ^ " (" ^ #logical_name source ^ ")"
 
-fun parse_goalfrag_selector selector =
+fun parse_execution_plan_selector selector =
   case String.fields (fn c => c = #":") selector of
       [theory, theorem] =>
         if theory = "" orelse theorem = "" then
@@ -244,44 +244,87 @@ fun run_analyser_for_proof_ir_text {name, tactic_start, tactic_end, tactic_text}
           val _ = OS.FileSys.remove resp handle OS.SysErr _ => ()
         in text end
 
-fun bool_field "1" = true
-  | bool_field "0" = false
-  | bool_field s = raise Error ("bad proof-ir boolean field: " ^ s)
-
-fun phase_field "start" = HolbuildProofIr.BranchStart
-  | phase_field "suffix" = HolbuildProofIr.BranchSuffix
-  | phase_field "close" = HolbuildProofIr.BranchClose
-  | phase_field s = raise Error ("bad proof-ir branch phase: " ^ s)
-
 fun int_field s =
   case Int.fromString s of SOME n => n | NONE => raise Error ("bad proof-ir integer field: " ^ s)
 
-fun parse_proof_step fields =
-  case fields of
-      ["proof-step", "tactic", a, b, label, program] =>
-        HolbuildProofIr.StepTactic {start_pos = int_field a, end_pos = int_field b, label = label, program = program}
-    | ["proof-step", "list", a, b, label, program] =>
-        HolbuildProofIr.StepList {start_pos = int_field a, end_pos = int_field b, label = label, program = program}
-    | "proof-step" :: "choice" :: a :: b :: label :: program :: alternatives =>
-        HolbuildProofIr.StepChoice {start_pos = int_field a, end_pos = int_field b, label = label, program = program, alternatives = alternatives}
-    | "proof-step" :: "list-choice" :: a :: b :: label :: program :: alternatives =>
-        HolbuildProofIr.StepListChoice {start_pos = int_field a, end_pos = int_field b, label = label, program = program, alternatives = alternatives}
-    | ["proof-step", "then1", a, b, label, list_suffix, first_label, first_program, second_program] =>
-        HolbuildProofIr.StepThen1 {start_pos = int_field a, end_pos = int_field b, label = label,
-                                   list_suffix = bool_field list_suffix, first_label = first_label,
-                                   first_program = first_program, second_program = second_program}
-    | ["proof-step", "gentle-then1", a, b, label, list_suffix, first_program, second_program] =>
-        HolbuildProofIr.StepGentleThen1 {start_pos = int_field a, end_pos = int_field b, label = label,
-                                         list_suffix = bool_field list_suffix,
-                                         first_program = first_program, second_program = second_program}
-    | ["proof-step", "branch", a, b, label, program, phase] =>
-        HolbuildProofIr.StepBranch {start_pos = int_field a, end_pos = int_field b, label = label, program = program,
-                                    phase = phase_field phase}
-    | ["proof-step", "branch-list", a, b, label, program] =>
-        HolbuildProofIr.StepBranchList {start_pos = int_field a, end_pos = int_field b, label = label, program = program}
-    | ["proof-step", "plain", a, b, label, program] =>
-        HolbuildProofIr.StepPlain {start_pos = int_field a, end_pos = int_field b, label = label, program = program}
-    | _ => raise Error ("bad proof-ir step response")
+fun parse_selector ["first"] = HolbuildProofIr.SelectFirst
+  | parse_selector ["matching-first", pats] = HolbuildProofIr.SelectMatchingFirst pats
+  | parse_selector ["matching-all", pats] = HolbuildProofIr.SelectMatchingAll pats
+  | parse_selector _ = raise Error "bad proof-ir selector"
+
+fun parse_mode "solve" = HolbuildProofIr.SelectSolve
+  | parse_mode "keep" = HolbuildProofIr.SelectKeep
+  | parse_mode s = raise Error ("bad proof-ir select mode: " ^ s)
+
+fun parse_proof_steps fieldss =
+  let
+    fun parse_body stops rest acc =
+      case rest of
+          [] => if List.exists (fn s => s = "end") stops then raise Error "unterminated proof-ir block" else (rev acc, [])
+        | fields :: more =>
+            (case fields of
+                 ["proof-step", "end"] =>
+                   if List.exists (fn s => s = "end") stops then
+                     if List.exists (fn s => s = "case" orelse s = "alternative") stops then (rev acc, rest)
+                     else (rev acc, more)
+                   else raise Error "proof-ir end outside block"
+               | ["proof-step", "case", _] =>
+                   if List.exists (fn s => s = "case") stops then (rev acc, rest)
+                   else raise Error "proof-ir case outside cases"
+               | ["proof-step", "alternative", _] =>
+                   if List.exists (fn s => s = "alternative") stops then (rev acc, rest)
+                   else raise Error "proof-ir alternative outside choice"
+               | ["proof-step", "step", a, b, label, program] =>
+                   parse_body stops more (HolbuildProofIr.StepTactic {start_pos = int_field a, end_pos = int_field b, label = label, program = program} :: acc)
+               | ["proof-step", "list-step", a, b, label, program] =>
+                   parse_body stops more (HolbuildProofIr.StepList {start_pos = int_field a, end_pos = int_field b, label = label, program = program} :: acc)
+               | ["proof-step", "each", a, b] =>
+                   let val (body, rest') = parse_body ["end"] more []
+                   in parse_body stops rest' (HolbuildProofIr.StepEach {start_pos = int_field a, end_pos = int_field b, body = body} :: acc) end
+               | "proof-step" :: "select" :: a :: b :: restfields =>
+                   let
+                     val (sel_fields, mode_text) =
+                       case restfields of
+                           [sel, mode] => ([sel], mode)
+                         | [sel, pats, mode] => ([sel, pats], mode)
+                         | _ => raise Error "bad proof-ir select response"
+                     val (body, rest') = parse_body ["end"] more []
+                   in parse_body stops rest' (HolbuildProofIr.StepSelect {start_pos = int_field a, end_pos = int_field b, selector = parse_selector sel_fields, mode = parse_mode mode_text, body = body} :: acc) end
+               | ["proof-step", "cases", a, b] =>
+                   let
+                     fun parse_cases n rest cases =
+                       (case rest of
+                            ["proof-step", "end"] :: more' => (rev cases, more')
+                          | ["proof-step", "case", k] :: more' =>
+                              if int_field k <> n then raise Error "proof-ir case ordering error"
+                              else let val (body, rest'') = parse_body ["case", "end"] more' []
+                                   in parse_cases (n + 1) rest'' (body :: cases) end
+                          | _ => raise Error "bad proof-ir cases block")
+                     val (cases, rest') = parse_cases 1 more []
+                   in parse_body stops rest' (HolbuildProofIr.StepCases {start_pos = int_field a, end_pos = int_field b, cases = cases} :: acc) end
+               | ["proof-step", "choice", a, b, label] =>
+                   let
+                     fun parse_alts n rest alts =
+                       (case rest of
+                            ["proof-step", "end"] :: more' => (rev alts, more')
+                          | ["proof-step", "alternative", k] :: more' =>
+                              if int_field k <> n then raise Error "proof-ir alternative ordering error"
+                              else let val (body, rest'') = parse_body ["alternative", "end"] more' []
+                                   in parse_alts (n + 1) rest'' (body :: alts) end
+                          | _ => raise Error "bad proof-ir choice block")
+                     val (alts, rest') = parse_alts 1 more []
+                   in parse_body stops rest' (HolbuildProofIr.StepChoice {start_pos = int_field a, end_pos = int_field b, label = label, alternatives = alts} :: acc) end
+               | ["proof-step", "repeat", a, b] =>
+                   let val (body, rest') = parse_body ["end"] more []
+                   in parse_body stops rest' (HolbuildProofIr.StepRepeat {start_pos = int_field a, end_pos = int_field b, body = body} :: acc) end
+               | ["proof-step", "try", a, b] =>
+                   let val (body, rest') = parse_body ["end"] more []
+                   in parse_body stops rest' (HolbuildProofIr.StepTry {start_pos = int_field a, end_pos = int_field b, body = body} :: acc) end
+               | _ => raise Error "bad proof-ir step response")
+    val (steps, rest) = parse_body [] fieldss []
+  in
+    case rest of [] => steps | _ => raise Error "unexpected proof-ir parser residue"
+  end
 
 fun analyser_proof_ir_plan_for_boundary (boundary : HolbuildTheoryCheckpoints.boundary) =
   let
@@ -295,9 +338,9 @@ fun analyser_proof_ir_plan_for_boundary (boundary : HolbuildTheoryCheckpoints.bo
         | line :: more =>
             (case HolbuildAnalysisProtocol.split line of
                  ["begin-proof-ir", "0", _, _, _, _] => loop more true [] found
-               | ["end-proof-ir", "0"] => loop more false [] (SOME (rev acc))
+               | ["end-proof-ir", "0"] => loop more false [] (SOME (parse_proof_steps (rev acc)))
                | fields as "proof-step" :: _ =>
-                   if active then loop more active (parse_proof_step fields :: acc) found
+                   if active then loop more active (fields :: acc) found
                    else loop more active acc found
                | _ => loop more active acc found)
   in
@@ -306,7 +349,7 @@ fun analyser_proof_ir_plan_for_boundary (boundary : HolbuildTheoryCheckpoints.bo
       | NONE => raise Error ("proof-IR plan missing for execution-plan theorem: " ^ name)
   end
 
-fun print_static_goalfrag_plan project new_ir source theorem boundary_opt =
+fun print_static_execution_plan project new_ir source theorem boundary_opt =
   (print (let val plan = analyser_proof_ir_plan_for_boundary (case boundary_opt of SOME b => b | NONE => raise Error "internal error: missing proof-IR boundary")
           in
             "holbuild proof-ir plan " ^ #logical_name source ^ ":" ^ theorem ^ " source=" ^ #relative_path source ^
@@ -327,13 +370,13 @@ fun find_theorem_in_source theorem source =
       SOME (_, boundary) => boundary
     | NONE => raise Error ("theorem not found for execution-plan: " ^ #logical_name source ^ ":" ^ theorem)
 
-fun print_goalfrag_plan_selector new_ir project selector =
+fun print_execution_plan_selector new_ir project selector =
   let
-    val {theory, theorem} = parse_goalfrag_selector selector
+    val {theory, theorem} = parse_execution_plan_selector selector
     val index = HolbuildSourceIndex.discover project
     val source = find_theory_source index theory
   in
-    print_static_goalfrag_plan project new_ir source theorem (SOME (find_theorem_in_source theorem source))
+    print_static_execution_plan project new_ir source theorem (SOME (find_theorem_in_source theorem source))
   end
 
 fun positive_int label text =
@@ -437,15 +480,15 @@ fun configure_analyser_for_toolchain ({holdir, ...} : HolbuildToolchain.t) =
 fun build tc cli_jobs args =
   let
     val project = timed_phase "project.discover" load_project
-    val ({dry_run, force, use_cache, skip_checkpoints, goalfrag, new_ir, tactic_timeout, tactic_timeout_set, goalfrag_plan, goalfrag_trace, repl_on_failure, retain_debug_artifacts, warn_unreachable}, targets) = split_flags args
+    val ({dry_run, force, use_cache, skip_checkpoints, proof_steps, new_ir, tactic_timeout, tactic_timeout_set, execution_plan, trace_steps, repl_on_failure, retain_debug_artifacts, warn_unreachable}, targets) = split_flags args
     val _ = HolbuildStatus.set_retain_debug_artifacts retain_debug_artifacts
     val jobs = if repl_on_failure then 1 else effective_jobs project cli_jobs
     val _ =
       if HolbuildStatus.json_mode () andalso dry_run then
         raise Error "--json does not support build --dry-run yet"
-      else if HolbuildStatus.json_mode () andalso goalfrag_trace then
+      else if HolbuildStatus.json_mode () andalso trace_steps then
         raise Error "--json does not support --trace-steps until structured proof-step trace events exist"
-      else if dry_run andalso goalfrag_trace then
+      else if dry_run andalso trace_steps then
         raise Error "--trace-steps requires build execution; use --force to inspect up-to-date targets"
       else if dry_run andalso repl_on_failure then
         raise Error "--repl-on-failure requires build execution"
@@ -453,13 +496,13 @@ fun build tc cli_jobs args =
         raise Error "--json does not support --repl-on-failure"
       else if skip_checkpoints andalso repl_on_failure then
         raise Error "--repl-on-failure requires checkpoints; remove --skip-checkpoints"
-      else if not goalfrag andalso new_ir then
+      else if not proof_steps andalso new_ir then
         raise Error "proof steps are required for proof IR; remove --skip-proof-steps"
-      else if not goalfrag andalso tactic_timeout_set then
+      else if not proof_steps andalso tactic_timeout_set then
         raise Error "--tactic-timeout requires proof steps; remove --skip-proof-steps"
-      else if not goalfrag andalso goalfrag_trace then
+      else if not proof_steps andalso trace_steps then
         raise Error "--trace-steps requires proof steps; remove --skip-proof-steps"
-      else if not goalfrag andalso repl_on_failure then
+      else if not proof_steps andalso repl_on_failure then
         raise Error "--repl-on-failure requires proof steps; remove --skip-proof-steps"
       else ()
     fun default_tactic_timeout () =
@@ -471,13 +514,13 @@ fun build tc cli_jobs args =
        force = force,
        force_targets = force_targets,
        skip_checkpoints = skip_checkpoints,
-       goalfrag = goalfrag,
+       proof_steps = proof_steps,
        new_ir = new_ir,
        node_tactic_timeouts =
          if tactic_timeout_set then HolbuildTacticTimeoutPolicy.plan_timeouts project plan tactic_timeout
          else HolbuildTacticTimeoutPolicy.entry_timeouts project index entry_plan (default_tactic_timeout ()),
-       goalfrag_plan = goalfrag_plan,
-       goalfrag_trace = goalfrag_trace,
+       execution_plan = execution_plan,
+       trace_steps = trace_steps,
        repl_on_failure = repl_on_failure}
     fun prepare_plan () =
       let
@@ -565,7 +608,7 @@ fun build_heap tc cli_jobs target =
         val toolchain_key = timed_phase "toolchain.key" (fn () => HolbuildToolchain.toolchain_key tc)
         val output_path = HolbuildProject.abs_under (#root project) output
       in
-        HolbuildBuildExec.build {use_cache = true, force = HolbuildBuildExec.ForceNone, force_targets = [], skip_checkpoints = false, goalfrag = true, new_ir = true, node_tactic_timeouts = HolbuildTacticTimeoutPolicy.entry_timeouts project index plan (SOME 2.5), goalfrag_plan = NONE, goalfrag_trace = false, repl_on_failure = false}
+        HolbuildBuildExec.build {use_cache = true, force = HolbuildBuildExec.ForceNone, force_targets = [], skip_checkpoints = false, proof_steps = true, new_ir = true, node_tactic_timeouts = HolbuildTacticTimeoutPolicy.entry_timeouts project index plan (SOME 2.5), execution_plan = NONE, trace_steps = false, repl_on_failure = false}
                                tc project plan toolchain_key jobs;
         HolbuildBuildExec.export_heap tc project plan output_path
       end
@@ -600,13 +643,13 @@ fun run_hol tc subcommand user_args =
 fun repl_hol tc user_args =
   run_hol_with HolbuildToolchain.run_interactive tc "repl" user_args
 
-fun goalfrag_plan_command _ _ =
+fun removed_legacy_plan_command _ _ =
   raise Error "goalfrag-plan has been removed; use execution-plan THEORY:THEOREM"
 
 fun execution_plan_command tc args =
   (configure_analyser_for_toolchain tc;
    case args of
-       [selector] => print_goalfrag_plan_selector true (load_project ()) selector
+       [selector] => print_execution_plan_selector true (load_project ()) selector
      | _ => raise Error "usage: holbuild execution-plan THEORY:THEOREM")
 
 fun reject_json command =
@@ -619,7 +662,7 @@ fun dispatch tc jobs args =
       [] => (reject_json "context"; context ())
     | "context" :: [] => (reject_json "context"; context ())
     | "execution-plan" :: rest => (reject_json "execution-plan"; execution_plan_command tc rest)
-    | "goalfrag-plan" :: rest => goalfrag_plan_command tc rest
+    | "goalfrag-plan" :: rest => removed_legacy_plan_command tc rest
     | "build" :: rest => build tc jobs rest
     | "clean" :: rest => (reject_json "clean"; clean_targets rest)
     | "heap" :: [target] => (reject_json "heap"; build_heap tc jobs target)
@@ -715,7 +758,7 @@ fun buildhol holdir maxheap =
     print (holdir ^ "\n")
   end
 
-fun removed_goalfrag_build_arg arg =
+fun removed_legacy_proof_step_build_arg arg =
   arg = "--goalfrag" orelse arg = "--goalfrag-plan" orelse String.isPrefix "--goalfrag-plan=" arg
 
 fun trace_steps_build_arg arg = arg = "--trace-steps" orelse arg = "--goalfrag-trace"
@@ -732,8 +775,8 @@ fun dispatch_with_options {holdir, source_dir, cache_dir, jobs, maxheap, json, v
      | "buildhol" :: [] => buildhol holdir maxheap
      | "goalfrag-plan" :: _ => raise Error "goalfrag-plan has been removed; use execution-plan THEORY:THEOREM"
      | "build" :: rest =>
-         if List.exists removed_goalfrag_build_arg rest then
-           (case List.find removed_goalfrag_build_arg rest of
+         if List.exists removed_legacy_proof_step_build_arg rest then
+           (case List.find removed_legacy_proof_step_build_arg rest of
                 SOME "--goalfrag" => raise Error "--goalfrag has been removed; proof steps are enabled by default"
               | SOME _ => raise Error "--goalfrag-plan has been removed; use execution-plan THEORY:THEOREM"
               | NONE => dispatch (effective_toolchain holdir maxheap) jobs args)

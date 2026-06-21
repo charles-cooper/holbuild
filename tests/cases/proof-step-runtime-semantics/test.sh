@@ -12,40 +12,6 @@ cleanup() { rm -rf "$tmpdir"; }
 trap cleanup EXIT
 use_case_cache "$tmpdir/cache"
 
-project=$tmpdir/project
-mkdir -p "$project/src"
-cat > "$project/holproject.toml" <<TOML
-[holbuild]
-schema = 2
-
-[dependencies.hol]
-git = "https://github.com/HOL-Theorem-Prover/HOL.git"
-rev = "$(holbuild_pinned_hol_rev)"
-
-[project]
-name = "removed-goalfrag-runtime"
-
-[build]
-members = ["src"]
-TOML
-cat > "$project/src/AScript.sml" <<'SML'
-open HolKernel Parse boolLib bossLib;
-val _ = new_theory "A";
-Theorem simple:
-  T
-Proof
-  ACCEPT_TAC TRUTH
-QED
-val _ = export_theory();
-SML
-
-log=$tmpdir/goalfrag.log
-if (cd "$project" && "$HOLBUILD_BIN" build --goalfrag ATheory) > "$log" 2>&1; then
-  echo "expected removed --goalfrag option to fail" >&2
-  exit 1
-fi
-require_grep "goalfrag has been removed; proof steps are enabled by default" "$log"
-
 make_project() {
   local p=$1
   local name=$2
@@ -100,6 +66,18 @@ Theorem select_then1_nested_body:
   T /\ T
 Proof
   CONJ_TAC >>~- ([`T`], sg `T` >- ACCEPT_TAC TRUTH >> ACCEPT_TAC TRUTH)
+QED
+
+Theorem select_goal_keep:
+  T /\ T
+Proof
+  CONJ_TAC >~ [`T`] >> ACCEPT_TAC TRUTH
+QED
+
+Theorem select_goals_keep:
+  T /\ T
+Proof
+  CONJ_TAC >>~ [`T`] >> ACCEPT_TAC TRUTH
 QED
 
 Theorem no_lt_orelse:
@@ -163,6 +141,18 @@ val _ = export_theory();
 SML
 (cd "$runtime_project" && HOLBUILD_ECHO_CHILD_LOGS=1 "$HOLBUILD_BIN" build --skip-checkpoints --tactic-timeout 60) > "$tmpdir/runtime.out" 2>&1
 require_file "$runtime_project/.holbuild/obj/src/ATheory.dat"
+(cd "$runtime_project" && "$HOLBUILD_BIN" execution-plan ATheory:select_then1_nested_body) > "$tmpdir/select_then1_nested_body.plan.out" 2>&1
+require_grep 'select matching-all \[`T`\] solve' "$tmpdir/select_then1_nested_body.plan.out"
+require_grep 'step sg `T`' "$tmpdir/select_then1_nested_body.plan.out"
+require_grep 'select first solve' "$tmpdir/select_then1_nested_body.plan.out"
+if grep -q 'Q.SELECT_GOALS_LT_THEN1' "$tmpdir/select_then1_nested_body.plan.out"; then
+  echo ">>~- was planned as opaque list-step instead of structural select" >&2
+  exit 1
+fi
+(cd "$runtime_project" && "$HOLBUILD_BIN" execution-plan ATheory:select_goal_keep) > "$tmpdir/select_goal_keep.plan.out" 2>&1
+require_grep 'select matching-first \[`T`\] keep' "$tmpdir/select_goal_keep.plan.out"
+(cd "$runtime_project" && "$HOLBUILD_BIN" execution-plan ATheory:select_goals_keep) > "$tmpdir/select_goals_keep.plan.out" 2>&1
+require_grep 'select matching-all \[`T`\] keep' "$tmpdir/select_goals_keep.plan.out"
 (cd "$runtime_project" && "$HOLBUILD_BIN" execution-plan ATheory:chained_then1_plain) > "$tmpdir/chained_then1.plan.out" 2>&1
 require_grep 'rpt CONJ_TAC' "$tmpdir/chained_then1.plan.out"
 
@@ -207,7 +197,7 @@ if (cd "$repeated_project" && "$HOLBUILD_BIN" build --skip-checkpoints --tactic-
   echo "expected repeated-label proof-step build to fail" >&2
   exit 1
 fi
-require_grep "plan position: 01 list_tactic >> strip_tac" "$tmpdir/repeated-label.out"
+require_grep "plan position: 01 step strip_tac" "$tmpdir/repeated-label.out"
 require_grep "source: .*AScript.sml:7:16-25" "$tmpdir/repeated-label.out"
 if grep -q "source: .*AScript.sml:7:3-12" "$tmpdir/repeated-label.out"; then
   echo "proof-step failure source used first matching label instead of failed step span" >&2
