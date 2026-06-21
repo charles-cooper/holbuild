@@ -466,3 +466,101 @@ if grep -q "from: failed-prefix checkpoint in first_stale_prefix" "$stale_third_
   exit 1
 fi
 require_grep "late non-proof failure edited" "$stale_third_log"
+
+# Regression for unsafe salvage inside structural cases: if the failed-prefix
+# endpoint becomes stale, salvaging to an earlier leaf inside a cases frame must
+# preserve the frame/focus metadata needed to continue in the current case.
+structural_salvage_project=$tmpdir/structural-salvage-project
+structural_salvage_counter=$tmpdir/structural-salvage-count.txt
+mkdir -p "$structural_salvage_project/src"
+touch "$structural_salvage_counter"
+cp "$project/holproject.toml" "$structural_salvage_project/holproject.toml"
+cat > "$structural_salvage_project/src/AScript.sml" <<SML
+open HolKernel Parse boolLib bossLib;
+val _ = new_theory "A";
+val slow_prefix_counter = "$structural_salvage_counter";
+fun bump_counter () =
+  let val out = TextIO.openAppend slow_prefix_counter
+  in TextIO.output(out, "x"); TextIO.closeOut out end;
+fun slow_tac g = (bump_counter(); ALL_TAC g);
+Theorem salvage_inside_cases:
+  T /\\ T
+Proof
+  CONJ_TAC >| [
+    ACCEPT_TAC TRUTH,
+    slow_tac >> ALL_TAC >> FAIL_TAC "structural salvage old suffix"
+  ]
+QED
+val _ = export_theory();
+SML
+structural_salvage_first_log=$tmpdir/structural-salvage-first.log
+if (cd "$structural_salvage_project" && "$HOLBUILD_BIN" build ATheory) > "$structural_salvage_first_log" 2>&1; then
+  echo "expected structural salvage seed to fail" >&2
+  exit 1
+fi
+structural_salvage_first_count=$(wc -c < "$structural_salvage_counter" | tr -d ' ')
+[[ "$structural_salvage_first_count" = "1" ]] || { echo "expected structural salvage seed to run slow_tac once, got $structural_salvage_first_count" >&2; exit 1; }
+require_grep 'structural salvage old suffix' "$structural_salvage_first_log"
+python3 - <<PY
+from pathlib import Path
+path = Path("$structural_salvage_project/src/AScript.sml")
+path.write_text(path.read_text().replace('slow_tac >> ALL_TAC >> FAIL_TAC "structural salvage old suffix"',
+                                      'slow_tac >> FAIL_TAC "structural salvage edited suffix"'))
+PY
+structural_salvage_second_log=$tmpdir/structural-salvage-second.log
+if (cd "$structural_salvage_project" && "$HOLBUILD_BIN" build ATheory) > "$structural_salvage_second_log" 2>&1; then
+  echo "expected structural salvage edited proof to fail" >&2
+  exit 1
+fi
+structural_salvage_second_count=$(wc -c < "$structural_salvage_counter" | tr -d ' ')
+[[ "$structural_salvage_second_count" = "1" ]] || { echo "structural failed-prefix salvage reran unchanged case leaf; count $structural_salvage_second_count" >&2; exit 1; }
+require_grep "from: failed-prefix checkpoint in salvage_inside_cases" "$structural_salvage_second_log"
+require_grep 'structural salvage edited suffix' "$structural_salvage_second_log"
+if grep -q "case count mismatch\|structural frame mismatch\|focus close without active focus" "$structural_salvage_second_log"; then
+  echo "structural failed-prefix salvage lost cases frame/focus state" >&2
+  exit 1
+fi
+
+# Regression for overly-permissive salvage: a leaf with the same path/program but
+# a changed source end should not be silently reused as a valid checkpoint prefix.
+source_end_salvage_project=$tmpdir/source-end-salvage-project
+source_end_salvage_counter=$tmpdir/source-end-salvage-count.txt
+mkdir -p "$source_end_salvage_project/src"
+touch "$source_end_salvage_counter"
+cp "$project/holproject.toml" "$source_end_salvage_project/holproject.toml"
+cat > "$source_end_salvage_project/src/AScript.sml" <<SML
+open HolKernel Parse boolLib bossLib;
+val _ = new_theory "A";
+val slow_prefix_counter = "$source_end_salvage_counter";
+fun bump_counter () =
+  let val out = TextIO.openAppend slow_prefix_counter
+  in TextIO.output(out, "x"); TextIO.closeOut out end;
+fun slow_tac g = (bump_counter(); ALL_TAC g);
+Theorem source_end_salvage:
+  T
+Proof
+  slow_tac >> FAIL_TAC "source-end old suffix"
+QED
+val _ = export_theory();
+SML
+source_end_salvage_first_log=$tmpdir/source-end-salvage-first.log
+if (cd "$source_end_salvage_project" && "$HOLBUILD_BIN" build ATheory) > "$source_end_salvage_first_log" 2>&1; then
+  echo "expected source-end salvage seed to fail" >&2
+  exit 1
+fi
+source_end_salvage_first_count=$(wc -c < "$source_end_salvage_counter" | tr -d ' ')
+[[ "$source_end_salvage_first_count" = "1" ]] || { echo "expected source-end seed to run slow_tac once, got $source_end_salvage_first_count" >&2; exit 1; }
+python3 - <<PY
+from pathlib import Path
+path = Path("$source_end_salvage_project/src/AScript.sml")
+path.write_text(path.read_text().replace('slow_tac >> FAIL_TAC "source-end old suffix"',
+                                      '   slow_tac >> FAIL_TAC "source-end edited suffix"'))
+PY
+source_end_salvage_second_log=$tmpdir/source-end-salvage-second.log
+if (cd "$source_end_salvage_project" && "$HOLBUILD_BIN" build ATheory) > "$source_end_salvage_second_log" 2>&1; then
+  echo "expected source-end edited proof to fail" >&2
+  exit 1
+fi
+source_end_salvage_second_count=$(wc -c < "$source_end_salvage_counter" | tr -d ' ')
+[[ "$source_end_salvage_second_count" = "2" ]] || { echo "source-end changed leaf was incorrectly salvaged without rerunning; count $source_end_salvage_second_count" >&2; exit 1; }
+require_grep 'source-end edited suffix' "$source_end_salvage_second_log"
