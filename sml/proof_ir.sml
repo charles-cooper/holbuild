@@ -505,6 +505,7 @@ and needs_each_suffix tactic =
   case tactic of
       TacThen xs => List.exists needs_each_suffix xs
     | TacThen1 _ => true
+    | TacThenL _ => true
     | TacSufficesBy _ => true
     | TacTry _ => true
     | TacOrelse _ => true
