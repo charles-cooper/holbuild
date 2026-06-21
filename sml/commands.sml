@@ -643,7 +643,7 @@ fun run_hol tc subcommand user_args =
 fun repl_hol tc user_args =
   run_hol_with HolbuildToolchain.run_interactive tc "repl" user_args
 
-fun removed_goalfrag_plan_command _ _ =
+fun removed_legacy_plan_command _ _ =
   raise Error "goalfrag-plan has been removed; use execution-plan THEORY:THEOREM"
 
 fun execution_plan_command tc args =
@@ -662,7 +662,7 @@ fun dispatch tc jobs args =
       [] => (reject_json "context"; context ())
     | "context" :: [] => (reject_json "context"; context ())
     | "execution-plan" :: rest => (reject_json "execution-plan"; execution_plan_command tc rest)
-    | "goalfrag-plan" :: rest => removed_goalfrag_plan_command tc rest
+    | "goalfrag-plan" :: rest => removed_legacy_plan_command tc rest
     | "build" :: rest => build tc jobs rest
     | "clean" :: rest => (reject_json "clean"; clean_targets rest)
     | "heap" :: [target] => (reject_json "heap"; build_heap tc jobs target)
@@ -758,7 +758,7 @@ fun buildhol holdir maxheap =
     print (holdir ^ "\n")
   end
 
-fun removed_goalfrag_build_arg arg =
+fun removed_legacy_proof_step_build_arg arg =
   arg = "--goalfrag" orelse arg = "--goalfrag-plan" orelse String.isPrefix "--goalfrag-plan=" arg
 
 fun trace_steps_build_arg arg = arg = "--trace-steps" orelse arg = "--goalfrag-trace"
@@ -775,8 +775,8 @@ fun dispatch_with_options {holdir, source_dir, cache_dir, jobs, maxheap, json, v
      | "buildhol" :: [] => buildhol holdir maxheap
      | "goalfrag-plan" :: _ => raise Error "goalfrag-plan has been removed; use execution-plan THEORY:THEOREM"
      | "build" :: rest =>
-         if List.exists removed_goalfrag_build_arg rest then
-           (case List.find removed_goalfrag_build_arg rest of
+         if List.exists removed_legacy_proof_step_build_arg rest then
+           (case List.find removed_legacy_proof_step_build_arg rest of
                 SOME "--goalfrag" => raise Error "--goalfrag has been removed; proof steps are enabled by default"
               | SOME _ => raise Error "--goalfrag-plan has been removed; use execution-plan THEORY:THEOREM"
               | NONE => dispatch (effective_toolchain holdir maxheap) jobs args)
