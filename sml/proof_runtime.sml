@@ -776,6 +776,24 @@ fun reorder_focused_front_after label front_count middle_count =
         in (middle @ front @ tail, validate) end
     in apply_focus_list_tactic label reorder end
 
+fun restore_focused_group_order label lengths =
+  case List.filter (fn n => n <> 0) lengths of
+      [] => ()
+    | [_] => ()
+    | nonzero_lengths =>
+        let
+          val reversed_lengths = rev nonzero_lengths
+          fun reorder goals =
+            let
+              val (reversed_groups, tail) = split_by_lengths reversed_lengths goals
+              val groups = rev reversed_groups
+              fun validate thms =
+                let
+                  val (normal_groups, tail_thms) = split_by_lengths nonzero_lengths thms
+                in List.concat (rev normal_groups) @ tail_thms end
+            in (List.concat groups @ tail, validate) end
+        in apply_focus_list_tactic label reorder end
+
 fun step proof_step =
   case proof_step of
       HolbuildProofIr.StepTactic {label, program, ...} => apply_tactic_step label program
@@ -1056,14 +1074,15 @@ fun run_structural_steps_with_resume resume_after_path display_index steps =
                   let val generated = focused_goal_count "each"
                   in if entering_from_resume then () else pop_structural_frame frame "each";
                      close_focus "each" HolbuildProofIr.SelectKeep;
-                     reorder_focused_front_after "each" generated (remaining - 1)
+                     reorder_focused_front_after "each" generated (remaining - 1);
+                     generated
                   end
           end
-        fun loop _ 0 = ()
-          | loop iter remaining = (run_one_each iter remaining; loop (iter + 1) (remaining - 1))
-      in case resume_frame of
-             SOME (EachFrame (_, iter, remaining)) => loop iter remaining
-           | _ => loop 0 count;
+        fun loop _ 0 acc = rev acc
+          | loop iter remaining acc = loop (iter + 1) (remaining - 1) (run_one_each iter remaining :: acc)
+      in (case resume_frame of
+              SOME (EachFrame (_, iter, remaining)) => restore_focused_group_order "each" (loop iter remaining [])
+            | _ => restore_focused_group_order "each" (loop 0 count []));
          d + HolbuildProofIr.display_line_count proof_step end)
     and run_cases d path proof_step cases =
       skip_or_enter_structural d path proof_step (fn () =>
@@ -1094,7 +1113,8 @@ fun run_structural_steps_with_resume resume_after_path display_index steps =
                   let val generated = focused_goal_count label
                   in if entering_from_resume then () else pop_structural_frame frame label;
                      close_focus label HolbuildProofIr.SelectKeep;
-                     reorder_focused_front_after label generated (remaining - 1)
+                     reorder_focused_front_after label generated (remaining - 1);
+                     generated
                   end
           end
         fun drop_cases 1 xs = xs
@@ -1106,13 +1126,13 @@ fun run_structural_steps_with_resume resume_after_path display_index steps =
                     if n = target then j
                     else loop (n + 1) (j + 1 + HolbuildProofIr.display_line_count_list body) rest
           in loop 1 (d + 1) cases end
-        fun loop _ _ _ [] = ()
-          | loop n remaining case_line (body :: rest) =
-              (run_one_case (case_line + 1) n remaining body;
-               loop (n + 1) (remaining - 1) (case_line + 1 + HolbuildProofIr.display_line_count_list body) rest)
-      in case resume_frame of
-             SOME (CaseFrame (_, n, remaining)) => loop n remaining (case_line_index n) (drop_cases n cases)
-           | _ => loop 1 count (d + 1) cases;
+        fun loop _ _ _ [] acc = rev acc
+          | loop n remaining case_line (body :: rest) acc =
+              loop (n + 1) (remaining - 1) (case_line + 1 + HolbuildProofIr.display_line_count_list body) rest
+                   (run_one_case (case_line + 1) n remaining body :: acc)
+      in (case resume_frame of
+              SOME (CaseFrame (_, n, remaining)) => restore_focused_group_order "cases" (loop n remaining (case_line_index n) (drop_cases n cases) [])
+            | _ => restore_focused_group_order "cases" (loop 1 count (d + 1) cases []));
          d + HolbuildProofIr.display_line_count proof_step end)
     and run_choice d path proof_step label alternatives =
       skip_or_enter_structural d path proof_step (fn () =>
