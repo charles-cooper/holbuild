@@ -102,6 +102,27 @@ Proof
   ACCEPT_TAC TRUTH
 QED
 
+Theorem thenl_cases_preserve_residual_order_success:
+  (T /\ (0 = 0)) /\ ((1 = 1) /\ T)
+Proof
+  CONJ_TAC >| [CONJ_TAC, CONJ_TAC]
+  >- ACCEPT_TAC TRUTH
+  >- REFL_TAC
+  >- REFL_TAC
+  >- ACCEPT_TAC TRUTH
+QED
+
+Theorem each_preserve_residual_order_success:
+  (T /\ (0 = 0)) /\ ((1 = 1) /\ T)
+Proof
+  CONJ_TAC >>
+  CONJ_TAC
+  >- ACCEPT_TAC TRUTH
+  >- REFL_TAC
+  >- REFL_TAC
+  >- ACCEPT_TAC TRUTH
+QED
+
 Theorem repeat_same_goal_count_progress_success:
   !x:num. x = x ==> x = x
 Proof
