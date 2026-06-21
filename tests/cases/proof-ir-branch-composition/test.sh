@@ -53,6 +53,13 @@ Proof
   (CONJ_TAC >- ACCEPT_TAC TRUTH >> ACCEPT_TAC TRUTH)
 QED
 
+Theorem issue60_parenthesized_rhs_plan:
+  (T /\ T) /\ (T /\ T)
+Proof
+  CONJ_TAC >>
+  (CONJ_TAC >- ACCEPT_TAC TRUTH >> ACCEPT_TAC TRUTH)
+QED
+
 Theorem branch_suffix_compound_each_plan:
   ((T /\ T) /\ T) /\ T
 Proof
@@ -126,6 +133,18 @@ EXPECTED
 
 check_plan suffix_compound_each_plan <<'EXPECTED'
 holbuild proof-ir plan BranchTheory:suffix_compound_each_plan source=src/BranchScript.sml (8 steps)
+  00 step CONJ_TAC
+  01 each
+  02   step CONJ_TAC
+  03   select first solve
+  04     step ACCEPT_TAC TRUTH
+  05   end
+  06   step ACCEPT_TAC TRUTH
+  07 end
+EXPECTED
+
+check_plan issue60_parenthesized_rhs_plan <<'EXPECTED'
+holbuild proof-ir plan BranchTheory:issue60_parenthesized_rhs_plan source=src/BranchScript.sml (8 steps)
   00 step CONJ_TAC
   01 each
   02   step CONJ_TAC

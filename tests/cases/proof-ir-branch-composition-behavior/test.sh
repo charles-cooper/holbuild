@@ -58,6 +58,13 @@ Proof
   (CONJ_TAC >- ACCEPT_TAC TRUTH >> ACCEPT_TAC TRUTH)
 QED
 
+Theorem issue60_parenthesized_rhs_success:
+  (T /\ T) /\ (T /\ T)
+Proof
+  CONJ_TAC >>
+  (CONJ_TAC >- ACCEPT_TAC TRUTH >> ACCEPT_TAC TRUTH)
+QED
+
 Theorem suffix_each_leaves_subgoals_success:
   (T /\ T) /\ (T /\ T)
 Proof
