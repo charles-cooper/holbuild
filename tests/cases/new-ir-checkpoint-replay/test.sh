@@ -564,3 +564,43 @@ fi
 source_end_salvage_second_count=$(wc -c < "$source_end_salvage_counter" | tr -d ' ')
 [[ "$source_end_salvage_second_count" = "2" ]] || { echo "source-end changed leaf was incorrectly salvaged without rerunning; count $source_end_salvage_second_count" >&2; exit 1; }
 require_grep 'source-end edited suffix' "$source_end_salvage_second_log"
+
+all_tac_span_project=$tmpdir/all-tac-span-project
+all_tac_span_counter=$tmpdir/all-tac-span-count.txt
+mkdir -p "$all_tac_span_project/src"
+touch "$all_tac_span_counter"
+cp "$project/holproject.toml" "$all_tac_span_project/holproject.toml"
+cat > "$all_tac_span_project/src/AScript.sml" <<SML
+open HolKernel Parse boolLib bossLib;
+val _ = new_theory "A";
+val slow_prefix_counter = "$all_tac_span_counter";
+fun bump_counter () =
+  let val out = TextIO.openAppend slow_prefix_counter
+  in TextIO.output(out, "x"); TextIO.closeOut out end;
+fun slow_tac g = (bump_counter(); ALL_TAC g);
+Theorem all_tac_span_replay:
+  T
+Proof
+  slow_tac >> ALL_TAC >> FAIL_TAC "all-tac span suffix"
+QED
+val _ = export_theory();
+SML
+all_tac_span_log=$tmpdir/all-tac-span.log
+if (cd "$all_tac_span_project" && "$HOLBUILD_BIN" build ATheory) > "$all_tac_span_log" 2>&1; then
+  echo "expected all-tac span proof to fail" >&2
+  exit 1
+fi
+all_tac_span_meta=$(find "$all_tac_span_project/.holbuild/checkpoints" -name '*all_tac_span_replay_failed_prefix.save.meta' -print -quit)
+require_file "$all_tac_span_meta"
+python3 - "$all_tac_span_meta" <<'PY'
+import sys
+from pathlib import Path
+lines = Path(sys.argv[1]).read_text().splitlines()
+all_tac_leaves = [line for line in lines if line.startswith('leaf=') and 'ALL_TAC' in line]
+if not all_tac_leaves:
+    raise SystemExit('failed-prefix metadata did not record the ALL_TAC leaf')
+for line in all_tac_leaves:
+    fields = line[len('leaf='):].split('\t')
+    if len(fields) >= 2 and fields[1] == '0':
+        raise SystemExit(f'ALL_TAC leaf recorded source end 0: {line}')
+PY

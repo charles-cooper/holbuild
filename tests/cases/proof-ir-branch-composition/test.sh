@@ -282,21 +282,21 @@ EXPECTED
 check_plan list_then_all_tac_plan <<'EXPECTED'
 holbuild proof-ir plan BranchTheory:list_then_all_tac_plan source=src/BranchScript.sml (3 steps)
   00 step CONJ_TAC
-  01 list-step Tactical.ALL_LT
+  01 list-step Tactical.ALL_LT >> ALL_TAC
   02 step ACCEPT_TAC TRUTH
 EXPECTED
 
 check_plan list_then_parenthesized_all_tac_plan <<'EXPECTED'
 holbuild proof-ir plan BranchTheory:list_then_parenthesized_all_tac_plan source=src/BranchScript.sml (3 steps)
   00 step CONJ_TAC
-  01 list-step Tactical.ALL_LT
+  01 list-step Tactical.ALL_LT >> (ALL_TAC)
   02 step ACCEPT_TAC TRUTH
 EXPECTED
 
 check_plan list_then_all_tac_cases_plan <<'EXPECTED'
 holbuild proof-ir plan BranchTheory:list_then_all_tac_cases_plan source=src/BranchScript.sml (8 steps)
   00 step CONJ_TAC
-  01 list-step Tactical.ALL_LT
+  01 list-step Tactical.ALL_LT >> ALL_TAC
   02 cases
   03   case 1
   04     step ACCEPT_TAC TRUTH

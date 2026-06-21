@@ -174,11 +174,6 @@ and list_tactic_end (LtThenLT []) = 0
 fun atomic e = TacAtomic (precedence e, span e)
 fun list_atomic e = LtAtomic (precedence e, span e)
 
-fun tactic_is_identity (TacThen []) = true
-  | tactic_is_identity (TacRepairGroup (_, t)) = tactic_is_identity t
-  | tactic_is_identity _ = false
-
-fun drop_identity_tactics ts = List.filter (fn t => not (tactic_is_identity t)) ts
 
 fun parse_tactic_ast e =
   case strip_closed_parens e of
@@ -193,8 +188,8 @@ and parse_tactic_app e =
   case app_name e of
       SOME ("sg", [x]) => TacSubgoal (PlainSubgoal, span x)
     | SOME ("subgoal", [x]) => TacSubgoal (PlainSubgoal, span x)
-    | SOME ("ALL_TAC", []) => TacThen []
-    | SOME ("all_tac", []) => TacThen []
+    | SOME ("ALL_TAC", []) => atomic e
+    | SOME ("all_tac", []) => atomic e
     | SOME ("EVERY", [xs]) => parse_every e xs
     | SOME ("FIRST", [xs]) => parse_first e xs
     | SOME ("FIRST_PROVE", [xs]) => parse_first_prove e xs
@@ -316,9 +311,9 @@ and parse_list_tactic_infix left opn right whole =
   case opn of
       ">>>" => LtThenLT (flatten_thenlt left @ flatten_thenlt right)
     | "THEN_LT" => LtThenLT (flatten_thenlt left @ flatten_thenlt right)
-    | ">>" => LtThen (parse_list_tactic_ast left, drop_identity_tactics (flatten_then right))
-    | "\\\\" => LtThen (parse_list_tactic_ast left, drop_identity_tactics (flatten_then right))
-    | "THEN" => LtThen (parse_list_tactic_ast left, drop_identity_tactics (flatten_then right))
+    | ">>" => LtThen (parse_list_tactic_ast left, flatten_then right)
+    | "\\\\" => LtThen (parse_list_tactic_ast left, flatten_then right)
+    | "THEN" => LtThen (parse_list_tactic_ast left, flatten_then right)
     | "ORELSE_LT" => LtOrelse (flatten_orelse_lt left @ flatten_orelse_lt right)
     | _ => list_atomic whole
 and flatten_thenlt e =
