@@ -628,13 +628,16 @@ holbuild restores the checkpoint, validates that metadata against the current
 Proof-IR plan, reconstructs the remaining continuation from the current plan, and
 continues from the restored HOL proof state. Hashes remain guardrails for
 dependency context and initial goal compatibility; structural path/signature
-validation decides whether the saved proof prefix is usable. If the saved prefix
-endpoint is stale, holbuild discards the failed-prefix checkpoint and falls back
-to an earlier valid checkpoint rather than reusing a shorter matching subprefix.
-Reusing such a subprefix would require either per-leaf checkpoints or a verified
-rewind of the retained HOL proof history to the longest common structural prefix;
-that is a desirable future incrementality improvement, but is not part of the
-current structural Proof-IR replay contract.
+validation decides whether the saved proof prefix is usable. Failed-prefix
+metadata also records per-leaf structural snapshots. If the saved endpoint is
+stale after an edit, holbuild can opportunistically choose the longest still-valid
+leaf prefix, rewind the retained HOL proof history to that prefix, restore the
+recorded structural focus state, and continue from the current Proof-IR plan.
+If snapshot validation, history rewind, or structural resume fails, replay is
+rejected and holbuild falls back to an earlier valid checkpoint. Future
+incrementality work should make this opportunistic reuse fire in more structural
+contexts, especially around dynamic choices and richer structural frame/event
+snapshots, while preserving the same fallback-on-mismatch contract.
 
 The prototype currently instruments AST `HOLTheoremDecl` declarations, i.e.
 modern goal/proof forms such as `Theorem ... Proof ... QED`. It parses the HOL
