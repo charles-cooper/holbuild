@@ -776,7 +776,7 @@ holbuild proof-ir plan ATheory:split_expr_plan source=src/AScript.sml (2 steps)
   01 list-step SPLIT_LT (1 + 0) (TACS_TO_LT [ACCEPT_TAC TRUTH], TACS_TO_LT [ACCEPT_TAC TRUTH])
 EXPECTED
 
-cat "$SCRIPT_DIR/../goalfrag-plan-golden/step_create_push_structure.sml" >> "$project/src/AScript.sml"
+cat "$SCRIPT_DIR/step_create_push_structure.sml" >> "$project/src/AScript.sml"
 check_plan_file step_create_push_structure "$SCRIPT_DIR/step_create_push_structure.expected"
 
 cat >> "$project/src/AScript.sml" <<'SML'
