@@ -604,3 +604,49 @@ for line in all_tac_leaves:
     if len(fields) >= 2 and fields[1] == '0':
         raise SystemExit(f'ALL_TAC leaf recorded source end 0: {line}')
 PY
+
+by_chain_resume_project=$tmpdir/by-chain-resume-project
+by_chain_resume_counter=$tmpdir/by-chain-resume-count.txt
+mkdir -p "$by_chain_resume_project/src"
+touch "$by_chain_resume_counter"
+cp "$project/holproject.toml" "$by_chain_resume_project/holproject.toml"
+cat > "$by_chain_resume_project/src/AScript.sml" <<SML
+open HolKernel Parse boolLib bossLib;
+val _ = new_theory "A";
+val by_chain_resume_counter = "$by_chain_resume_counter";
+fun bump_counter () =
+  let val out = TextIO.openAppend by_chain_resume_counter
+  in TextIO.output(out, "x"); TextIO.closeOut out end;
+fun counted_tac g = (bump_counter(); ALL_TAC g);
+Theorem by_chain_resume_inside_tac:
+  1 + 1 = SUC 1
+Proof
+  \`1 + 1 = 2\` by (counted_tac >> FAIL_TAC "old by rhs failure") >>
+  \`_ = SUC 1\` by EVAL_TAC >>
+  (fn g as (asl, _) =>
+     if length asl = 1 then ALL_TAC g
+     else FAIL_TAC "resumed by chain should leave exactly one assumption" g) >>
+  pop_assum ACCEPT_TAC
+QED
+val _ = export_theory();
+SML
+by_chain_resume_first_log=$tmpdir/by-chain-resume-first.log
+if (cd "$by_chain_resume_project" && "$HOLBUILD_BIN" build ATheory) > "$by_chain_resume_first_log" 2>&1; then
+  echo "expected by-chain resume seed proof to fail" >&2
+  exit 1
+fi
+by_chain_resume_first_count=$(wc -c < "$by_chain_resume_counter" | tr -d ' ')
+[[ "$by_chain_resume_first_count" = "1" ]] || { echo "expected by-chain seed to run counted_tac once, got $by_chain_resume_first_count" >&2; exit 1; }
+require_grep 'old by rhs failure' "$by_chain_resume_first_log"
+require_file "$(find "$by_chain_resume_project/.holbuild/checkpoints" -name '*by_chain_resume_inside_tac_failed_prefix.save' -print -quit)"
+python3 - <<PY
+from pathlib import Path
+path = Path("$by_chain_resume_project/src/AScript.sml")
+path.write_text(path.read_text().replace('FAIL_TAC "old by rhs failure"', 'EVAL_TAC'))
+PY
+by_chain_resume_second_log=$tmpdir/by-chain-resume-second.log
+(cd "$by_chain_resume_project" && "$HOLBUILD_BIN" build ATheory) > "$by_chain_resume_second_log" 2>&1
+by_chain_resume_second_count=$(wc -c < "$by_chain_resume_counter" | tr -d ' ')
+[[ "$by_chain_resume_second_count" = "1" ]] || { echo "by-chain failed-prefix replay reran unchanged counted_tac; count $by_chain_resume_second_count" >&2; exit 1; }
+require_grep 'from: failed-prefix checkpoint in by_chain_resume_inside_tac' "$by_chain_resume_second_log"
+require_grep 'ATheory built' "$by_chain_resume_second_log"
