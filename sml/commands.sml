@@ -862,8 +862,18 @@ fun dispatch_with_options {holdir, source_dir, cache_dir, jobs, maxheap, json, v
 fun is_broken_pipe (IO.Io {cause = OS.SysErr (msg, _), ...}) = msg = "Broken pipe"
   | is_broken_pipe _ = false
 
+fun install_signal_handlers () =
+  let
+    fun handler _ = (HolbuildToolchain.cleanup_active_children (); err "interrupted")
+    val _ = Signal.signal (Posix.Signal.int, Signal.SIG_HANDLE handler)
+    val _ = Signal.signal (Posix.Signal.term, Signal.SIG_HANDLE handler)
+  in
+    ()
+  end
+
 fun main raw_args =
   (let
+     val _ = install_signal_handlers ()
      val _ = HolbuildStatus.set_json_mode (List.exists (fn s => s = "--json") raw_args)
      val _ =
        if raw_args = ["--version"] then
