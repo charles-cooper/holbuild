@@ -4,18 +4,13 @@ struct
 structure Path = OS.Path
 structure FS = OS.FileSys
 
-datatype kernel_variant = StandardKernel | TracingKernel
+datatype kernel_variant = datatype HolbuildToolchainConfig.kernel_variant
 
 type t = {holdir : string, maxheap : int option, kernel_variant : kernel_variant}
 
-fun kernel_variant_name StandardKernel = "stdknl"
-  | kernel_variant_name TracingKernel = "trknl"
-
-fun kernel_variant_build_args StandardKernel = []
-  | kernel_variant_build_args TracingKernel = ["--trknl"]
-
-fun kernel_variant_tracing TracingKernel = true
-  | kernel_variant_tracing StandardKernel = false
+val kernel_variant_name = HolbuildToolchainConfig.kernel_variant_name
+val kernel_variant_build_args = HolbuildToolchainConfig.kernel_variant_build_args
+val kernel_variant_tracing = HolbuildToolchainConfig.kernel_variant_tracing
 
 exception Error of string
 

@@ -79,7 +79,7 @@ fun poly_command () = Option.getOpt(OS.Process.getEnv "HOLBUILD_POLY", "poly")
 fun poly_version () = trim (command_output (quote (poly_command ()) ^ " -v"))
 
 fun build_args_for kernel_variant =
-  String.concatWith " " (build_args :: HolbuildToolchain.kernel_variant_build_args kernel_variant)
+  String.concatWith " " (build_args :: HolbuildToolchainConfig.kernel_variant_build_args kernel_variant)
 
 fun key_material {git, rev, kernel_variant} =
   let val _ = validate_git git
@@ -89,7 +89,7 @@ fun key_material {git, rev, kernel_variant} =
     String.concatWith "\n"
       [format_version, "git=" ^ git, "rev=" ^ rev, "poly=" ^ poly,
        "poly_version=" ^ version,
-       "kernel_variant=" ^ HolbuildToolchain.kernel_variant_name kernel_variant,
+       "kernel_variant=" ^ HolbuildToolchainConfig.kernel_variant_name kernel_variant,
        "build_args=" ^ build_args_for kernel_variant]
   end
 
@@ -111,6 +111,8 @@ fun lock_owner_path lock = lock ^ ".owner"
 datatype toolchain_lock = ToolchainLock of HolbuildFileLock.t
 
 fun holdir_for req = holdir_for_key (key req)
+fun holdir_for_standard {git, rev} =
+  holdir_for {git = git, rev = rev, kernel_variant = HolbuildToolchainConfig.StandardKernel}
 
 fun built holdir =
   executable (Path.concat(holdir, "bin/hol")) andalso

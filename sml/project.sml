@@ -713,7 +713,7 @@ fun hol_dependency ({dependencies, ...} : t) =
 fun project_hol_dir project =
   case hol_dependency project of
       SOME (Dependency {source = GitSource {git, rev}, ...}) =>
-        SOME (HolbuildHolSharedCache.holdir_for {git = git, rev = rev})
+        SOME (HolbuildHolSharedCache.holdir_for_standard {git = git, rev = rev})
     | _ => NONE
 fun build_roots ({roots, ...} : t) = roots
 fun package_action_policies (Package {action_policies, ...}) = action_policies
@@ -750,12 +750,12 @@ fun dependency_manifest_context name = "dependencies." ^ name ^ ".manifest"
 fun dependency_local_path (project as {graph_artifact_root, ...} : t) (Dependency {name, source}) =
   case source of
       GitSource {git, rev} =>
-        if name = "hol" then SOME (HolbuildHolSharedCache.holdir_for {git = git, rev = rev})
+        if name = "hol" then SOME (HolbuildHolSharedCache.holdir_for_standard {git = git, rev = rev})
         else SOME (Path.concat(Path.concat(Path.concat(graph_artifact_root, ".holbuild"), "src"), name))
     | FromSource {from, path, ...} =>
         (case hol_dependency project of
              SOME (Dependency {name = "hol", source = GitSource {git, rev}}) =>
-               if from = "hol" then SOME (Path.concat(HolbuildHolSharedCache.holdir_for {git = git, rev = rev}, path))
+               if from = "hol" then SOME (Path.concat(HolbuildHolSharedCache.holdir_for_standard {git = git, rev = rev}, path))
                else SOME (Path.concat(Path.concat(Path.concat(Path.concat(graph_artifact_root, ".holbuild"), "src"), from), path))
            | _ => SOME (Path.concat(Path.concat(Path.concat(Path.concat(graph_artifact_root, ".holbuild"), "src"), from), path)))
 
