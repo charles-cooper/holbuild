@@ -1,17 +1,23 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [[ $# -ne 1 ]]; then
-  echo "usage: $0 HOL_REV" >&2
+if [[ $# -lt 1 || $# -gt 2 ]]; then
+  echo "usage: $0 HOL_REV [stdknl|trknl]" >&2
   exit 2
 fi
 
 rev=$1
+kernel_variant=${2:-stdknl}
+case "$kernel_variant" in
+  stdknl) kernel_build_args=() ;;
+  trknl) kernel_build_args=(--trknl) ;;
+  *) echo "unknown kernel variant: $kernel_variant" >&2; exit 2 ;;
+esac
 git_url=${HOLBUILD_CANONICAL_HOL_GIT:-https://github.com/HOL-Theorem-Prover/HOL.git}
 poly=${HOLBUILD_POLY:-poly}
 
 script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-key=$(HOLBUILD_CANONICAL_HOL_GIT="$git_url" HOLBUILD_POLY="$poly" "$script_dir/hol-toolchain-key.sh" "$rev")
+key=$(HOLBUILD_CANONICAL_HOL_GIT="$git_url" HOLBUILD_POLY="$poly" "$script_dir/hol-toolchain-key.sh" "$rev" "$kernel_variant")
 
 if [[ -n "${HOLBUILD_CACHE:-}" ]]; then
   cache_root=$HOLBUILD_CACHE
@@ -47,8 +53,8 @@ key_material() {
   printf 'rev=%s\n' "$rev"
   printf 'poly=%s\n' "$poly"
   printf 'poly_version=%s\n' "$poly_version"
-  printf 'kernel_variant=stdknl\n'
-  printf 'build_args=--no-helpdocs\n'
+  printf 'kernel_variant=%s\n' "$kernel_variant"
+  printf 'build_args=--no-helpdocs%s\n' "${kernel_build_args[*]:+ ${kernel_build_args[*]}}"
 }
 
 if valid_entry; then
@@ -68,7 +74,7 @@ echo "building HOL toolchain cache entry: $entry" >&2
 git clone "$git_url" "$holdir" >&2
 git -C "$holdir" checkout --detach "$rev" >&2
 (cd "$holdir" && "$poly" --script tools/smart-configure.sml) >&2
-(cd "$holdir" && bin/build --no-helpdocs) >&2
+(cd "$holdir" && bin/build --no-helpdocs "${kernel_build_args[@]}") >&2
 
 if ! [[ -x "$holdir/bin/hol" && -x "$holdir/bin/build" && -r "$holdir/bin/hol.state" ]]; then
   echo "HOL build did not produce bin/hol, bin/build, and bin/hol.state in $holdir" >&2

@@ -710,11 +710,13 @@ fun schema ({schema, ...} : t) = schema
 fun hol_dependency ({dependencies, ...} : t) =
   List.find (fn Dependency {name, ...} => name = "hol") dependencies
 
-fun project_hol_dir project =
+fun project_hol_dir_with_kernel kernel_variant project =
   case hol_dependency project of
       SOME (Dependency {source = GitSource {git, rev}, ...}) =>
-        SOME (HolbuildHolSharedCache.holdir_for_standard {git = git, rev = rev})
+        SOME (HolbuildHolSharedCache.holdir_for {git = git, rev = rev, kernel_variant = kernel_variant})
     | _ => NONE
+
+fun project_hol_dir project = project_hol_dir_with_kernel HolbuildToolchainConfig.StandardKernel project
 fun build_roots ({roots, ...} : t) = roots
 fun package_action_policies (Package {action_policies, ...}) = action_policies
 
@@ -747,17 +749,19 @@ fun action_policy_for policies logical =
 fun dependency_path_context name = "dependencies." ^ name ^ ".path"
 fun dependency_manifest_context name = "dependencies." ^ name ^ ".manifest"
 
-fun dependency_local_path (project as {graph_artifact_root, ...} : t) (Dependency {name, source}) =
+fun dependency_local_path_with_kernel kernel_variant (project as {graph_artifact_root, ...} : t) (Dependency {name, source}) =
   case source of
       GitSource {git, rev} =>
-        if name = "hol" then SOME (HolbuildHolSharedCache.holdir_for_standard {git = git, rev = rev})
+        if name = "hol" then SOME (HolbuildHolSharedCache.holdir_for {git = git, rev = rev, kernel_variant = kernel_variant})
         else SOME (Path.concat(Path.concat(Path.concat(graph_artifact_root, ".holbuild"), "src"), name))
     | FromSource {from, path, ...} =>
         (case hol_dependency project of
              SOME (Dependency {name = "hol", source = GitSource {git, rev}}) =>
-               if from = "hol" then SOME (Path.concat(HolbuildHolSharedCache.holdir_for_standard {git = git, rev = rev}, path))
+               if from = "hol" then SOME (Path.concat(HolbuildHolSharedCache.holdir_for {git = git, rev = rev, kernel_variant = kernel_variant}, path))
                else SOME (Path.concat(Path.concat(Path.concat(Path.concat(graph_artifact_root, ".holbuild"), "src"), from), path))
            | _ => SOME (Path.concat(Path.concat(Path.concat(Path.concat(graph_artifact_root, ".holbuild"), "src"), from), path)))
+
+fun dependency_local_path project dep = dependency_local_path_with_kernel HolbuildToolchainConfig.StandardKernel project dep
 
 fun dependency_manifest ({manifest = project_manifest, graph_artifact_root, ...} : t) dep =
   case dep of
@@ -771,12 +775,12 @@ fun dependency_manifest ({manifest = project_manifest, graph_artifact_root, ...}
 fun heap_to_string (Heap {name, output, objects}) =
   name ^ " -> " ^ output ^ " [" ^ String.concatWith ", " objects ^ "]"
 
-fun dependency_to_string project (dep as Dependency {name, source}) =
+fun dependency_to_string_with_kernel kernel_variant project (dep as Dependency {name, source}) =
   let
     fun field label value =
       case value of NONE => [] | SOME s => [label ^ "=" ^ s]
     val override = override_path (#overrides project) name
-    val local_path = dependency_local_path project dep
+    val local_path = dependency_local_path_with_kernel kernel_variant project dep
     val resolved_manifest = dependency_manifest project dep
     val source_fields =
       case source of
@@ -789,6 +793,8 @@ fun dependency_to_string project (dep as Dependency {name, source}) =
     name ^ " [" ^ String.concatWith ", " fields ^ "]"
   end
 
+fun dependency_to_string project dep = dependency_to_string_with_kernel HolbuildToolchainConfig.StandardKernel project dep
+
 fun override_to_string (Override {name, path}) = name ^ " -> " ^ path
 
 fun project_package ({root, artifact_root, graph_artifact_root, manifest, name, members, excludes, roots, action_policies, generators, ...} : t) =
@@ -798,7 +804,7 @@ fun project_package ({root, artifact_root, graph_artifact_root, manifest, name, 
            action_policies = action_policies,
            generators = generators}
 
-fun dependency_project (project : t) (dep as Dependency {name, source}) =
+fun dependency_project_with_kernel kernel_variant (project : t) (dep as Dependency {name, source}) =
   let
     val _ =
       case source of
@@ -808,7 +814,7 @@ fun dependency_project (project : t) (dep as Dependency {name, source}) =
                                                        artifact_root = #graph_artifact_root project})
         | _ => ()
     val dep_root =
-      case dependency_local_path project dep of
+      case dependency_local_path_with_kernel kernel_variant project dep of
           SOME path => path
         | NONE => die ("dependency " ^ name ^ " has no local path; add path or .holconfig.toml override")
     val dep_manifest =
@@ -840,7 +846,9 @@ fun dependency_project (project : t) (dep as Dependency {name, source}) =
     dep_project
   end
 
-fun resolved_hol_dependency project =
+fun dependency_project project dep = dependency_project_with_kernel HolbuildToolchainConfig.StandardKernel project dep
+
+fun resolved_hol_dependency_with_kernel kernel_variant project =
   let
     fun seen name names = List.exists (fn n => n = name) names
     fun search_project names p =
@@ -853,17 +861,19 @@ fun resolved_hol_dependency project =
         | (dep as Dependency {name, ...}) :: rest =>
             if seen name names then search_deps names parent rest
             else
-              (case search_project (name :: names) (dependency_project parent dep) of
+              (case search_project (name :: names) (dependency_project_with_kernel kernel_variant parent dep) of
                    SOME hol => SOME hol
                  | NONE => search_deps (name :: names) parent rest)
   in
     search_project [] project
   end
 
-fun dependency_package artifact_parent project (dep as Dependency {name, ...}) =
+fun resolved_hol_dependency project = resolved_hol_dependency_with_kernel HolbuildToolchainConfig.StandardKernel project
+
+fun dependency_package_with_kernel kernel_variant artifact_parent project (dep as Dependency {name, ...}) =
   let
-    val dep_project = dependency_project project dep
-    val dep_root = valOf (dependency_local_path project dep)
+    val dep_project = dependency_project_with_kernel kernel_variant project dep
+    val dep_root = valOf (dependency_local_path_with_kernel kernel_variant project dep)
     val dep_manifest = valOf (dependency_manifest project dep)
     val artifact_root =
       Path.concat(Path.concat(Path.concat(artifact_parent, ".holbuild"), "packages"), name)
@@ -881,7 +891,10 @@ fun same_dependency_source (GitSource a, GitSource b) = #git a = #git b andalso 
       #from a = #from b andalso #path a = #path b andalso #manifest a = #manifest b
   | same_dependency_source _ = false
 
-fun packages (project : t) =
+fun dependency_package artifact_parent project dep =
+  dependency_package_with_kernel HolbuildToolchainConfig.StandardKernel artifact_parent project dep
+
+fun packages_with_kernel kernel_variant (project : t) =
   let
     val artifact_parent = #graph_artifact_root project
     fun seen_source name seen =
@@ -893,7 +906,7 @@ fun packages (project : t) =
             else die ("conflicting dependency " ^ name)
         | NONE =>
             let
-              val (package, dep_project) = dependency_package artifact_parent parent_project dep
+              val (package, dep_project) = dependency_package_with_kernel kernel_variant artifact_parent parent_project dep
               val (seen', packages') = add_project dep_project ((name, source) :: seen, package :: packages)
             in
               (seen', packages')
@@ -912,7 +925,9 @@ fun packages (project : t) =
     result
   end
 
-fun describe (project : t) =
+fun packages project = packages_with_kernel HolbuildToolchainConfig.StandardKernel project
+
+fun describe_with_kernel kernel_variant (project : t) =
   let
     val {root, artifact_root, manifest, name, version, members, excludes, roots, root_tactic_timeouts, dependencies,
          overrides, local_build_excludes, local_build_jobs, build_tactic_timeout, run_heap, run_loads, heaps, action_policies, generators, ...} = project
@@ -934,8 +949,8 @@ fun describe (project : t) =
                 print ("root tactic_timeout: " ^ root ^ " = " ^
                        (case timeout of NONE => "none" | SOME t => Real.toString t) ^ "\n"))
              root_tactic_timeouts;
-    List.app describe_package (packages project);
-    List.app (fn dep => print ("dependency: " ^ dependency_to_string project dep ^ "\n")) dependencies;
+    List.app describe_package (packages_with_kernel kernel_variant project);
+    List.app (fn dep => print ("dependency: " ^ dependency_to_string_with_kernel kernel_variant project dep ^ "\n")) dependencies;
     List.app (fn override => print ("override: " ^ override_to_string override ^ "\n")) overrides;
     Option.app (fn jobs => print ("local build.jobs: " ^ Int.toString jobs ^ "\n")) local_build_jobs;
     Option.app (fn t => print ("build.tactic_timeout: " ^ Real.toString t ^ "\n")) build_tactic_timeout;
@@ -945,5 +960,7 @@ fun describe (project : t) =
     List.app (fn generator => print ("generate: " ^ generator_name generator ^ "\n")) generators;
     List.app (fn policy => print ("action: " ^ action_policy_logical policy ^ "\n")) action_policies
   end
+
+fun describe project = describe_with_kernel HolbuildToolchainConfig.StandardKernel project
 
 end
