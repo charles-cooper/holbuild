@@ -391,6 +391,28 @@ fi
 require_file "$project/.holbuild/obj/src/ATheory.dat"
 # checkpoints persist after successful parent-mismatch rebuild for incremental rebuilds
 
+run_expect_suffix_failure "$tmpdir/wrong-valid-context-seed.log"
+wrong_valid_deps=$(first_deps_path)
+wrong_valid_context=$(first_context_path)
+wrong_valid_failed_prefix=$(second_failed_prefix_path)
+rm -f "$wrong_valid_failed_prefix" "$wrong_valid_failed_prefix.ok" "$wrong_valid_failed_prefix.meta" "$wrong_valid_failed_prefix.prefix"
+cp "$wrong_valid_deps" "$wrong_valid_context"
+write_good_source
+force_rebuild
+wrong_valid_log=$tmpdir/wrong-valid-context.log
+if ! (cd "$project" && "$HOLBUILD_BIN" build ATheory) > "$wrong_valid_log" 2>&1; then
+  cat "$wrong_valid_log" >&2
+  exit 1
+fi
+require_grep "from: theorem-context checkpoint after first" "$wrong_valid_log"
+require_grep "discarding invalid checkpoint after HOL state load failure" "$wrong_valid_log"
+if grep -q "Couldn't load HOL base-state\|Unable to load header\|Structure (HolbuildRuntime) has not been declared" "$wrong_valid_log"; then
+  echo "valid but wrong theorem-context checkpoint leaked as a build failure" >&2
+  exit 1
+fi
+require_file "$project/.holbuild/obj/src/ATheory.dat"
+# checkpoints persist after successful wrong-valid-context rebuild for incremental rebuilds
+
 run_expect_suffix_failure "$tmpdir/corrupt-seed.log"
 corrupt_context=$(first_context_path)
 corrupt_failed_prefix=$(second_failed_prefix_path)
