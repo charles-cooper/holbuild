@@ -30,6 +30,9 @@ jobs:
       - uses: ./.github/actions/setup-polyml
         id: polyml
 
+      - uses: ./.github/actions/setup-trknl-polyml
+        id: trknl-polyml
+
       - name: Install test dependencies
         run: |
           sudo apt-get update
@@ -43,17 +46,34 @@ jobs:
         uses: actions/cache/restore@v5
         with:
           path: ~/.cache/holbuild/hol-toolchains
-          key: hol-toolchains-${{ runner.os }}-${{ steps.polyml.outputs.polyml-rev }}-${{ steps.hol4-pin.outputs.hol4-ref }}-v2
+          key: hol-toolchains-${{ runner.os }}-${{ steps.polyml.outputs.polyml-rev }}-${{ steps.hol4-pin.outputs.hol4-ref }}-v3
+
+      - name: Restore traced HOL toolchain cache
+        id: hol-toolchain-trknl-cache
+        uses: actions/cache/restore@v5
+        with:
+          path: ~/.cache/holbuild/hol-toolchains
+          key: hol-toolchains-trknl-${{ runner.os }}-${{ steps.trknl-polyml.outputs.polyml-rev }}-${{ steps.hol4-pin.outputs.hol4-ref }}-v3
 
       - name: Setup schema2 HOL cache
-        run: tools/setup-hol-toolchain-cache.sh "${{ steps.hol4-pin.outputs.hol4-ref }}" >> "$GITHUB_ENV"
+        run: |
+          tools/setup-hol-toolchain-cache.sh "${{ steps.hol4-pin.outputs.hol4-ref }}" >> "$GITHUB_ENV"
+          HOLBUILD_POLY="${{ steps.trknl-polyml.outputs.polyml-bin }}" tools/setup-hol-toolchain-cache.sh "${{ steps.hol4-pin.outputs.hol4-ref }}" trknl
+          echo "HOLBUILD_TRKNL_POLY=${{ steps.trknl-polyml.outputs.polyml-bin }}" >> "$GITHUB_ENV"
 
       - name: Save HOL toolchain cache
         if: steps.hol-toolchain-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v5
         with:
           path: ~/.cache/holbuild/hol-toolchains
-          key: hol-toolchains-${{ runner.os }}-${{ steps.polyml.outputs.polyml-rev }}-${{ steps.hol4-pin.outputs.hol4-ref }}-v2
+          key: hol-toolchains-${{ runner.os }}-${{ steps.polyml.outputs.polyml-rev }}-${{ steps.hol4-pin.outputs.hol4-ref }}-v3
+
+      - name: Save traced HOL toolchain cache
+        if: steps.hol-toolchain-trknl-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v5
+        with:
+          path: ~/.cache/holbuild/hol-toolchains
+          key: hol-toolchains-trknl-${{ runner.os }}-${{ steps.trknl-polyml.outputs.polyml-rev }}-${{ steps.hol4-pin.outputs.hol4-ref }}-v3
 
       - name: Build holbuild
         run: make

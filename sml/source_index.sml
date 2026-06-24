@@ -265,13 +265,15 @@ fun discover_package package acc =
       end
   end
 
-fun discover (project : HolbuildProject.t) =
+fun discover_with_kernel kernel_variant (project : HolbuildProject.t) =
   by_logical
     (sort_sources
        (List.foldl
           (fn (package, acc) => discover_package package acc)
           []
-          (HolbuildProject.packages project)))
+          (HolbuildProject.packages_with_kernel kernel_variant project)))
+
+fun discover project = discover_with_kernel HolbuildToolchainConfig.StandardKernel project
 
 fun kind_string kind =
   case kind of
@@ -330,10 +332,12 @@ fun roots_for_package sources package =
          | _ => raise Error ("ambiguous build root: " ^ HolbuildProject.package_name package ^ ":" ^ root))
     (HolbuildProject.package_roots package)
 
-fun default_targets sources project =
+fun default_targets_with_kernel kernel_variant sources project =
   List.concat
     (map (roots_for_package sources)
          (List.filter (fn package => not (null (HolbuildProject.package_roots package)))
-                      (HolbuildProject.packages project)))
+                      (HolbuildProject.packages_with_kernel kernel_variant project)))
+
+fun default_targets sources project = default_targets_with_kernel HolbuildToolchainConfig.StandardKernel sources project
 
 end

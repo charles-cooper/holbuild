@@ -4,7 +4,13 @@ struct
 structure Path = OS.Path
 structure FS = OS.FileSys
 
-type t = {holdir : string, maxheap : int option}
+datatype kernel_variant = datatype HolbuildToolchainConfig.kernel_variant
+
+type t = {holdir : string, maxheap : int option, kernel_variant : kernel_variant}
+
+val kernel_variant_name = HolbuildToolchainConfig.kernel_variant_name
+val kernel_variant_build_args = HolbuildToolchainConfig.kernel_variant_build_args
+val kernel_variant_tracing = HolbuildToolchainConfig.kernel_variant_tracing
 
 exception Error of string
 
@@ -251,6 +257,7 @@ fun toolchain_key tc =
   hash_text
     (String.concatWith "\n"
        ["holbuild-toolchain-v1",
+        "kernel_variant=" ^ kernel_variant_name (#kernel_variant tc),
         "hol=" ^ file_hash (hol tc),
         "base_state=" ^ file_hash (base_state tc)] ^ "\n")
 

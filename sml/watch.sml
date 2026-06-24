@@ -52,16 +52,18 @@ fun source_paths (source : HolbuildSourceIndex.source, paths) =
                extras
   end
 
-fun watch_paths project index =
+fun watch_paths_with_kernel kernel_variant project index =
   let
     val paths = []
     val paths = add_readable (#manifest project) paths
     val paths = add_readable (Path.concat(#root project, ".holconfig.toml")) paths
-    val paths = List.foldl package_paths paths (HolbuildProject.packages project)
+    val paths = List.foldl package_paths paths (HolbuildProject.packages_with_kernel kernel_variant project)
     val paths = List.foldl source_paths paths index
   in
     rev paths
   end
+
+fun watch_paths project index = watch_paths_with_kernel HolbuildToolchainConfig.StandardKernel project index
 
 fun ensure_inotifywait () =
   if OS.Process.isSuccess (OS.Process.system "command -v inotifywait >/dev/null 2>&1") then ()

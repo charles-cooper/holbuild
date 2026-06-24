@@ -5,12 +5,20 @@
 
 val format_version = "holbuild-hol-toolchain-v1"
 val default_canonical_git = "https://github.com/HOL-Theorem-Prover/HOL.git"
-val build_args = "--no-helpdocs"
+val base_build_args = "--no-helpdocs"
+val default_kernel_variant = "stdknl"
 
 fun quote s =
   "'" ^ String.translate (fn #"'" => "'\\''" | c => str c) s ^ "'"
 
 fun die msg = (TextIO.output(TextIO.stdErr, msg ^ "\n"); OS.Process.exit OS.Process.failure)
+
+fun kernel_variant () =
+  case OS.Process.getEnv "HOLBUILD_TOOLCHAIN_KERNEL_VARIANT" of
+      NONE => default_kernel_variant
+    | SOME "stdknl" => "stdknl"
+    | SOME "trknl" => "trknl"
+    | SOME value => die ("unknown kernel variant: " ^ value)
 
 fun command_output command =
   let
@@ -39,10 +47,20 @@ fun canonical_git () = Option.getOpt(OS.Process.getEnv "HOLBUILD_CANONICAL_HOL_G
 fun poly_command () = Option.getOpt(OS.Process.getEnv "HOLBUILD_POLY", "poly")
 fun poly_version () = trim (command_output (quote (poly_command ()) ^ " -v"))
 
+fun kernel_build_args "stdknl" = []
+  | kernel_build_args "trknl" = ["--trknl"]
+  | kernel_build_args value = die ("unknown kernel variant: " ^ value)
+
+fun build_args_for variant = String.concatWith " " (base_build_args :: kernel_build_args variant)
+
 fun key_material rev =
-  String.concatWith "\n"
-    [format_version, "git=" ^ canonical_git (), "rev=" ^ rev, "poly=" ^ poly_command (),
-     "poly_version=" ^ poly_version (), "build_args=" ^ build_args]
+  let val variant = kernel_variant ()
+  in
+    String.concatWith "\n"
+      [format_version, "git=" ^ canonical_git (), "rev=" ^ rev, "poly=" ^ poly_command (),
+       "poly_version=" ^ poly_version (), "kernel_variant=" ^ variant,
+       "build_args=" ^ build_args_for variant]
+  end
 
 fun sha1 text =
   let
