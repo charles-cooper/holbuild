@@ -957,8 +957,14 @@ fun find_substring needle haystack =
 fun hol_state_load_failure text =
   Option.isSome (find_substring "Couldn't load HOL base-state" text)
 
+fun selected_hol_state_missing_failure text =
+  Option.isSome (find_substring "selected HOL base-state checkpoint is missing" text)
+
 fun holbuild_runtime_missing_failure text =
   Option.isSome (find_substring "Structure (HolbuildRuntime) has not been declared" text)
+
+fun hol_static_error_failure text =
+  Option.isSome (find_substring "Static Errors" text)
 
 (* Defensive recovery for already-invalid checkpoint artifacts. Holbuild should
    preserve parent/child heap families atomically; this path is not a substitute
@@ -967,7 +973,8 @@ fun holbuild_runtime_missing_failure text =
    PolyML heap while still missing holbuild's runtime prelude; retry that case
    from a fresh dependency context too. *)
 fun invalid_checkpoint_retryable base_context run_context msg =
-  (hol_state_load_failure msg orelse holbuild_runtime_missing_failure msg) andalso
+  (hol_state_load_failure msg orelse selected_hol_state_missing_failure msg orelse
+   holbuild_runtime_missing_failure msg orelse hol_static_error_failure msg) andalso
   hol_context_path run_context <> hol_context_path base_context
 
 fun theorem_context_or_end_path path
@@ -2356,14 +2363,14 @@ fun build_theory cache_allowed policy tc project base_context plan keys toolchai
         (expand_extra_dep (Path.dir (source_file node)) decl)
     val _ = List.app stage_source_extra_dep (#extra_deps (source_deps node))
     val build_log = Path.concat(stage, "holbuild-build.log")
-    val _ = validate_hol_context (#context run_spec)
     val _ =
-      run_hol_files_to_log tc stage stage
-        (#context run_spec)
-        (#files run_spec @ [final_loader])
-        "holbuild-build.log"
-        (SOME (current_build_log project node))
-        "hol run failed while building theory script"
+      (validate_hol_context (#context run_spec);
+       run_hol_files_to_log tc stage stage
+         (#context run_spec)
+         (#files run_spec @ [final_loader])
+         "holbuild-build.log"
+         (SOME (current_build_log project node))
+         "hol run failed while building theory script")
       handle Error msg =>
         if invalid_checkpoint_retryable base_context (#context run_spec) msg then
           let
@@ -2377,14 +2384,34 @@ fun build_theory cache_allowed policy tc project base_context plan keys toolchai
           raise RetryInvalidCheckpoint
         else
           let
-            val failure_error =
-              if file_exists timeout_marker then tactic_timeout_error ()
-              else if null theorem_checkpoints andalso null termination_diagnostics then Error msg
-              else checkpoint_failure_error msg
-            val _ = run_failure_repl tc policy theorem_checkpoints (#failure_checkpoints run_spec) deps_loaded stage
-            val _ = cleanup_json_stage stage
+            val failure_output = checkpoint_failure_output project node input_key stage
+            val failure_output_path = captured_output_path_option failure_output
+            val static_error =
+              Option.mapPartial
+                (fn path => HolbuildTheoryDiagnostics.static_error_summary
+                              (source_file node) source_text
+                              (String.fields (fn c => c = #"\n") (read_text path)))
+                failure_output_path
           in
-            raise failure_error
+            if Option.isSome static_error andalso hol_context_path (#context run_spec) <> hol_context_path base_context then
+              let
+                val invalid = hol_context_path (#context run_spec)
+                val _ = discard_loaded_checkpoint_after_load_failure ()
+                val _ = warn ("discarding invalid checkpoint after HOL state load failure: " ^ invalid)
+              in
+                raise RetryInvalidCheckpoint
+              end
+            else
+              let
+                val failure_error =
+                  if file_exists timeout_marker then tactic_timeout_error ()
+                  else if null theorem_checkpoints andalso null termination_diagnostics then Error msg
+                  else checkpoint_failure_error msg
+                val _ = run_failure_repl tc policy theorem_checkpoints (#failure_checkpoints run_spec) deps_loaded stage
+                val _ = cleanup_json_stage stage
+              in
+                raise failure_error
+              end
           end
     val _ =
       if execution_plan_only policy andalso file_exists plan_only_marker then
@@ -3195,15 +3222,19 @@ fun build_parallel status options tc project base_context plan keys toolchain_ke
     wait_workers ()
   end
 
+fun project_checkpoint_limit_gb project =
+  Option.getOpt(HolbuildProject.checkpoint_limit_gb project, default_max_checkpoints_gb)
+
 fun enforce_checkpoint_budget project =
   let
-    val max_bytes = gb_to_bytes default_max_checkpoints_gb
+    val checkpoint_limit_gb = project_checkpoint_limit_gb project
+    val max_bytes = gb_to_bytes checkpoint_limit_gb
     val eviction = evict_oldest_checkpoints_with_stats (project_state_dir project "checkpoints") max_bytes
     val {before_bytes, after_bytes, evicted, ...} = eviction
   in
     if before_bytes > max_bytes orelse evicted > 0 then
       warn ("checkpoint budget: " ^ checkpoint_eviction_text eviction ^
-            " checkpoint_limit_gb=" ^ Int.toString default_max_checkpoints_gb)
+            " checkpoint_limit_gb=" ^ Int.toString checkpoint_limit_gb)
     else ();
     if after_bytes > max_bytes then
       warn ("checkpoint budget still exceeds limit after eviction; check permissions or oversized live families")
