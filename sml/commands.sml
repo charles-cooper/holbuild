@@ -12,32 +12,157 @@ fun err msg = err_with_debug_artifacts msg HolbuildStatus.no_debug_artifacts
 
 fun warn msg = HolbuildStatus.message_stderr ("holbuild: warning: " ^ msg ^ "\n")
 
-fun usage () = print
+fun global_help () = print
   "holbuild: experimental project-aware build frontend for HOL4\n\n\
   \Usage:\n\
-  \  holbuild --version\n\
-  \  holbuild [--json] [--quiet|--verbose|--verbosity LEVEL] [--source-dir PATH] [--cache-dir PATH] [--maxheap MB] [-jN] context\n\
-  \  holbuild [--json] [--quiet|--verbose|--verbosity LEVEL] [--source-dir PATH] [--cache-dir PATH] [--maxheap MB] [-jN] execution-plan THEORY:THEOREM\n\
-  \  holbuild [--json] [--quiet|--verbose|--verbosity LEVEL] [--source-dir PATH] [--cache-dir PATH] [--maxheap MB] [-jN] build [--dry-run] [--force[=theory|project|full]] [--no-cache] [--skip-checkpoints] [--skip-proof-steps] [--tactic-timeout SECONDS] [--trace-steps] [--repl-on-failure] [--retain-debug-artifacts] [--warn-unreachable] [TARGET ...]\n\
-  \  holbuild [--json] [--quiet|--verbose|--verbosity LEVEL] [--source-dir PATH] [--cache-dir PATH] clean THEORY...\n\
-  \  holbuild [--json] [--quiet|--verbose|--verbosity LEVEL] [--source-dir PATH] [--cache-dir PATH] [--maxheap MB] [-jN] heap NAME\n\
-  \  holbuild [--json] [--quiet|--verbose|--verbosity LEVEL] [--source-dir PATH] [--cache-dir PATH] [--maxheap MB] run [ARG ...]\n\
-  \  holbuild [--json] [--quiet|--verbose|--verbosity LEVEL] [--source-dir PATH] [--cache-dir PATH] [--maxheap MB] repl [ARG ...]\n\
-  \  holbuild [--json] [--quiet|--verbose|--verbosity LEVEL] [--source-dir PATH] [--cache-dir PATH] [--maxheap MB] export [--build] -o FILE [TARGET ...]\n\
-  \  holbuild [--json] [--quiet|--verbose|--verbosity LEVEL] [--source-dir PATH] [--cache-dir PATH] import FILE\n\
-  \  holbuild [--source-dir PATH] [--cache-dir PATH] buildhol\n\
-  \  holbuild [--cache-dir PATH] gc [--retention-days DAYS] [--max-checkpoints-gb GB] [--clean-only|--cache-only]\n\n\
-  \Projects must use schema 2 and declare dependencies.hol. Commands that need HOL\n\
-  \build/reuse the declared HOL tree in the global cache. --holdir/HOLDIR are no\n\
-  \longer supported.\n\
-  \Project sources are found from --source-dir, HOLBUILD_SOURCE_DIR, or cwd.\n\
-  \--cache-dir overrides HOLBUILD_CACHE/XDG_CACHE_HOME/HOME for the global cache.\n\
-  \-j/--jobs controls build parallelism. Default is .holconfig.toml [build].jobs,\n\
-  \or max(1, detected processor count / 2). --maxheap/--max-heap passes Poly/ML\n\
-  \maximum heap size in MB to child HOL processes. --json emits newline-delimited\n\
-  \JSON for build status, messages, and errors. Non-TTY normal output suppresses\n\
-  \unchanged node lines; --verbose logs node starts, all finishes, and per-node\n\
-  \elapsed times; --quiet suppresses per-node success lines.\n"
+  \  holbuild [GLOBAL OPTIONS] [build] [TARGET ...]\n\
+  \  holbuild [GLOBAL OPTIONS] COMMAND [ARGS]\n\
+  \  holbuild --version\n\n\
+  \Primary command:\n\
+  \  [build] [TARGET ...]        Build project targets\n\n\
+  \Project interaction:\n\
+  \  repl [ARG ...]              Start HOL REPL with project context\n\
+  \  run [ARG ...]               Run HOL with project context\n\
+  \  context                     Show resolved project context\n\n\
+  \Inspection and advanced commands:\n\
+  \  execution-plan T:THM        Inspect proof-step execution plan\n\
+  \  buildhol                    Build/reuse declared HOL and print its path\n\
+  \  heap NAME                   Build a configured heap\n\
+  \  clean THEORY...             Remove local build outputs\n\
+  \  export -o FILE [TARGET ...]  Export cached build outputs\n\
+  \  import FILE                  Import cached build outputs\n\
+  \  gc                          Remove stale project/cache state\n\n\
+  \Global options:\n\
+  \  --source-dir PATH\n\
+  \  --cache-dir PATH\n\
+  \  --json\n\
+  \  --quiet, --verbose, --verbosity LEVEL\n\
+  \  -j N, -jN, --jobs N\n\
+  \  --maxheap MB, --max-heap MB\n\n\
+  \Use `holbuild COMMAND --help` for command-specific help.\n"
+
+fun build_help () = print
+  "Usage:\n\
+  \  holbuild [GLOBAL OPTIONS] [build] [OPTIONS] [TARGET ...]\n\n\
+  \Build project targets. With no TARGET, build the project's default targets.\n\n\
+  \Options:\n\
+  \  --watch\n\
+  \  --dry-run\n\
+  \  --force[=theory|project|full]\n\
+  \  --no-cache\n\
+  \  --skip-checkpoints\n\
+  \  --skip-proof-steps\n\
+  \  --tactic-timeout SECONDS\n\
+  \  --trace-steps\n\
+  \  --repl-on-failure\n\
+  \  --retain-debug-artifacts\n\
+  \  --warn-unreachable\n\n\
+  \Global options: see `holbuild --help`.\n"
+
+fun context_help () = print
+  "Usage:\n\
+  \  holbuild [GLOBAL OPTIONS] context\n\n\
+  \Show resolved project context.\n\n\
+  \Global options: see `holbuild --help`.\n"
+
+fun repl_help () = print
+  "Usage:\n\
+  \  holbuild [GLOBAL OPTIONS] repl [ARG ...]\n\n\
+  \Start HOL REPL with project context. Extra arguments are passed to HOL.\n\n\
+  \Global options: see `holbuild --help`.\n"
+
+fun run_help () = print
+  "Usage:\n\
+  \  holbuild [GLOBAL OPTIONS] run [ARG ...]\n\n\
+  \Run HOL with project context. Extra arguments are passed to HOL.\n\n\
+  \Global options: see `holbuild --help`.\n"
+
+fun execution_plan_help () = print
+  "Usage:\n\
+  \  holbuild [GLOBAL OPTIONS] execution-plan THEORY:THEOREM\n\n\
+  \Inspect the proof-step execution plan for a theorem.\n\n\
+  \Global options: see `holbuild --help`.\n"
+
+fun buildhol_help () = print
+  "Usage:\n\
+  \  holbuild [GLOBAL OPTIONS] buildhol\n\n\
+  \Build/reuse the declared HOL tree and print its path.\n\n\
+  \Global options: see `holbuild --help`.\n"
+
+fun heap_help () = print
+  "Usage:\n\
+  \  holbuild [GLOBAL OPTIONS] heap NAME\n\n\
+  \Build a configured heap.\n\n\
+  \Global options: see `holbuild --help`.\n"
+
+fun clean_help () = print
+  "Usage:\n\
+  \  holbuild [GLOBAL OPTIONS] clean THEORY...\n\n\
+  \Remove local build outputs for theories. Subsequent builds may restore outputs\n\
+  \from the global cache.\n\n\
+  \Global options: see `holbuild --help`.\n"
+
+fun gc_help () = print
+  "Usage:\n\
+  \  holbuild [GLOBAL OPTIONS] gc [OPTIONS]\n\n\
+  \Remove stale project/cache state.\n\n\
+  \Options:\n\
+  \  --retention-days DAYS\n\
+  \  --max-checkpoints-gb GB\n\
+  \  --clean-only\n\
+  \  --cache-only\n\n\
+  \Global options: see `holbuild --help`.\n"
+
+fun cache_help () = print
+  "`holbuild cache gc` is deprecated; use `holbuild gc --cache-only`.\n"
+
+fun export_help () = print
+  "Usage:\n\
+  \  holbuild [GLOBAL OPTIONS] export [--build] -o FILE [TARGET ...]\n\n\
+  \Export cached build outputs for targets. With --build, build targets first.\n\n\
+  \Global options: see `holbuild --help`.\n"
+
+fun import_help () = print
+  "Usage:\n\
+  \  holbuild [GLOBAL OPTIONS] import FILE\n\n\
+  \Import cached build outputs from an hbx archive into the global cache.\n\n\
+  \Global options: see `holbuild --help`.\n"
+
+fun help_arg arg = arg = "--help" orelse arg = "-h"
+fun has_help_arg args = List.exists help_arg args
+
+fun known_command command =
+  command = "build" orelse command = "context" orelse command = "repl" orelse
+  command = "run" orelse command = "execution-plan" orelse command = "buildhol" orelse
+  command = "heap" orelse command = "clean" orelse command = "export" orelse
+  command = "import" orelse command = "gc" orelse command = "cache" orelse
+  command = "goalfrag-plan"
+
+fun command_help command =
+  case command of
+      "build" => build_help ()
+    | "context" => context_help ()
+    | "repl" => repl_help ()
+    | "run" => run_help ()
+    | "execution-plan" => execution_plan_help ()
+    | "buildhol" => buildhol_help ()
+    | "heap" => heap_help ()
+    | "clean" => clean_help ()
+    | "export" => export_help ()
+    | "import" => import_help ()
+    | "gc" => gc_help ()
+    | "cache" => cache_help ()
+    | "goalfrag-plan" => raise Error "goalfrag-plan has been removed; use execution-plan THEORY:THEOREM"
+    | _ => raise Error ("unknown command: " ^ command)
+
+fun maybe_handle_command_help args =
+  case args of
+      [] => false
+    | command :: rest =>
+        if has_help_arg rest then
+          if known_command command then (command_help command; true)
+          else raise Error ("unknown command: " ^ command)
+        else false
 
 fun nonnegative_real label text =
   case Real.fromString text of
@@ -62,64 +187,66 @@ fun force_level_value text =
 
 fun split_flags args =
   let
-    fun loop dry force use_cache skip_checkpoints goalfrag new_ir tactic_timeout tactic_timeout_set goalfrag_plan goalfrag_trace repl_on_failure retain_debug_artifacts warn_unreachable rest =
+    fun loop dry watch force use_cache skip_checkpoints proof_steps new_ir tactic_timeout tactic_timeout_set execution_plan trace_steps repl_on_failure retain_debug_artifacts warn_unreachable rest =
       case rest of
-          [] => ({dry_run = dry, force = force, use_cache = use_cache,
+          [] => ({dry_run = dry, watch = watch, force = force, use_cache = use_cache,
                   skip_checkpoints = skip_checkpoints,
-                  goalfrag = goalfrag, new_ir = new_ir,
+                  proof_steps = proof_steps, new_ir = new_ir,
                   tactic_timeout = tactic_timeout,
                   tactic_timeout_set = tactic_timeout_set,
-                  goalfrag_plan = goalfrag_plan,
-                  goalfrag_trace = goalfrag_trace,
+                  execution_plan = execution_plan,
+                  trace_steps = trace_steps,
                   repl_on_failure = repl_on_failure,
                   retain_debug_artifacts = retain_debug_artifacts,
                   warn_unreachable = warn_unreachable}, [])
         | "--dry-run" :: xs =>
-            loop true force use_cache skip_checkpoints goalfrag new_ir tactic_timeout tactic_timeout_set goalfrag_plan goalfrag_trace repl_on_failure retain_debug_artifacts warn_unreachable xs
+            loop true watch force use_cache skip_checkpoints proof_steps new_ir tactic_timeout tactic_timeout_set execution_plan trace_steps repl_on_failure retain_debug_artifacts warn_unreachable xs
+        | "--watch" :: xs =>
+            loop dry true force use_cache skip_checkpoints proof_steps new_ir tactic_timeout tactic_timeout_set execution_plan trace_steps repl_on_failure retain_debug_artifacts warn_unreachable xs
         | "--force" :: xs =>
-            loop dry HolbuildBuildExec.ForceAll use_cache skip_checkpoints goalfrag new_ir tactic_timeout tactic_timeout_set goalfrag_plan goalfrag_trace repl_on_failure retain_debug_artifacts warn_unreachable xs
+            loop dry watch HolbuildBuildExec.ForceAll use_cache skip_checkpoints proof_steps new_ir tactic_timeout tactic_timeout_set execution_plan trace_steps repl_on_failure retain_debug_artifacts warn_unreachable xs
         | "--force-theory" :: xs =>
-            loop dry HolbuildBuildExec.ForceTargets use_cache skip_checkpoints goalfrag new_ir tactic_timeout tactic_timeout_set goalfrag_plan goalfrag_trace repl_on_failure retain_debug_artifacts warn_unreachable xs
+            loop dry watch HolbuildBuildExec.ForceTargets use_cache skip_checkpoints proof_steps new_ir tactic_timeout tactic_timeout_set execution_plan trace_steps repl_on_failure retain_debug_artifacts warn_unreachable xs
         | "--force-project" :: xs =>
-            loop dry HolbuildBuildExec.ForceProject use_cache skip_checkpoints goalfrag new_ir tactic_timeout tactic_timeout_set goalfrag_plan goalfrag_trace repl_on_failure retain_debug_artifacts warn_unreachable xs
+            loop dry watch HolbuildBuildExec.ForceProject use_cache skip_checkpoints proof_steps new_ir tactic_timeout tactic_timeout_set execution_plan trace_steps repl_on_failure retain_debug_artifacts warn_unreachable xs
         | "--force-full" :: xs =>
-            loop dry HolbuildBuildExec.ForceAll use_cache skip_checkpoints goalfrag new_ir tactic_timeout tactic_timeout_set goalfrag_plan goalfrag_trace repl_on_failure retain_debug_artifacts warn_unreachable xs
+            loop dry watch HolbuildBuildExec.ForceAll use_cache skip_checkpoints proof_steps new_ir tactic_timeout tactic_timeout_set execution_plan trace_steps repl_on_failure retain_debug_artifacts warn_unreachable xs
         | "--no-cache" :: xs =>
-            loop dry force false skip_checkpoints goalfrag new_ir tactic_timeout tactic_timeout_set goalfrag_plan goalfrag_trace repl_on_failure retain_debug_artifacts warn_unreachable xs
+            loop dry watch force false skip_checkpoints proof_steps new_ir tactic_timeout tactic_timeout_set execution_plan trace_steps repl_on_failure retain_debug_artifacts warn_unreachable xs
         | "--skip-checkpoints" :: xs =>
-            loop dry force use_cache true goalfrag new_ir tactic_timeout tactic_timeout_set goalfrag_plan goalfrag_trace repl_on_failure retain_debug_artifacts warn_unreachable xs
+            loop dry watch force use_cache true proof_steps new_ir tactic_timeout tactic_timeout_set execution_plan trace_steps repl_on_failure retain_debug_artifacts warn_unreachable xs
         | "--skip-proof-steps" :: xs =>
-            loop dry force use_cache skip_checkpoints false false tactic_timeout tactic_timeout_set goalfrag_plan goalfrag_trace repl_on_failure retain_debug_artifacts warn_unreachable xs
+            loop dry watch force use_cache skip_checkpoints false false tactic_timeout tactic_timeout_set execution_plan trace_steps repl_on_failure retain_debug_artifacts warn_unreachable xs
         | "--skip-goalfrag" :: xs =>
             (warn "--skip-goalfrag is deprecated; use --skip-proof-steps";
-             loop dry force use_cache skip_checkpoints false false tactic_timeout tactic_timeout_set goalfrag_plan goalfrag_trace repl_on_failure retain_debug_artifacts warn_unreachable xs)
+             loop dry watch force use_cache skip_checkpoints false false tactic_timeout tactic_timeout_set execution_plan trace_steps repl_on_failure retain_debug_artifacts warn_unreachable xs)
         | "--goalfrag" :: _ =>
             raise Error "--goalfrag has been removed; proof steps are enabled by default"
         | "--new-ir" :: xs =>
             (warn "--new-ir is deprecated and has no effect; proof IR is the default";
-             loop dry force use_cache skip_checkpoints goalfrag true tactic_timeout tactic_timeout_set goalfrag_plan goalfrag_trace repl_on_failure retain_debug_artifacts warn_unreachable xs)
+             loop dry watch force use_cache skip_checkpoints proof_steps true tactic_timeout tactic_timeout_set execution_plan trace_steps repl_on_failure retain_debug_artifacts warn_unreachable xs)
         | "--goalfrag-plan" :: _ => raise Error "--goalfrag-plan has been removed; use execution-plan THEORY:THEOREM"
         | "--trace-steps" :: xs =>
-            loop dry force use_cache skip_checkpoints goalfrag new_ir tactic_timeout tactic_timeout_set goalfrag_plan true repl_on_failure retain_debug_artifacts warn_unreachable xs
+            loop dry watch force use_cache skip_checkpoints proof_steps new_ir tactic_timeout tactic_timeout_set execution_plan true repl_on_failure retain_debug_artifacts warn_unreachable xs
         | "--goalfrag-trace" :: xs =>
             (warn "--goalfrag-trace is deprecated; use --trace-steps";
-             loop dry force use_cache skip_checkpoints goalfrag new_ir tactic_timeout tactic_timeout_set goalfrag_plan true repl_on_failure retain_debug_artifacts warn_unreachable xs)
+             loop dry watch force use_cache skip_checkpoints proof_steps new_ir tactic_timeout tactic_timeout_set execution_plan true repl_on_failure retain_debug_artifacts warn_unreachable xs)
         | "--repl-on-failure" :: xs =>
-            loop dry force use_cache skip_checkpoints goalfrag new_ir tactic_timeout tactic_timeout_set goalfrag_plan goalfrag_trace true retain_debug_artifacts warn_unreachable xs
+            loop dry watch force use_cache skip_checkpoints proof_steps new_ir tactic_timeout tactic_timeout_set execution_plan trace_steps true retain_debug_artifacts warn_unreachable xs
         | "--retain-debug-artifacts" :: xs =>
-            loop dry force use_cache skip_checkpoints goalfrag new_ir tactic_timeout tactic_timeout_set goalfrag_plan goalfrag_trace repl_on_failure true warn_unreachable xs
+            loop dry watch force use_cache skip_checkpoints proof_steps new_ir tactic_timeout tactic_timeout_set execution_plan trace_steps repl_on_failure true warn_unreachable xs
         | "--warn-unreachable" :: xs =>
-            loop dry force use_cache skip_checkpoints goalfrag new_ir tactic_timeout tactic_timeout_set goalfrag_plan goalfrag_trace repl_on_failure retain_debug_artifacts true xs
+            loop dry watch force use_cache skip_checkpoints proof_steps new_ir tactic_timeout tactic_timeout_set execution_plan trace_steps repl_on_failure retain_debug_artifacts true xs
         | "--tactic-timeout" :: seconds :: xs =>
-            loop dry force use_cache skip_checkpoints goalfrag new_ir (tactic_timeout_value seconds) true goalfrag_plan goalfrag_trace repl_on_failure retain_debug_artifacts warn_unreachable xs
+            loop dry watch force use_cache skip_checkpoints proof_steps new_ir (tactic_timeout_value seconds) true execution_plan trace_steps repl_on_failure retain_debug_artifacts warn_unreachable xs
         | "--tactic-timeout" :: [] => raise Error "--tactic-timeout requires SECONDS"
         | x :: xs =>
             if String.isPrefix "--force=" x then
-              loop dry (force_level_value (String.extract (x, size "--force=", NONE))) use_cache skip_checkpoints goalfrag new_ir tactic_timeout tactic_timeout_set goalfrag_plan goalfrag_trace repl_on_failure retain_debug_artifacts warn_unreachable xs
+              loop dry watch (force_level_value (String.extract (x, size "--force=", NONE))) use_cache skip_checkpoints proof_steps new_ir tactic_timeout tactic_timeout_set execution_plan trace_steps repl_on_failure retain_debug_artifacts warn_unreachable xs
             else if String.isPrefix "--tactic-timeout=" x then
-              loop dry force use_cache skip_checkpoints goalfrag new_ir
+              loop dry watch force use_cache skip_checkpoints proof_steps new_ir
                    (tactic_timeout_value (String.extract (x, size "--tactic-timeout=", NONE)))
-                   true goalfrag_plan goalfrag_trace repl_on_failure retain_debug_artifacts warn_unreachable xs
+                   true execution_plan trace_steps repl_on_failure retain_debug_artifacts warn_unreachable xs
             else if String.isPrefix "--goalfrag-plan=" x then
               raise Error "--goalfrag-plan has been removed; use execution-plan THEORY:THEOREM"
             else if String.isPrefix "--trace-steps=" x then
@@ -129,10 +256,10 @@ fun split_flags args =
             else if String.isPrefix "--" x then
               raise Error ("unknown build option: " ^ x)
             else
-              let val (flags, ys) = loop dry force use_cache skip_checkpoints goalfrag new_ir tactic_timeout tactic_timeout_set goalfrag_plan goalfrag_trace repl_on_failure retain_debug_artifacts warn_unreachable xs
+              let val (flags, ys) = loop dry watch force use_cache skip_checkpoints proof_steps new_ir tactic_timeout tactic_timeout_set execution_plan trace_steps repl_on_failure retain_debug_artifacts warn_unreachable xs
               in (flags, x :: ys) end
   in
-    loop false HolbuildBuildExec.ForceNone true false true true NONE false NONE false false false false args
+    loop false false HolbuildBuildExec.ForceNone true false true true NONE false NONE false false false false args
   end
 
 fun has_suffix suffix s =
@@ -201,7 +328,7 @@ fun theory_source source = #kind source = HolbuildSourceIndex.TheoryScript
 fun describe_source source =
   #package source ^ ":" ^ #relative_path source ^ " (" ^ #logical_name source ^ ")"
 
-fun parse_goalfrag_selector selector =
+fun parse_execution_plan_selector selector =
   case String.fields (fn c => c = #":") selector of
       [theory, theorem] =>
         if theory = "" orelse theorem = "" then
@@ -246,44 +373,87 @@ fun run_analyser_for_proof_ir_text {name, tactic_start, tactic_end, tactic_text}
           val _ = OS.FileSys.remove resp handle OS.SysErr _ => ()
         in text end
 
-fun bool_field "1" = true
-  | bool_field "0" = false
-  | bool_field s = raise Error ("bad proof-ir boolean field: " ^ s)
-
-fun phase_field "start" = HolbuildProofIr.BranchStart
-  | phase_field "suffix" = HolbuildProofIr.BranchSuffix
-  | phase_field "close" = HolbuildProofIr.BranchClose
-  | phase_field s = raise Error ("bad proof-ir branch phase: " ^ s)
-
 fun int_field s =
   case Int.fromString s of SOME n => n | NONE => raise Error ("bad proof-ir integer field: " ^ s)
 
-fun parse_proof_step fields =
-  case fields of
-      ["proof-step", "tactic", a, b, label, program] =>
-        HolbuildProofIr.StepTactic {start_pos = int_field a, end_pos = int_field b, label = label, program = program}
-    | ["proof-step", "list", a, b, label, program] =>
-        HolbuildProofIr.StepList {start_pos = int_field a, end_pos = int_field b, label = label, program = program}
-    | "proof-step" :: "choice" :: a :: b :: label :: program :: alternatives =>
-        HolbuildProofIr.StepChoice {start_pos = int_field a, end_pos = int_field b, label = label, program = program, alternatives = alternatives}
-    | "proof-step" :: "list-choice" :: a :: b :: label :: program :: alternatives =>
-        HolbuildProofIr.StepListChoice {start_pos = int_field a, end_pos = int_field b, label = label, program = program, alternatives = alternatives}
-    | ["proof-step", "then1", a, b, label, list_suffix, first_label, first_program, second_program] =>
-        HolbuildProofIr.StepThen1 {start_pos = int_field a, end_pos = int_field b, label = label,
-                                   list_suffix = bool_field list_suffix, first_label = first_label,
-                                   first_program = first_program, second_program = second_program}
-    | ["proof-step", "gentle-then1", a, b, label, list_suffix, first_program, second_program] =>
-        HolbuildProofIr.StepGentleThen1 {start_pos = int_field a, end_pos = int_field b, label = label,
-                                         list_suffix = bool_field list_suffix,
-                                         first_program = first_program, second_program = second_program}
-    | ["proof-step", "branch", a, b, label, program, phase] =>
-        HolbuildProofIr.StepBranch {start_pos = int_field a, end_pos = int_field b, label = label, program = program,
-                                    phase = phase_field phase}
-    | ["proof-step", "branch-list", a, b, label, program] =>
-        HolbuildProofIr.StepBranchList {start_pos = int_field a, end_pos = int_field b, label = label, program = program}
-    | ["proof-step", "plain", a, b, label, program] =>
-        HolbuildProofIr.StepPlain {start_pos = int_field a, end_pos = int_field b, label = label, program = program}
-    | _ => raise Error ("bad proof-ir step response")
+fun parse_selector ["first"] = HolbuildProofIr.SelectFirst
+  | parse_selector ["matching-first", pats] = HolbuildProofIr.SelectMatchingFirst pats
+  | parse_selector ["matching-all", pats] = HolbuildProofIr.SelectMatchingAll pats
+  | parse_selector _ = raise Error "bad proof-ir selector"
+
+fun parse_mode "solve" = HolbuildProofIr.SelectSolve
+  | parse_mode "keep" = HolbuildProofIr.SelectKeep
+  | parse_mode s = raise Error ("bad proof-ir select mode: " ^ s)
+
+fun parse_proof_steps fieldss =
+  let
+    fun parse_body stops rest acc =
+      case rest of
+          [] => if List.exists (fn s => s = "end") stops then raise Error "unterminated proof-ir block" else (rev acc, [])
+        | fields :: more =>
+            (case fields of
+                 ["proof-step", "end"] =>
+                   if List.exists (fn s => s = "end") stops then
+                     if List.exists (fn s => s = "case" orelse s = "alternative") stops then (rev acc, rest)
+                     else (rev acc, more)
+                   else raise Error "proof-ir end outside block"
+               | ["proof-step", "case", _] =>
+                   if List.exists (fn s => s = "case") stops then (rev acc, rest)
+                   else raise Error "proof-ir case outside cases"
+               | ["proof-step", "alternative", _] =>
+                   if List.exists (fn s => s = "alternative") stops then (rev acc, rest)
+                   else raise Error "proof-ir alternative outside choice"
+               | ["proof-step", "step", a, b, label, program] =>
+                   parse_body stops more (HolbuildProofIr.StepTactic {start_pos = int_field a, end_pos = int_field b, label = label, program = program} :: acc)
+               | ["proof-step", "list-step", a, b, label, program] =>
+                   parse_body stops more (HolbuildProofIr.StepList {start_pos = int_field a, end_pos = int_field b, label = label, program = program} :: acc)
+               | ["proof-step", "each", a, b] =>
+                   let val (body, rest') = parse_body ["end"] more []
+                   in parse_body stops rest' (HolbuildProofIr.StepEach {start_pos = int_field a, end_pos = int_field b, body = body} :: acc) end
+               | "proof-step" :: "select" :: a :: b :: restfields =>
+                   let
+                     val (sel_fields, mode_text) =
+                       case restfields of
+                           [sel, mode] => ([sel], mode)
+                         | [sel, pats, mode] => ([sel, pats], mode)
+                         | _ => raise Error "bad proof-ir select response"
+                     val (body, rest') = parse_body ["end"] more []
+                   in parse_body stops rest' (HolbuildProofIr.StepSelect {start_pos = int_field a, end_pos = int_field b, selector = parse_selector sel_fields, mode = parse_mode mode_text, body = body} :: acc) end
+               | ["proof-step", "cases", a, b] =>
+                   let
+                     fun parse_cases n rest cases =
+                       (case rest of
+                            ["proof-step", "end"] :: more' => (rev cases, more')
+                          | ["proof-step", "case", k] :: more' =>
+                              if int_field k <> n then raise Error "proof-ir case ordering error"
+                              else let val (body, rest'') = parse_body ["case", "end"] more' []
+                                   in parse_cases (n + 1) rest'' (body :: cases) end
+                          | _ => raise Error "bad proof-ir cases block")
+                     val (cases, rest') = parse_cases 1 more []
+                   in parse_body stops rest' (HolbuildProofIr.StepCases {start_pos = int_field a, end_pos = int_field b, cases = cases} :: acc) end
+               | ["proof-step", "choice", a, b, label] =>
+                   let
+                     fun parse_alts n rest alts =
+                       (case rest of
+                            ["proof-step", "end"] :: more' => (rev alts, more')
+                          | ["proof-step", "alternative", k] :: more' =>
+                              if int_field k <> n then raise Error "proof-ir alternative ordering error"
+                              else let val (body, rest'') = parse_body ["alternative", "end"] more' []
+                                   in parse_alts (n + 1) rest'' (body :: alts) end
+                          | _ => raise Error "bad proof-ir choice block")
+                     val (alts, rest') = parse_alts 1 more []
+                   in parse_body stops rest' (HolbuildProofIr.StepChoice {start_pos = int_field a, end_pos = int_field b, label = label, alternatives = alts} :: acc) end
+               | ["proof-step", "repeat", a, b] =>
+                   let val (body, rest') = parse_body ["end"] more []
+                   in parse_body stops rest' (HolbuildProofIr.StepRepeat {start_pos = int_field a, end_pos = int_field b, body = body} :: acc) end
+               | ["proof-step", "try", a, b] =>
+                   let val (body, rest') = parse_body ["end"] more []
+                   in parse_body stops rest' (HolbuildProofIr.StepTry {start_pos = int_field a, end_pos = int_field b, body = body} :: acc) end
+               | _ => raise Error "bad proof-ir step response")
+    val (steps, rest) = parse_body [] fieldss []
+  in
+    case rest of [] => steps | _ => raise Error "unexpected proof-ir parser residue"
+  end
 
 fun analyser_proof_ir_plan_for_boundary (boundary : HolbuildTheoryCheckpoints.boundary) =
   let
@@ -297,9 +467,9 @@ fun analyser_proof_ir_plan_for_boundary (boundary : HolbuildTheoryCheckpoints.bo
         | line :: more =>
             (case HolbuildAnalysisProtocol.split line of
                  ["begin-proof-ir", "0", _, _, _, _] => loop more true [] found
-               | ["end-proof-ir", "0"] => loop more false [] (SOME (rev acc))
+               | ["end-proof-ir", "0"] => loop more false [] (SOME (parse_proof_steps (rev acc)))
                | fields as "proof-step" :: _ =>
-                   if active then loop more active (parse_proof_step fields :: acc) found
+                   if active then loop more active (fields :: acc) found
                    else loop more active acc found
                | _ => loop more active acc found)
   in
@@ -308,7 +478,7 @@ fun analyser_proof_ir_plan_for_boundary (boundary : HolbuildTheoryCheckpoints.bo
       | NONE => raise Error ("proof-IR plan missing for execution-plan theorem: " ^ name)
   end
 
-fun print_static_goalfrag_plan project new_ir source theorem boundary_opt =
+fun print_static_execution_plan project new_ir source theorem boundary_opt =
   (print (let val plan = analyser_proof_ir_plan_for_boundary (case boundary_opt of SOME b => b | NONE => raise Error "internal error: missing proof-IR boundary")
           in
             "holbuild proof-ir plan " ^ #logical_name source ^ ":" ^ theorem ^ " source=" ^ #relative_path source ^
@@ -329,13 +499,13 @@ fun find_theorem_in_source theorem source =
       SOME (_, boundary) => boundary
     | NONE => raise Error ("theorem not found for execution-plan: " ^ #logical_name source ^ ":" ^ theorem)
 
-fun print_goalfrag_plan_selector new_ir project selector =
+fun print_execution_plan_selector new_ir project selector =
   let
-    val {theory, theorem} = parse_goalfrag_selector selector
+    val {theory, theorem} = parse_execution_plan_selector selector
     val index = HolbuildSourceIndex.discover project
     val source = find_theory_source index theory
   in
-    print_static_goalfrag_plan project new_ir source theorem (SOME (find_theorem_in_source theorem source))
+    print_static_execution_plan project new_ir source theorem (SOME (find_theorem_in_source theorem source))
   end
 
 fun positive_int label text =
@@ -436,18 +606,17 @@ fun configure_analyser_for_toolchain ({holdir, ...} : HolbuildToolchain.t) =
   if holdir = "" then HolbuildDependencies.clear_analyser_path ()
   else HolbuildDependencies.set_analyser_path (HolbuildHolSharedCache.analyser_path_for_holdir holdir)
 
-fun build tc cli_jobs args =
+fun build_once tc cli_jobs ({dry_run, watch, force, use_cache, skip_checkpoints, proof_steps, new_ir, tactic_timeout, tactic_timeout_set, execution_plan, trace_steps, repl_on_failure, retain_debug_artifacts, warn_unreachable}, targets) =
   let
     val project = timed_phase "project.discover" load_project
-    val ({dry_run, force, use_cache, skip_checkpoints, goalfrag, new_ir, tactic_timeout, tactic_timeout_set, goalfrag_plan, goalfrag_trace, repl_on_failure, retain_debug_artifacts, warn_unreachable}, targets) = split_flags args
     val _ = HolbuildStatus.set_retain_debug_artifacts retain_debug_artifacts
     val jobs = if repl_on_failure then 1 else effective_jobs project cli_jobs
     val _ =
       if HolbuildStatus.json_mode () andalso dry_run then
         raise Error "--json does not support build --dry-run yet"
-      else if HolbuildStatus.json_mode () andalso goalfrag_trace then
+      else if HolbuildStatus.json_mode () andalso trace_steps then
         raise Error "--json does not support --trace-steps until structured proof-step trace events exist"
-      else if dry_run andalso goalfrag_trace then
+      else if dry_run andalso trace_steps then
         raise Error "--trace-steps requires build execution; use --force to inspect up-to-date targets"
       else if dry_run andalso repl_on_failure then
         raise Error "--repl-on-failure requires build execution"
@@ -455,13 +624,13 @@ fun build tc cli_jobs args =
         raise Error "--json does not support --repl-on-failure"
       else if skip_checkpoints andalso repl_on_failure then
         raise Error "--repl-on-failure requires checkpoints; remove --skip-checkpoints"
-      else if not goalfrag andalso new_ir then
+      else if not proof_steps andalso new_ir then
         raise Error "proof steps are required for proof IR; remove --skip-proof-steps"
-      else if not goalfrag andalso tactic_timeout_set then
+      else if not proof_steps andalso tactic_timeout_set then
         raise Error "--tactic-timeout requires proof steps; remove --skip-proof-steps"
-      else if not goalfrag andalso goalfrag_trace then
+      else if not proof_steps andalso trace_steps then
         raise Error "--trace-steps requires proof steps; remove --skip-proof-steps"
-      else if not goalfrag andalso repl_on_failure then
+      else if not proof_steps andalso repl_on_failure then
         raise Error "--repl-on-failure requires proof steps; remove --skip-proof-steps"
       else ()
     fun default_tactic_timeout () =
@@ -473,13 +642,13 @@ fun build tc cli_jobs args =
        force = force,
        force_targets = force_targets,
        skip_checkpoints = skip_checkpoints,
-       goalfrag = goalfrag,
+       proof_steps = proof_steps,
        new_ir = new_ir,
        node_tactic_timeouts =
          if tactic_timeout_set then HolbuildTacticTimeoutPolicy.plan_timeouts project plan tactic_timeout
          else HolbuildTacticTimeoutPolicy.entry_timeouts project index entry_plan (default_tactic_timeout ()),
-       goalfrag_plan = goalfrag_plan,
-       goalfrag_trace = goalfrag_trace,
+       execution_plan = execution_plan,
+       trace_steps = trace_steps,
        repl_on_failure = repl_on_failure}
     fun prepare_plan () =
       let
@@ -514,6 +683,77 @@ fun build tc cli_jobs args =
   in
     if dry_run then describe_dry_run ()
     else HolbuildBuildExec.with_project_lock project "build" execute_build
+  end
+
+fun build_iteration_error_message exn =
+  case exn of
+      Error msg => SOME msg
+    | HolbuildToolchain.Error msg => SOME msg
+    | HolbuildProject.Error msg => SOME msg
+    | HolbuildGenerators.Error msg => SOME msg
+    | HolbuildGenerators.ErrorWithDebugArtifacts (msg, _) => SOME msg
+    | HolbuildSourceIndex.Error msg => SOME msg
+    | HolbuildSourceIndex.ErrorWithDebugArtifacts (msg, _) => SOME msg
+    | HolbuildDependencies.Error msg => SOME msg
+    | HolbuildBuildPlan.Error msg => SOME msg
+    | HolbuildBuildExec.Error msg => SOME msg
+    | HolbuildBuildExec.ErrorWithDebugArtifacts (msg, _) => SOME msg
+    | HolbuildHolSharedCache.Error msg => SOME msg
+    | HolbuildCache.Error msg => SOME msg
+    | HolbuildCacheConfig.Error msg => SOME msg
+    | HolbuildWatch.Error msg => SOME msg
+    | _ => NONE
+
+fun current_watch_paths previous =
+  let
+    val project = timed_phase "watch.project.discover" load_project
+    val index = timed_phase "watch.source.discover" (fn () => HolbuildSourceIndex.discover project)
+  in
+    HolbuildWatch.watch_paths project index
+  end
+  handle exn =>
+    case (build_iteration_error_message exn, previous) of
+        (SOME msg, SOME paths) => (warn ("could not recompute watch set: " ^ msg); paths)
+      | (SOME msg, NONE) => raise Error ("could not compute watch set: " ^ msg)
+      | (NONE, _) => raise exn
+
+fun build_watch tc cli_jobs parsed =
+  let
+    val _ = HolbuildWatch.ensure_inotifywait ()
+    fun attempt () =
+      (build_once tc cli_jobs parsed; ())
+      handle exn =>
+        case build_iteration_error_message exn of
+            SOME msg => warn ("build failed: " ^ msg)
+          | NONE => raise exn
+    fun loop previous_paths =
+      let
+        val before_paths = current_watch_paths previous_paths
+        val _ = attempt ()
+        val paths = current_watch_paths (SOME before_paths)
+        val _ = warn ("watching " ^ Int.toString (length paths) ^ " project path(s); waiting for changes")
+        val _ = HolbuildWatch.wait_for_change paths
+      in
+        loop (SOME paths)
+      end
+  in
+    loop NONE
+  end
+
+fun build tc cli_jobs args =
+  let
+    val parsed as ({dry_run, watch, repl_on_failure, ...}, _) = split_flags args
+    val _ =
+      if watch andalso HolbuildStatus.json_mode () then
+        raise Error "--json does not support build --watch yet"
+      else if watch andalso dry_run then
+        raise Error "--watch does not support --dry-run"
+      else if watch andalso repl_on_failure then
+        raise Error "--watch does not support --repl-on-failure"
+      else ()
+  in
+    if watch then build_watch tc cli_jobs parsed
+    else build_once tc cli_jobs parsed
   end
 
 datatype export_args = ExportArgs of {build_first : bool, output : string, targets : string list}
@@ -556,11 +796,11 @@ fun export_build_options project index entry_plan plan =
      force = HolbuildBuildExec.ForceNone,
      force_targets = [],
      skip_checkpoints = false,
-     goalfrag = true,
+     proof_steps = true,
      new_ir = true,
      node_tactic_timeouts = HolbuildTacticTimeoutPolicy.entry_timeouts project index entry_plan (default_tactic_timeout ()),
-     goalfrag_plan = NONE,
-     goalfrag_trace = false,
+     execution_plan = NONE,
+     trace_steps = false,
      repl_on_failure = false}
   end
 
@@ -677,6 +917,7 @@ fun import_archive args =
         end
     | _ => raise Error "usage: holbuild import FILE"
 
+
 fun clean_targets args =
   let
     val project = timed_phase "project.discover" load_project
@@ -728,7 +969,7 @@ fun build_heap tc cli_jobs target =
         val toolchain_key = timed_phase "toolchain.key" (fn () => HolbuildToolchain.toolchain_key tc)
         val output_path = HolbuildProject.abs_under (#root project) output
       in
-        HolbuildBuildExec.build {use_cache = true, force = HolbuildBuildExec.ForceNone, force_targets = [], skip_checkpoints = false, goalfrag = true, new_ir = true, node_tactic_timeouts = HolbuildTacticTimeoutPolicy.entry_timeouts project index plan (SOME 2.5), goalfrag_plan = NONE, goalfrag_trace = false, repl_on_failure = false}
+        HolbuildBuildExec.build {use_cache = true, force = HolbuildBuildExec.ForceNone, force_targets = [], skip_checkpoints = false, proof_steps = true, new_ir = true, node_tactic_timeouts = HolbuildTacticTimeoutPolicy.entry_timeouts project index plan (SOME 2.5), execution_plan = NONE, trace_steps = false, repl_on_failure = false}
                                tc project plan toolchain_key jobs;
         HolbuildBuildExec.export_heap tc project plan output_path
       end
@@ -763,13 +1004,13 @@ fun run_hol tc subcommand user_args =
 fun repl_hol tc user_args =
   run_hol_with HolbuildToolchain.run_interactive tc "repl" user_args
 
-fun goalfrag_plan_command _ _ =
+fun removed_legacy_plan_command _ _ =
   raise Error "goalfrag-plan has been removed; use execution-plan THEORY:THEOREM"
 
 fun execution_plan_command tc args =
   (configure_analyser_for_toolchain tc;
    case args of
-       [selector] => print_goalfrag_plan_selector true (load_project ()) selector
+       [selector] => print_execution_plan_selector true (load_project ()) selector
      | _ => raise Error "usage: holbuild execution-plan THEORY:THEOREM")
 
 fun reject_json command =
@@ -779,10 +1020,10 @@ fun reject_json command =
 
 fun dispatch tc jobs args =
   case args of
-      [] => (reject_json "context"; context ())
+      [] => build tc jobs []
     | "context" :: [] => (reject_json "context"; context ())
     | "execution-plan" :: rest => (reject_json "execution-plan"; execution_plan_command tc rest)
-    | "goalfrag-plan" :: rest => goalfrag_plan_command tc rest
+    | "goalfrag-plan" :: rest => removed_legacy_plan_command tc rest
     | "build" :: rest => build tc jobs rest
     | "clean" :: rest => (reject_json "clean"; clean_targets rest)
     | "heap" :: [target] => (reject_json "heap"; build_heap tc jobs target)
@@ -791,7 +1032,8 @@ fun dispatch tc jobs args =
     | "repl" :: rest => (reject_json "repl"; repl_hol tc rest)
     | "export" :: rest => (reject_json "export"; export_archive tc jobs rest)
     | "import" :: rest => (reject_json "import"; import_archive rest)
-    | cmd :: _ => raise Error ("unknown command: " ^ cmd)
+    | cmd :: _ => if known_command cmd then raise Error ("unknown command: " ^ cmd)
+                  else build tc jobs args
 
 fun parse_gc_args args =
   let
@@ -808,7 +1050,7 @@ fun parse_gc_args args =
         | "--days" :: n :: xs => loop (HolbuildCache.parse_days n) max_checkpoints_gb clean_only cache_only xs
         | "--max-checkpoints-gb" :: n :: xs =>
             (case Int.fromString n of
-                 SOME gb => if gb >= 0 then loop days gb clean_only cache_only xs
+                 SOME gb => if gb >= 0 then loop days (SOME gb) clean_only cache_only xs
                             else raise Error "--max-checkpoints-gb must be non-negative"
                | NONE => raise Error "--max-checkpoints-gb requires an integer")
         | "--max-checkpoints-gb" :: [] => raise Error "--max-checkpoints-gb requires GB"
@@ -816,12 +1058,13 @@ fun parse_gc_args args =
         | "--cache-only" :: xs => loop days max_checkpoints_gb clean_only true xs
         | arg :: _ => raise Error ("unknown gc option: " ^ arg)
   in
-    loop HolbuildCache.default_retention_days HolbuildBuildExec.default_max_checkpoints_gb false false args
+    loop HolbuildCache.default_retention_days NONE false false args
   end
 
-fun run_project_gc (days, max_checkpoints_gb) =
+fun run_project_gc (days, max_checkpoints_gb_option) =
   let
     val project = load_project ()
+    val max_checkpoints_gb = Option.getOpt(max_checkpoints_gb_option, HolbuildBuildExec.project_checkpoint_limit_gb project)
     fun clean_project () = HolbuildBuildExec.clean_project project days max_checkpoints_gb
   in
     HolbuildBuildExec.with_project_lock project "gc" clean_project
@@ -880,7 +1123,7 @@ fun buildhol holdir maxheap =
     print (holdir ^ "\n")
   end
 
-fun removed_goalfrag_build_arg arg =
+fun removed_legacy_proof_step_build_arg arg =
   arg = "--goalfrag" orelse arg = "--goalfrag-plan" orelse String.isPrefix "--goalfrag-plan=" arg
 
 fun trace_steps_build_arg arg = arg = "--trace-steps" orelse arg = "--goalfrag-trace"
@@ -891,36 +1134,49 @@ fun dispatch_with_options {holdir, source_dir, cache_dir, jobs, maxheap, json, v
    HolbuildStatus.set_retain_debug_artifacts false;
    Option.app HolbuildProject.set_source_dir source_dir;
    Option.app HolbuildCacheConfig.set_cache_root cache_dir;
+   if args = ["--help"] orelse args = ["-h"] then global_help ()
+   else if maybe_handle_command_help args then () else
    case args of
        "gc" :: rest => (reject_json "gc"; gc rest)
      | "cache" :: rest => (reject_json "cache"; HolbuildCache.dispatch rest)
      | "import" :: rest => (reject_json "import"; import_archive rest)
      | "buildhol" :: [] => buildhol holdir maxheap
+     | "buildhol" :: _ => raise Error "usage: holbuild buildhol"
      | "goalfrag-plan" :: _ => raise Error "goalfrag-plan has been removed; use execution-plan THEORY:THEOREM"
+     | [] => dispatch (effective_toolchain holdir maxheap) jobs args
      | "build" :: rest =>
-         if List.exists removed_goalfrag_build_arg rest then
-           (case List.find removed_goalfrag_build_arg rest of
+         if List.exists removed_legacy_proof_step_build_arg rest then
+           (case List.find removed_legacy_proof_step_build_arg rest of
                 SOME "--goalfrag" => raise Error "--goalfrag has been removed; proof steps are enabled by default"
               | SOME _ => raise Error "--goalfrag-plan has been removed; use execution-plan THEORY:THEOREM"
               | NONE => dispatch (effective_toolchain holdir maxheap) jobs args)
          else if json andalso List.exists trace_steps_build_arg rest then
            raise Error "--json does not support --trace-steps until structured proof-step trace events exist"
          else dispatch (effective_toolchain holdir maxheap) jobs args
-     | [] => dispatch (context_toolchain holdir maxheap) jobs args
      | "context" :: _ => dispatch (context_toolchain holdir maxheap) jobs args
      | _ => dispatch (effective_toolchain holdir maxheap) jobs args)
 
 fun is_broken_pipe (IO.Io {cause = OS.SysErr (msg, _), ...}) = msg = "Broken pipe"
   | is_broken_pipe _ = false
 
+fun install_signal_handlers () =
+  let
+    fun handler _ = (HolbuildToolchain.cleanup_active_children (); err "interrupted")
+    val _ = Signal.signal (Posix.Signal.int, Signal.SIG_HANDLE handler)
+    val _ = Signal.signal (Posix.Signal.term, Signal.SIG_HANDLE handler)
+  in
+    ()
+  end
+
 fun main raw_args =
   (let
+     val _ = install_signal_handlers ()
      val _ = HolbuildStatus.set_json_mode (List.exists (fn s => s = "--json") raw_args)
      val _ =
        if raw_args = ["--version"] then
          (print ("holbuild " ^ HolbuildVersion.version ^ "\n"); OS.Process.exit OS.Process.success)
-       else if List.exists (fn s => s = "--help" orelse s = "-h" orelse s = "help") raw_args
-       then (usage (); OS.Process.exit OS.Process.success)
+       else if raw_args = ["--help"] orelse raw_args = ["-h"]
+       then (global_help (); OS.Process.exit OS.Process.success)
        else ()
      val (options, args) = parse_global_options raw_args
    in
@@ -943,6 +1199,7 @@ fun main raw_args =
        | HolbuildCacheArchive.Error msg => err msg
        | HolbuildCacheTransfer.Error msg => err msg
        | HolbuildCacheConfig.Error msg => err msg
+       | HolbuildWatch.Error msg => err msg
        | e => if is_broken_pipe e then OS.Process.exit OS.Process.success
               else err (General.exnMessage e)
 

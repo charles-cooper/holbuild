@@ -1,6 +1,6 @@
 ---
 name: holbuild
-Build HOL4 projects with holbuild. Use when working with holproject.toml manifests, building theory targets like FooTheory, managing dependencies, configuring proof IR/GoalFrag or checkpoint behavior, using the holbuild CLI, generated source, JSON output, tactic timeouts, cache/gc, or heap exports.
+Build HOL4 projects with holbuild. Use when working with holproject.toml manifests, building theory targets like FooTheory, managing dependencies, configuring proof IR/proof-step or checkpoint behavior, using the holbuild CLI, generated source, JSON output, tactic timeouts, cache/gc, or heap exports.
 ---
 
 # holbuild
@@ -84,6 +84,6 @@ Root project artifacts live under `.holbuild/`: `gen/`, `obj/`, `dep/`, `checkpo
 - [manifest.md](references/manifest.md) — `holproject.toml` schema, source discovery, generators, action policies, HOLSource headers
 - [local-config.md](references/local-config.md) — `.holconfig.toml` overrides, excludes, jobs, timeout
 - [build-model.md](references/build-model.md) — dependency inference, action keys, invalidation, cache, write locks, gc
-- [checkpoints-goalfrag.md](references/checkpoints-goalfrag.md) — proof IR/GoalFrag, checkpoint lifecycle, tactic timeouts, replay, env vars
+- [checkpoints-proof-steps.md](references/checkpoints-proof-steps.md) — proof IR/proof-step checkpoints, tactic timeouts, replay, env vars
 - [dependencies.md](references/dependencies.md) — declaring schema 2 deps, project HOL, shim manifests, transitive resolution
 - [heaps-and-run.md](references/heaps-and-run.md) — `[[heap]]` exports; `run`/`repl` prototype status
