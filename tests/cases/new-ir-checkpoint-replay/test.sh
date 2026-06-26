@@ -55,7 +55,7 @@ first_count=$(wc -c < "$counter" | tr -d ' ')
 [[ "$first_count" = "2" ]] || { echo "expected first run to execute slow prefix twice, got $first_count" >&2; exit 1; }
 require_grep "FAIL_TAC \"first suffix failure\"" "$first_log"
 require_grep "failed tactic top input goal:" "$first_log"
-require_grep "plan position: 02 list_tactic >> FAIL_TAC" "$first_log"
+require_grep 'plan position: 02 step FAIL_TAC "first suffix failure"' "$first_log"
 require_grep "failed tactic input goals: 1" "$first_log"
 require_file "$(find "$project/.holbuild/checkpoints" -name '*slow_prefix_failure_failed_prefix.save' -print -quit)"
 
@@ -73,7 +73,7 @@ edited_count=$(wc -c < "$counter" | tr -d ' ')
 [[ "$edited_count" = "2" ]] || { echo "new-ir failed-prefix replay reran unchanged slow prefix after suffix edit; count $edited_count" >&2; exit 1; }
 require_grep "from: failed-prefix checkpoint in slow_prefix_failure" "$edited_log"
 require_grep "edited suffix failure" "$edited_log"
-require_grep "plan position: 02 list_tactic >> FAIL_TAC" "$edited_log"
+require_grep 'plan position: 02 step FAIL_TAC "edited suffix failure"' "$edited_log"
 require_grep "failed tactic input goals: 1" "$edited_log"
 
 python3 - <<PY
@@ -114,7 +114,7 @@ if (cd "$prefix_edit_project" && "$HOLBUILD_BIN" build ATheory) > "$prefix_edit_
   echo "expected prefix-edit replay seed to fail" >&2
   exit 1
 fi
-require_grep "plan position: 04 branch_suffix" "$prefix_edit_first_log"
+require_grep "plan position: 07 step NO_TAC" "$prefix_edit_first_log"
 require_file "$(find "$prefix_edit_project/.holbuild/checkpoints" -name '*replay_after_prefix_edit_failed_prefix.save' -print -quit)"
 
 python3 - <<PY
@@ -128,6 +128,7 @@ if (cd "$prefix_edit_project" && "$HOLBUILD_BIN" build ATheory) > "$prefix_edit_
   exit 1
 fi
 require_grep "from: failed-prefix checkpoint in replay_after_prefix_edit" "$prefix_edit_second_log"
+require_grep "restoring proof-ir prefix with 4 successful leaf steps" "$prefix_edit_second_log"
 if grep -q "fragment: >> strip_tac" "$prefix_edit_second_log"; then
   echo "failed-prefix replay after prefix edit resumed from an inconsistent proof state" >&2
   exit 1
@@ -136,7 +137,136 @@ if grep -q "branch suffix without active branch" "$prefix_edit_second_log"; then
   echo "failed-prefix replay after prefix edit lost branch state" >&2
   exit 1
 fi
-require_grep "plan position: 05 branch_suffix" "$prefix_edit_second_log"
+require_grep "plan position: 08 step NO_TAC" "$prefix_edit_second_log"
+
+cases_replay_project=$tmpdir/cases-replay-project
+cases_counter=$tmpdir/cases-count.txt
+mkdir -p "$cases_replay_project/src"
+touch "$cases_counter"
+cp "$project/holproject.toml" "$cases_replay_project/holproject.toml"
+cat > "$cases_replay_project/src/AScript.sml" <<SML
+open HolKernel Parse boolLib bossLib;
+val _ = new_theory "A";
+val slow_prefix_counter = "$cases_counter";
+fun bump_counter () =
+  let val out = TextIO.openAppend slow_prefix_counter
+  in TextIO.output(out, "x"); TextIO.closeOut out end;
+fun slow_tac g = (bump_counter(); OS.Process.sleep (Time.fromReal 0.25); ALL_TAC g);
+Theorem cases_replay:
+  T /\\ T
+Proof
+  CONJ_TAC >| [
+    slow_tac >> ACCEPT_TAC TRUTH,
+    slow_tac >> FAIL_TAC "cases suffix failure"
+  ]
+QED
+val _ = export_theory();
+SML
+cases_first_log=$tmpdir/cases-first.log
+if (cd "$cases_replay_project" && "$HOLBUILD_BIN" build ATheory) > "$cases_first_log" 2>&1; then
+  echo "expected cases replay seed to fail" >&2
+  exit 1
+fi
+cases_first_count=$(wc -c < "$cases_counter" | tr -d ' ')
+[[ "$cases_first_count" = "2" ]] || { echo "expected first cases run to execute slow prefix twice, got $cases_first_count" >&2; exit 1; }
+require_grep 'plan position: 07 step FAIL_TAC "cases suffix failure"' "$cases_first_log"
+python3 - <<PY
+from pathlib import Path
+path = Path("$cases_replay_project/src/AScript.sml")
+path.write_text(path.read_text().replace('FAIL_TAC "cases suffix failure"', 'FAIL_TAC "edited cases suffix failure"'))
+PY
+cases_second_log=$tmpdir/cases-second.log
+if (cd "$cases_replay_project" && "$HOLBUILD_BIN" build ATheory) > "$cases_second_log" 2>&1; then
+  echo "expected edited cases replay proof to fail" >&2
+  exit 1
+fi
+cases_second_count=$(wc -c < "$cases_counter" | tr -d ' ')
+[[ "$cases_second_count" = "2" ]] || { echo "cases failed-prefix replay reran unchanged case prefixes; count $cases_second_count" >&2; exit 1; }
+require_grep "from: failed-prefix checkpoint in cases_replay" "$cases_second_log"
+require_grep 'plan position: 07 step FAIL_TAC "edited cases suffix failure"' "$cases_second_log"
+
+each_replay_project=$tmpdir/each-replay-project
+each_counter=$tmpdir/each-count.txt
+mkdir -p "$each_replay_project/src"
+touch "$each_counter"
+cp "$project/holproject.toml" "$each_replay_project/holproject.toml"
+cat > "$each_replay_project/src/AScript.sml" <<SML
+open HolKernel Parse boolLib bossLib;
+val _ = new_theory "A";
+val slow_prefix_counter = "$each_counter";
+fun bump_counter () =
+  let val out = TextIO.openAppend slow_prefix_counter
+  in TextIO.output(out, "x"); TextIO.closeOut out end;
+fun slow_tac g = (bump_counter(); OS.Process.sleep (Time.fromReal 0.25); ALL_TAC g);
+Theorem each_replay:
+  (T /\\ T) /\\ (T /\\ T)
+Proof
+  CONJ_TAC >>
+  (slow_tac >> CONJ_TAC >- ACCEPT_TAC TRUTH >> FAIL_TAC "each suffix failure")
+QED
+val _ = export_theory();
+SML
+each_first_log=$tmpdir/each-first.log
+if (cd "$each_replay_project" && "$HOLBUILD_BIN" build ATheory) > "$each_first_log" 2>&1; then
+  echo "expected each replay seed to fail" >&2
+  exit 1
+fi
+each_first_count=$(wc -c < "$each_counter" | tr -d ' ')
+[[ "$each_first_count" = "1" ]] || { echo "expected first each run to execute slow prefix once before failure, got $each_first_count" >&2; exit 1; }
+require_grep 'FAIL_TAC "each suffix failure"' "$each_first_log"
+python3 - <<PY
+from pathlib import Path
+path = Path("$each_replay_project/src/AScript.sml")
+path.write_text(path.read_text().replace('FAIL_TAC "each suffix failure"', 'FAIL_TAC "edited each suffix failure"'))
+PY
+each_second_log=$tmpdir/each-second.log
+if (cd "$each_replay_project" && "$HOLBUILD_BIN" build ATheory) > "$each_second_log" 2>&1; then
+  echo "expected edited each replay proof to fail" >&2
+  exit 1
+fi
+each_second_count=$(wc -c < "$each_counter" | tr -d ' ')
+[[ "$each_second_count" = "1" ]] || { echo "each failed-prefix replay reran unchanged each prefix; count $each_second_count" >&2; exit 1; }
+require_grep "from: failed-prefix checkpoint in each_replay" "$each_second_log"
+require_grep 'FAIL_TAC "edited each suffix failure"' "$each_second_log"
+
+unsafe_replay_project=$tmpdir/unsafe-replay-project
+unsafe_counter=$tmpdir/unsafe-count.txt
+mkdir -p "$unsafe_replay_project/src"
+touch "$unsafe_counter"
+cp "$project/holproject.toml" "$unsafe_replay_project/holproject.toml"
+cat > "$unsafe_replay_project/src/AScript.sml" <<SML
+open HolKernel Parse boolLib bossLib;
+val _ = new_theory "A";
+val slow_prefix_counter = "$unsafe_counter";
+fun bump_counter () =
+  let val out = TextIO.openAppend slow_prefix_counter
+  in TextIO.output(out, "x"); TextIO.closeOut out end;
+fun slow_tac g = (bump_counter(); OS.Process.sleep (Time.fromReal 0.25); ALL_TAC g);
+Theorem unsafe_replay:
+  T /\ T
+Proof
+  CONJ_TAC >> FAIL_TAC "unsafe suffix failure"
+QED
+val _ = export_theory();
+SML
+unsafe_first_log=$tmpdir/unsafe-first.log
+if (cd "$unsafe_replay_project" && "$HOLBUILD_BIN" build ATheory) > "$unsafe_first_log" 2>&1; then
+  echo "expected unsafe replay seed to fail" >&2
+  exit 1
+fi
+python3 - <<PY
+from pathlib import Path
+path = Path("$unsafe_replay_project/src/AScript.sml")
+path.write_text(path.read_text().replace('CONJ_TAC >> FAIL_TAC "unsafe suffix failure"', 'ALL_TAC >> FAIL_TAC "unsafe edited failure"'))
+PY
+unsafe_second_log=$tmpdir/unsafe-second.log
+if (cd "$unsafe_replay_project" && "$HOLBUILD_BIN" build ATheory) > "$unsafe_second_log" 2>&1; then
+  echo "expected unsafe edited proof to fail" >&2
+  exit 1
+fi
+require_grep "from: failed-prefix checkpoint in unsafe_replay" "$unsafe_second_log"
+require_grep 'plan position: 01 step FAIL_TAC "unsafe edited failure"' "$unsafe_second_log"
+require_grep "T ∧ T" "$unsafe_second_log"
 
 resume_project=$tmpdir/resume-project
 resume_counter=$tmpdir/resume-count.txt
@@ -336,3 +466,187 @@ if grep -q "from: failed-prefix checkpoint in first_stale_prefix" "$stale_third_
   exit 1
 fi
 require_grep "late non-proof failure edited" "$stale_third_log"
+
+# Regression for unsafe salvage inside structural cases: if the failed-prefix
+# endpoint becomes stale, salvaging to an earlier leaf inside a cases frame must
+# preserve the frame/focus metadata needed to continue in the current case.
+structural_salvage_project=$tmpdir/structural-salvage-project
+structural_salvage_counter=$tmpdir/structural-salvage-count.txt
+mkdir -p "$structural_salvage_project/src"
+touch "$structural_salvage_counter"
+cp "$project/holproject.toml" "$structural_salvage_project/holproject.toml"
+cat > "$structural_salvage_project/src/AScript.sml" <<SML
+open HolKernel Parse boolLib bossLib;
+val _ = new_theory "A";
+val slow_prefix_counter = "$structural_salvage_counter";
+fun bump_counter () =
+  let val out = TextIO.openAppend slow_prefix_counter
+  in TextIO.output(out, "x"); TextIO.closeOut out end;
+fun slow_tac g = (bump_counter(); ALL_TAC g);
+Theorem salvage_inside_cases:
+  T /\\ T
+Proof
+  CONJ_TAC >| [
+    ACCEPT_TAC TRUTH,
+    slow_tac >> ALL_TAC >> FAIL_TAC "structural salvage old suffix"
+  ]
+QED
+val _ = export_theory();
+SML
+structural_salvage_first_log=$tmpdir/structural-salvage-first.log
+if (cd "$structural_salvage_project" && "$HOLBUILD_BIN" build ATheory) > "$structural_salvage_first_log" 2>&1; then
+  echo "expected structural salvage seed to fail" >&2
+  exit 1
+fi
+structural_salvage_first_count=$(wc -c < "$structural_salvage_counter" | tr -d ' ')
+[[ "$structural_salvage_first_count" = "1" ]] || { echo "expected structural salvage seed to run slow_tac once, got $structural_salvage_first_count" >&2; exit 1; }
+require_grep 'structural salvage old suffix' "$structural_salvage_first_log"
+python3 - <<PY
+from pathlib import Path
+path = Path("$structural_salvage_project/src/AScript.sml")
+path.write_text(path.read_text().replace('slow_tac >> ALL_TAC >> FAIL_TAC "structural salvage old suffix"',
+                                      'slow_tac >> FAIL_TAC "structural salvage edited suffix"'))
+PY
+structural_salvage_second_log=$tmpdir/structural-salvage-second.log
+if (cd "$structural_salvage_project" && "$HOLBUILD_BIN" build ATheory) > "$structural_salvage_second_log" 2>&1; then
+  echo "expected structural salvage edited proof to fail" >&2
+  exit 1
+fi
+structural_salvage_second_count=$(wc -c < "$structural_salvage_counter" | tr -d ' ')
+[[ "$structural_salvage_second_count" = "1" ]] || { echo "structural failed-prefix salvage reran unchanged case leaf; count $structural_salvage_second_count" >&2; exit 1; }
+require_grep "from: failed-prefix checkpoint in salvage_inside_cases" "$structural_salvage_second_log"
+require_grep 'structural salvage edited suffix' "$structural_salvage_second_log"
+if grep -q "case count mismatch\|structural frame mismatch\|focus close without active focus" "$structural_salvage_second_log"; then
+  echo "structural failed-prefix salvage lost cases frame/focus state" >&2
+  exit 1
+fi
+
+# Regression for overly-permissive salvage: a leaf with the same path/program but
+# a changed source end should not be silently reused as a valid checkpoint prefix.
+source_end_salvage_project=$tmpdir/source-end-salvage-project
+source_end_salvage_counter=$tmpdir/source-end-salvage-count.txt
+mkdir -p "$source_end_salvage_project/src"
+touch "$source_end_salvage_counter"
+cp "$project/holproject.toml" "$source_end_salvage_project/holproject.toml"
+cat > "$source_end_salvage_project/src/AScript.sml" <<SML
+open HolKernel Parse boolLib bossLib;
+val _ = new_theory "A";
+val slow_prefix_counter = "$source_end_salvage_counter";
+fun bump_counter () =
+  let val out = TextIO.openAppend slow_prefix_counter
+  in TextIO.output(out, "x"); TextIO.closeOut out end;
+fun slow_tac g = (bump_counter(); ALL_TAC g);
+Theorem source_end_salvage:
+  T
+Proof
+  slow_tac >> FAIL_TAC "source-end old suffix"
+QED
+val _ = export_theory();
+SML
+source_end_salvage_first_log=$tmpdir/source-end-salvage-first.log
+if (cd "$source_end_salvage_project" && "$HOLBUILD_BIN" build ATheory) > "$source_end_salvage_first_log" 2>&1; then
+  echo "expected source-end salvage seed to fail" >&2
+  exit 1
+fi
+source_end_salvage_first_count=$(wc -c < "$source_end_salvage_counter" | tr -d ' ')
+[[ "$source_end_salvage_first_count" = "1" ]] || { echo "expected source-end seed to run slow_tac once, got $source_end_salvage_first_count" >&2; exit 1; }
+python3 - <<PY
+from pathlib import Path
+path = Path("$source_end_salvage_project/src/AScript.sml")
+path.write_text(path.read_text().replace('slow_tac >> FAIL_TAC "source-end old suffix"',
+                                      '   slow_tac >> FAIL_TAC "source-end edited suffix"'))
+PY
+source_end_salvage_second_log=$tmpdir/source-end-salvage-second.log
+if (cd "$source_end_salvage_project" && "$HOLBUILD_BIN" build ATheory) > "$source_end_salvage_second_log" 2>&1; then
+  echo "expected source-end edited proof to fail" >&2
+  exit 1
+fi
+source_end_salvage_second_count=$(wc -c < "$source_end_salvage_counter" | tr -d ' ')
+[[ "$source_end_salvage_second_count" = "2" ]] || { echo "source-end changed leaf was incorrectly salvaged without rerunning; count $source_end_salvage_second_count" >&2; exit 1; }
+require_grep 'source-end edited suffix' "$source_end_salvage_second_log"
+
+all_tac_span_project=$tmpdir/all-tac-span-project
+all_tac_span_counter=$tmpdir/all-tac-span-count.txt
+mkdir -p "$all_tac_span_project/src"
+touch "$all_tac_span_counter"
+cp "$project/holproject.toml" "$all_tac_span_project/holproject.toml"
+cat > "$all_tac_span_project/src/AScript.sml" <<SML
+open HolKernel Parse boolLib bossLib;
+val _ = new_theory "A";
+val slow_prefix_counter = "$all_tac_span_counter";
+fun bump_counter () =
+  let val out = TextIO.openAppend slow_prefix_counter
+  in TextIO.output(out, "x"); TextIO.closeOut out end;
+fun slow_tac g = (bump_counter(); ALL_TAC g);
+Theorem all_tac_span_replay:
+  T
+Proof
+  slow_tac >> ALL_TAC >> FAIL_TAC "all-tac span suffix"
+QED
+val _ = export_theory();
+SML
+all_tac_span_log=$tmpdir/all-tac-span.log
+if (cd "$all_tac_span_project" && "$HOLBUILD_BIN" build ATheory) > "$all_tac_span_log" 2>&1; then
+  echo "expected all-tac span proof to fail" >&2
+  exit 1
+fi
+all_tac_span_meta=$(find "$all_tac_span_project/.holbuild/checkpoints" -name '*all_tac_span_replay_failed_prefix.save.meta' -print -quit)
+require_file "$all_tac_span_meta"
+python3 - "$all_tac_span_meta" <<'PY'
+import sys
+from pathlib import Path
+lines = Path(sys.argv[1]).read_text().splitlines()
+all_tac_leaves = [line for line in lines if line.startswith('leaf=') and 'ALL_TAC' in line]
+if not all_tac_leaves:
+    raise SystemExit('failed-prefix metadata did not record the ALL_TAC leaf')
+for line in all_tac_leaves:
+    fields = line[len('leaf='):].split('\t')
+    if len(fields) >= 2 and fields[1] == '0':
+        raise SystemExit(f'ALL_TAC leaf recorded source end 0: {line}')
+PY
+
+by_chain_resume_project=$tmpdir/by-chain-resume-project
+by_chain_resume_counter=$tmpdir/by-chain-resume-count.txt
+mkdir -p "$by_chain_resume_project/src"
+touch "$by_chain_resume_counter"
+cp "$project/holproject.toml" "$by_chain_resume_project/holproject.toml"
+cat > "$by_chain_resume_project/src/AScript.sml" <<SML
+open HolKernel Parse boolLib bossLib;
+val _ = new_theory "A";
+val by_chain_resume_counter = "$by_chain_resume_counter";
+fun bump_counter () =
+  let val out = TextIO.openAppend by_chain_resume_counter
+  in TextIO.output(out, "x"); TextIO.closeOut out end;
+fun counted_tac g = (bump_counter(); ALL_TAC g);
+Theorem by_chain_resume_inside_tac:
+  1 + 1 = SUC 1
+Proof
+  \`1 + 1 = 2\` by (counted_tac >> FAIL_TAC "old by rhs failure") >>
+  \`_ = SUC 1\` by EVAL_TAC >>
+  (fn g as (asl, _) =>
+     if length asl = 1 then ALL_TAC g
+     else FAIL_TAC "resumed by chain should leave exactly one assumption" g) >>
+  pop_assum ACCEPT_TAC
+QED
+val _ = export_theory();
+SML
+by_chain_resume_first_log=$tmpdir/by-chain-resume-first.log
+if (cd "$by_chain_resume_project" && "$HOLBUILD_BIN" build ATheory) > "$by_chain_resume_first_log" 2>&1; then
+  echo "expected by-chain resume seed proof to fail" >&2
+  exit 1
+fi
+by_chain_resume_first_count=$(wc -c < "$by_chain_resume_counter" | tr -d ' ')
+[[ "$by_chain_resume_first_count" = "1" ]] || { echo "expected by-chain seed to run counted_tac once, got $by_chain_resume_first_count" >&2; exit 1; }
+require_grep 'old by rhs failure' "$by_chain_resume_first_log"
+require_file "$(find "$by_chain_resume_project/.holbuild/checkpoints" -name '*by_chain_resume_inside_tac_failed_prefix.save' -print -quit)"
+python3 - <<PY
+from pathlib import Path
+path = Path("$by_chain_resume_project/src/AScript.sml")
+path.write_text(path.read_text().replace('FAIL_TAC "old by rhs failure"', 'EVAL_TAC'))
+PY
+by_chain_resume_second_log=$tmpdir/by-chain-resume-second.log
+(cd "$by_chain_resume_project" && "$HOLBUILD_BIN" build ATheory) > "$by_chain_resume_second_log" 2>&1
+by_chain_resume_second_count=$(wc -c < "$by_chain_resume_counter" | tr -d ' ')
+[[ "$by_chain_resume_second_count" = "1" ]] || { echo "by-chain failed-prefix replay reran unchanged counted_tac; count $by_chain_resume_second_count" >&2; exit 1; }
+require_grep 'from: failed-prefix checkpoint in by_chain_resume_inside_tac' "$by_chain_resume_second_log"
+require_grep 'ATheory built' "$by_chain_resume_second_log"

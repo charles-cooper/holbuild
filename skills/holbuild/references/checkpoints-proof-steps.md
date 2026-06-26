@@ -9,7 +9,7 @@ When proof steps are enabled (default), holbuild instruments modern theorem decl
 3. Rewrites source to insert theorem-boundary markers and load a runtime helper
 4. Runs theorem proofs through the selected runtime with per-step timeout, failure diagnostics, and optional checkpoint saves
 
-The runtime is **proof IR**. It lowers `HOLSourceAST.exp` directly and executes exact HOL tactic/list-tactic boundaries for recognized constructs. If the proof-IR planner cannot parse/decompose a recovered tactic expression, it falls back to a whole-tactic `StepPlain` so the proof still runs under the installed runtime. `--goalfrag` and `goalfrag-plan` have been removed. The old `--new-ir` flag is a deprecated no-op because proof IR is default.
+The runtime is **proof IR**. It lowers `HOLSourceAST.exp` directly and executes exact HOL tactic/list-tactic boundaries for recognized constructs. If the proof-IR planner cannot parse/decompose a recovered tactic expression, it falls back to a whole-tactic leaf so the proof still runs under the installed runtime. `--goalfrag` and `goalfrag-plan` have been removed. The old `--new-ir` flag is a deprecated no-op because proof IR is default.
 
 This enables:
 - Per-step tactic timeouts (`--tactic-timeout`)

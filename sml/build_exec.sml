@@ -6,7 +6,7 @@ structure FS = OS.FileSys
 
 exception Error of string
 exception ErrorWithDebugArtifacts of string * HolbuildStatus.debug_artifacts
-exception GoalfragPlanPrinted
+exception ExecutionPlanPrinted
 exception RetryInvalidCheckpoint
 
 fun has_suffix suffix s =
@@ -343,7 +343,7 @@ fun current_log_dir project node =
 
 fun current_build_log project node = Path.concat(current_log_dir project node, "build.log")
 fun current_checkpoint_failure_log project node = Path.concat(current_log_dir project node, "instrumented-failure.log")
-fun current_goalfrag_trace_log project node = Path.concat(current_log_dir project node, "proof-trace.log")
+fun current_proof_trace_log project node = Path.concat(current_log_dir project node, "proof-trace.log")
 
 fun staged_theory_file stage node ext = Path.concat(Path.concat(stage, ".hol/objs"), logical_name node ^ ext)
 fun staged_dat_reference stage node = Path.concat(stage, logical_name node ^ ".dat")
@@ -559,7 +559,7 @@ fun checkpoint_clean_artifact path =
   has_suffix ".save" path orelse has_suffix ".save.ok" path orelse
   has_suffix ".save.tmp" path orelse has_suffix ".save.ok.tmp" path orelse
   has_suffix ".save.bak" path orelse has_suffix ".save.ok.bak" path orelse
-  has_suffix ".meta" path orelse has_suffix ".prefix" path
+  has_suffix ".meta" path
 
 fun remove_empty_dir path = FS.rmDir path handle OS.SysErr _ => ()
 
@@ -576,7 +576,6 @@ fun checkpoint_save_artifact_base path =
   else if has_suffix ".save.tmp" path then SOME (drop_suffix ".tmp" path)
   else if has_suffix ".save.bak" path then SOME (drop_suffix ".bak" path)
   else if has_suffix ".meta" path then SOME (drop_suffix ".meta" path)
-  else if has_suffix ".prefix" path then SOME (drop_suffix ".prefix" path)
   else if has_suffix ".save" path then SOME path
   else NONE
 
@@ -958,8 +957,14 @@ fun find_substring needle haystack =
 fun hol_state_load_failure text =
   Option.isSome (find_substring "Couldn't load HOL base-state" text)
 
+fun selected_hol_state_missing_failure text =
+  Option.isSome (find_substring "selected HOL base-state checkpoint is missing" text)
+
 fun holbuild_runtime_missing_failure text =
   Option.isSome (find_substring "Structure (HolbuildRuntime) has not been declared" text)
+
+fun hol_static_error_failure text =
+  Option.isSome (find_substring "Static Errors" text)
 
 (* Defensive recovery for already-invalid checkpoint artifacts. Holbuild should
    preserve parent/child heap families atomically; this path is not a substitute
@@ -968,7 +973,8 @@ fun holbuild_runtime_missing_failure text =
    PolyML heap while still missing holbuild's runtime prelude; retry that case
    from a fresh dependency context too. *)
 fun invalid_checkpoint_retryable base_context run_context msg =
-  (hol_state_load_failure msg orelse holbuild_runtime_missing_failure msg) andalso
+  (hol_state_load_failure msg orelse selected_hol_state_missing_failure msg orelse
+   holbuild_runtime_missing_failure msg orelse hol_static_error_failure msg) andalso
   hol_context_path run_context <> hol_context_path base_context
 
 fun theorem_context_or_end_path path
@@ -1039,11 +1045,11 @@ fun checkpoint_failure_output project node input_key stage =
     (stage_build_output stage)
     (current_checkpoint_failure_log project node)
 
-fun goalfrag_trace_output project node input_key stage =
+fun proof_trace_output project node input_key stage =
   retained_or_ephemeral_output
     (HolbuildStatus.retain_debug_artifacts ())
     (stage_build_output stage)
-    (current_goalfrag_trace_log project node)
+    (current_proof_trace_log project node)
 
 val large_log_warning_threshold = 65536
 
@@ -1880,6 +1886,12 @@ fun best_replay_candidate requested_timeout project node theorem_checkpoints dec
       [] => NONE
     | first :: rest => SOME (List.foldl later_candidate first rest)
 
+fun strict_nonnegative_int_text text =
+  size text > 0 andalso List.all Char.isDigit (String.explode text)
+
+fun strict_nonnegative_int text =
+  if strict_nonnegative_int_text text then Int.fromString text else NONE
+
 fun failed_prefix_metadata path =
   case current_metadata (path ^ ".meta") of
       NONE => NONE
@@ -1891,9 +1903,15 @@ fun failed_prefix_metadata path =
                    if String.isPrefix prefix line then SOME (String.extract(line, size prefix, NONE)) else NONE)
                    lines
               end
-        in Option.mapPartial Int.fromString (value "step_count") end
-
-fun failed_prefix_text path = current_metadata (path ^ ".prefix")
+        in
+          case (value "proof_ir_failed_prefix_version", value "step_count", value "prefix_end", value "path", value "focus") of
+              (SOME version, SOME step_count_text, SOME _, SOME _, SOME _) =>
+                if version = "1" orelse version = "3" then
+                  Option.map (fn step_count => {step_count = step_count, metadata_text = text})
+                    (strict_nonnegative_int step_count_text)
+                else NONE
+            | _ => NONE
+        end
 
 fun without_proof_timeout text =
   String.concatWith "\n"
@@ -1909,11 +1927,10 @@ fun checkpoint_ok_text_matches_ordered requested_timeout path expected_text =
 
 fun failed_prefix_checkpoint requested_timeout checkpoint =
   if checkpoint_ok_text_matches_ordered requested_timeout (#failed_prefix_path checkpoint) (#failed_prefix_ok checkpoint) then
-    case (failed_prefix_metadata (#failed_prefix_path checkpoint),
-          failed_prefix_text (#failed_prefix_path checkpoint)) of
-        (SOME step_count, SOME prefix_text) =>
-          SOME {checkpoint = checkpoint, step_count = step_count, prefix_text = prefix_text}
-      | _ => NONE
+    case failed_prefix_metadata (#failed_prefix_path checkpoint) of
+        SOME {step_count, metadata_text} =>
+          SOME {checkpoint = checkpoint, step_count = step_count, metadata_text = metadata_text}
+      | NONE => NONE
   else NONE
 
 fun remove_failed_prefix_checkpoint ({failed_prefix_path, ...} : HolbuildTheoryCheckpoints.checkpoint) =
@@ -1932,24 +1949,24 @@ fun best_failed_prefix_checkpoint requested_timeout checkpoints =
 
 datatype force_level = ForceNone | ForceTargets | ForceProject | ForceAll
 
-type build_options = {use_cache : bool, force : force_level, force_targets : string list, skip_checkpoints : bool, goalfrag : bool, new_ir : bool, node_tactic_timeouts : (string * real option) list, goalfrag_plan : string option, goalfrag_trace : bool, repl_on_failure : bool}
+type build_options = {use_cache : bool, force : force_level, force_targets : string list, skip_checkpoints : bool, proof_steps : bool, new_ir : bool, node_tactic_timeouts : (string * real option) list, execution_plan : string option, trace_steps : bool, repl_on_failure : bool}
 
 datatype checkpoint_policy =
-  CheckpointPolicy of {checkpoint : bool, goalfrag : bool, new_ir : bool, tactic_timeout : real option, goalfrag_plan : string option, goalfrag_trace : bool, repl_on_failure : bool}
+  CheckpointPolicy of {checkpoint : bool, proof_steps : bool, new_ir : bool, tactic_timeout : real option, execution_plan : string option, trace_steps : bool, repl_on_failure : bool}
 
 val no_checkpoint_policy =
-  CheckpointPolicy {checkpoint = false, goalfrag = false, new_ir = false, tactic_timeout = NONE, goalfrag_plan = NONE, goalfrag_trace = false, repl_on_failure = false}
+  CheckpointPolicy {checkpoint = false, proof_steps = false, new_ir = false, tactic_timeout = NONE, execution_plan = NONE, trace_steps = false, repl_on_failure = false}
 
 fun checkpoint_enabled (CheckpointPolicy {checkpoint, ...}) = checkpoint
-fun goalfrag_enabled (CheckpointPolicy {goalfrag, ...}) = goalfrag
+fun proof_steps_enabled (CheckpointPolicy {proof_steps, ...}) = proof_steps
 fun proof_ir_enabled (CheckpointPolicy {new_ir, ...}) = new_ir
 fun tactic_timeout (CheckpointPolicy {tactic_timeout, ...}) = tactic_timeout
-fun goalfrag_plan (CheckpointPolicy {goalfrag_plan, ...}) = goalfrag_plan
-fun goalfrag_trace (CheckpointPolicy {goalfrag_trace, ...}) = goalfrag_trace
+fun execution_plan (CheckpointPolicy {execution_plan, ...}) = execution_plan
+fun trace_steps (CheckpointPolicy {trace_steps, ...}) = trace_steps
 fun repl_on_failure (CheckpointPolicy {repl_on_failure, ...}) = repl_on_failure
 
-fun goalfrag_plan_only (CheckpointPolicy {goalfrag_plan = SOME _, goalfrag_trace = false, ...}) = true
-  | goalfrag_plan_only _ = false
+fun execution_plan_only (CheckpointPolicy {execution_plan = SOME _, trace_steps = false, ...}) = true
+  | execution_plan_only _ = false
 
 fun bool_text true = "true"
   | bool_text false = "false"
@@ -1958,7 +1975,7 @@ val theory_manifest_version = "1"
 
 (* Final theory artifacts are semantic products of source bytes, resolved deps,
    toolchain, and declared action policy. Execution strategy is deliberately not
-   part of this key: goalfrag/checkpoint/tactic-timeout affect inspectability and
+   part of this key: proof_steps/checkpoint/tactic-timeout affect inspectability and
    replay/debug behavior, not the identity of the generated .uo/.ui/.dat bundle.
    Checkpoint files carry their own validity in the filesystem and .ok metadata. *)
 fun policy_config_lines _ =
@@ -1969,7 +1986,7 @@ fun plain_source_from_checkpoint source_text start_offset =
   else "val _ = HolbuildRuntime.restore_prover();\n" ^ String.extract(source_text, start_offset, NONE)
 
 fun instrumented_source policy timeout_marker plan_only_marker source_text start_offset checkpoints declaration_checkpoints terminations =
-  if goalfrag_enabled policy then
+  if proof_steps_enabled policy then
     HolbuildTheoryCheckpoints.instrument
       {source = source_text, start_offset = start_offset, checkpoints = checkpoints,
        declaration_checkpoints = if checkpoint_enabled policy then declaration_checkpoints else [],
@@ -1977,46 +1994,14 @@ fun instrumented_source policy timeout_marker plan_only_marker source_text start
        save_checkpoints = checkpoint_enabled policy,
        tactic_timeout = tactic_timeout policy,
        timeout_marker = timeout_marker,
-       plan_theorem = goalfrag_plan policy,
-       trace_all = goalfrag_trace policy,
+       plan_theorem = execution_plan policy,
+       trace_all = trace_steps policy,
        plan_only_marker = plan_only_marker,
        new_ir = proof_ir_enabled policy}
   else plain_source_from_checkpoint source_text start_offset
 
 fun replay_candidate policy project node theorem_checkpoints declaration_checkpoints =
   best_replay_candidate (tactic_timeout policy) project node theorem_checkpoints declaration_checkpoints
-
-fun common_prefix_size old_text new_text =
-  let
-    val old_n = size old_text
-    val new_n = size new_text
-    val limit = Int.min(old_n, new_n)
-    fun loop i =
-      if i >= limit then i
-      else if String.sub(old_text, i) = String.sub(new_text, i) then loop (i + 1)
-      else i
-  in
-    loop 0
-  end
-
-fun skip_tactic_resume_prefix text offset =
-  let
-    val n = size text
-    fun is_ws c = c = #" " orelse c = #"\n" orelse c = #"\t" orelse c = #"\r"
-    fun skip_ws i = if i < n andalso is_ws (String.sub(text, i)) then skip_ws (i + 1) else i
-    fun starts_with i token =
-      let val m = size token
-      in i + m <= n andalso String.substring(text, i, m) = token end
-    fun skip_separator i =
-      let val j = skip_ws i
-      in
-        if starts_with j ">>" then skip_ws (j + 2)
-        else if starts_with j ">-" then skip_ws (j + 2)
-        else j
-      end
-  in
-    skip_separator (Int.min(n, Int.max(0, offset)))
-  end
 
 fun source_location_text source_path source_text offset =
   let
@@ -2039,29 +2024,19 @@ fun source_context_resume_message node source_text kind safe_name boundary =
     ["from: " ^ kind ^ " checkpoint after " ^ safe_name,
      "continuing at: " ^ source_location_text (source_file node) source_text boundary]
 
-fun failed_prefix_resume_message node source_text checkpoint prefix_text =
-  let
-    val tactic_offset = common_prefix_size prefix_text (#tactic_text checkpoint)
-    val replay_tactic_offset = skip_tactic_resume_prefix (#tactic_text checkpoint) tactic_offset
-    val replay_source_offset = #tactic_start checkpoint + replay_tactic_offset
-  in
-    let val resume_location = source_location_text (source_file node) source_text replay_source_offset
-    in
-      checkpoint_resume_message node
-        ["from: failed-prefix checkpoint in " ^ #safe_name checkpoint,
-         "matched proof prefix through: " ^ resume_location,
-         "replaying remaining proof from: " ^ resume_location]
-    end
-  end
+fun failed_prefix_resume_message node source_text checkpoint step_count =
+  checkpoint_resume_message node
+    ["from: failed-prefix checkpoint in " ^ #safe_name checkpoint,
+     "restoring proof-ir prefix with " ^ Int.toString step_count ^ " successful leaf steps"]
 
-fun failed_prefix_resume_source policy timeout_marker plan_only_marker source checkpoints declaration_checkpoints terminations checkpoint step_count prefix_text =
+fun failed_prefix_resume_source policy timeout_marker plan_only_marker source checkpoints declaration_checkpoints terminations checkpoint metadata_text =
   let
     val runtime_config =
       {checkpoint_enabled = checkpoint_enabled policy,
        tactic_timeout = tactic_timeout policy,
        timeout_marker = SOME timeout_marker,
-       plan_theorem = goalfrag_plan policy,
-       trace_all = goalfrag_trace policy,
+       plan_theorem = execution_plan policy,
+       trace_all = trace_steps policy,
        plan_only_marker = plan_only_marker,
        new_ir = proof_ir_enabled policy}
     val prelude = HolbuildTheoryCheckpoints.runtime_reinstall_prelude runtime_config
@@ -2071,8 +2046,7 @@ fun failed_prefix_resume_source policy timeout_marker plan_only_marker source ch
       String.concat
         ["HolbuildProofRuntime.finish_failed_prefix ",
          HolbuildToolchain.sml_string (#name checkpoint), " ",
-         HolbuildToolchain.sml_string prefix_text, " ",
-         Int.toString step_count, " ",
+         HolbuildToolchain.sml_string metadata_text, " ",
          HolbuildToolchain.sml_string (#tactic_text checkpoint),
          " " ^ HolbuildToolchain.sml_string (#failed_prefix_path checkpoint) ^
          " " ^ HolbuildToolchain.sml_string (#failed_prefix_ok checkpoint)]
@@ -2104,8 +2078,8 @@ fun failed_prefix_resume_source policy timeout_marker plan_only_marker source ch
          save_checkpoints = checkpoint_enabled policy,
          tactic_timeout = tactic_timeout policy,
          timeout_marker = SOME timeout_marker,
-         plan_theorem = goalfrag_plan policy,
-         trace_all = goalfrag_trace policy,
+         plan_theorem = execution_plan policy,
+         trace_all = trace_steps policy,
          plan_only_marker = plan_only_marker,
          new_ir = proof_ir_enabled policy}
   in
@@ -2196,12 +2170,12 @@ fun write_theory_script policy project base_context plan keys input_key toolchai
          write_preload plan node deps_loaded deps_ok preload;
          write_text staged_script (instrumented_source policy (SOME timeout_marker) plan_only_marker source_text 0 checkpoints declaration_checkpoints terminations);
          {context = base_context, files = [preload, staged_script], failure_checkpoints = [], failed_prefix_context = NONE})
-      fun run_from_failed_prefix {checkpoint, step_count, prefix_text} =
+      fun run_from_failed_prefix {checkpoint, step_count, metadata_text} =
         let
           val path = #failed_prefix_path checkpoint
           val _ = ensure_source_checkpoint_parents ()
-          val _ = write_text staged_script (failed_prefix_resume_source policy timeout_marker plan_only_marker source_text checkpoints declaration_checkpoints terminations checkpoint step_count prefix_text)
-          val _ = failed_prefix_resume_message node source_text checkpoint prefix_text
+          val _ = write_text staged_script (failed_prefix_resume_source policy timeout_marker plan_only_marker source_text checkpoints declaration_checkpoints terminations checkpoint metadata_text)
+          val _ = failed_prefix_resume_message node source_text checkpoint step_count
         in
           {context = HolState path, files = [staged_script], failure_checkpoints = [path, deps_loaded], failed_prefix_context = SOME (path, step_count)}
         end
@@ -2216,7 +2190,7 @@ fun write_theory_script policy project base_context plan keys input_key toolchai
       fun failed_prefix_at_least_as_late failed NONE = true
         | failed_prefix_at_least_as_late failed (SOME replay) =
             #boundary (#checkpoint failed) >= #boundary replay
-      val failed_prefix = if goalfrag_enabled policy then best_failed_prefix_checkpoint (tactic_timeout policy) checkpoints else NONE
+      val failed_prefix = if proof_steps_enabled policy then best_failed_prefix_checkpoint (tactic_timeout policy) checkpoints else NONE
       val replay = replay_candidate policy project node checkpoints declaration_checkpoints
     in
       case failed_prefix of
@@ -2241,7 +2215,7 @@ fun build_theory cache_allowed policy tc project base_context plan keys toolchai
     val parents_report = Path.concat(stage, "holbuild-theory-parents.txt")
     val mldeps_report = Path.concat(stage, "holbuild-theory-mldeps.txt")
     val timeout_marker = Path.concat(stage, "holbuild-tactic-timeout.txt")
-    val plan_only_marker = Path.concat(stage, "holbuild-goalfrag-plan.txt")
+    val plan_only_marker = Path.concat(stage, "holbuild-proof-ir-plan.txt")
     val deps_key = dependency_context_key toolchain_key plan keys node
     val deps_loaded = deps_loaded_path project node deps_key
     val deps_ok = deps_checkpoint_ok_text deps_key
@@ -2279,7 +2253,7 @@ fun build_theory cache_allowed policy tc project base_context plan keys toolchai
     val _ = remove_file plan_only_marker
     val run_spec = write_theory_script policy project base_context plan keys input_key toolchain_key node
                                     source_text theorem_checkpoints declaration_checkpoints termination_diagnostics staged_script preload timeout_marker
-                                    (if goalfrag_plan_only policy then SOME plan_only_marker else NONE)
+                                    (if execution_plan_only policy then SOME plan_only_marker else NONE)
     fun tactic_timeout_error () =
       let
         val words = String.tokens Char.isSpace (read_text timeout_marker)
@@ -2320,18 +2294,23 @@ fun build_theory cache_allowed policy tc project base_context plan keys toolchai
     fun discard_loaded_checkpoint_after_load_failure () =
       remove_loaded_checkpoint_descendants project node deps_key deps_loaded theorem_checkpoints declaration_checkpoints
         (hol_context_path (#context run_spec))
-    fun discard_failed_prefix_after_resume_failure () =
+    fun discard_failed_prefix_after_resume_failure msg =
       case #failed_prefix_context run_spec of
           NONE => false
         | SOME (path, _) =>
             let
               val failure_output = checkpoint_failure_output project node input_key stage
-              val failure_text =
+              val output_text =
                 case captured_output_path_option failure_output of
                     NONE => ""
                   | SOME output_path => read_text output_path handle _ => ""
+              val failure_text = msg ^ "\n" ^ output_text
             in
-              if String.isSubstring "failed-prefix checkpoint cannot rewind" failure_text then
+              if List.exists (fn marker => String.isSubstring marker failure_text)
+                   ["failed-prefix checkpoint cannot rewind",
+                    "failed-prefix proof path is not present in current proof-ir plan",
+                    "invalid proof-ir failed-prefix metadata",
+                    "proof-ir dynamic replay mismatch"] then
                 (remove_checkpoint path;
                  warn ("discarding failed-prefix checkpoint after failed resume: " ^ path);
                  true)
@@ -2347,7 +2326,7 @@ fun build_theory cache_allowed policy tc project base_context plan keys toolchai
                (captured_output_has_retained_log failure_output))
             failure_output_path
         val plan_position = Option.mapPartial HolbuildTheoryDiagnostics.plan_position_summary failure_output_path
-        val trace_context = if goalfrag_trace policy then Option.mapPartial HolbuildTheoryDiagnostics.summarize_goalfrag_trace failure_output_path else NONE
+        val trace_context = if trace_steps policy then Option.mapPartial HolbuildTheoryDiagnostics.summarize_trace_steps failure_output_path else NONE
         val static_error = Option.mapPartial (fn path => HolbuildTheoryDiagnostics.static_error_summary (source_file node) source_text (String.fields (fn c => c = #"\n") (read_text path))) failure_output_path
         val source_context = Option.mapPartial (HolbuildTheoryDiagnostics.summarize_failed_fragment_source (source_file node) source_text theorem_checkpoints) failure_output_path
         val termination_context =
@@ -2384,14 +2363,14 @@ fun build_theory cache_allowed policy tc project base_context plan keys toolchai
         (expand_extra_dep (Path.dir (source_file node)) decl)
     val _ = List.app stage_source_extra_dep (#extra_deps (source_deps node))
     val build_log = Path.concat(stage, "holbuild-build.log")
-    val _ = validate_hol_context (#context run_spec)
     val _ =
-      run_hol_files_to_log tc stage stage
-        (#context run_spec)
-        (#files run_spec @ [final_loader])
-        "holbuild-build.log"
-        (SOME (current_build_log project node))
-        "hol run failed while building theory script"
+      (validate_hol_context (#context run_spec);
+       run_hol_files_to_log tc stage stage
+         (#context run_spec)
+         (#files run_spec @ [final_loader])
+         "holbuild-build.log"
+         (SOME (current_build_log project node))
+         "hol run failed while building theory script")
       handle Error msg =>
         if invalid_checkpoint_retryable base_context (#context run_spec) msg then
           let
@@ -2401,30 +2380,50 @@ fun build_theory cache_allowed policy tc project base_context plan keys toolchai
           in
             raise RetryInvalidCheckpoint
           end
-        else if discard_failed_prefix_after_resume_failure () then
+        else if discard_failed_prefix_after_resume_failure msg then
           raise RetryInvalidCheckpoint
         else
           let
-            val failure_error =
-              if file_exists timeout_marker then tactic_timeout_error ()
-              else if null theorem_checkpoints andalso null termination_diagnostics then Error msg
-              else checkpoint_failure_error msg
-            val _ = run_failure_repl tc policy theorem_checkpoints (#failure_checkpoints run_spec) deps_loaded stage
-            val _ = cleanup_json_stage stage
+            val failure_output = checkpoint_failure_output project node input_key stage
+            val failure_output_path = captured_output_path_option failure_output
+            val static_error =
+              Option.mapPartial
+                (fn path => HolbuildTheoryDiagnostics.static_error_summary
+                              (source_file node) source_text
+                              (String.fields (fn c => c = #"\n") (read_text path)))
+                failure_output_path
           in
-            raise failure_error
+            if Option.isSome static_error andalso hol_context_path (#context run_spec) <> hol_context_path base_context then
+              let
+                val invalid = hol_context_path (#context run_spec)
+                val _ = discard_loaded_checkpoint_after_load_failure ()
+                val _ = warn ("discarding invalid checkpoint after HOL state load failure: " ^ invalid)
+              in
+                raise RetryInvalidCheckpoint
+              end
+            else
+              let
+                val failure_error =
+                  if file_exists timeout_marker then tactic_timeout_error ()
+                  else if null theorem_checkpoints andalso null termination_diagnostics then Error msg
+                  else checkpoint_failure_error msg
+                val _ = run_failure_repl tc policy theorem_checkpoints (#failure_checkpoints run_spec) deps_loaded stage
+                val _ = cleanup_json_stage stage
+              in
+                raise failure_error
+              end
           end
     val _ =
-      if goalfrag_plan_only policy andalso file_exists plan_only_marker then
+      if execution_plan_only policy andalso file_exists plan_only_marker then
         (HolbuildStatus.message_stdout (read_text build_log handle _ => "");
-         raise GoalfragPlanPrinted)
-      else if Option.isSome (goalfrag_plan policy) then
+         raise ExecutionPlanPrinted)
+      else if Option.isSome (execution_plan policy) then
         HolbuildStatus.message_stdout (read_text build_log handle _ => "")
-      else if goalfrag_trace policy then
+      else if trace_steps policy then
         if HolbuildStatus.json_mode () then
           HolbuildStatus.message_stdout (read_text build_log handle _ => "")
         else
-          (case goalfrag_trace_output project node input_key stage of
+          (case proof_trace_output project node input_key stage of
                NONE => ()
              | SOME output => HolbuildStatus.message_stdout ("proof step trace log: " ^ captured_output_path output ^ "\n"))
       else ()
@@ -2673,22 +2672,22 @@ fun assoc_timeout _ [] = NONE
   | assoc_timeout node_key ((key, timeout) :: rest) =
       if key = node_key then timeout else assoc_timeout node_key rest
 
-fun effective_tactic_timeout goalfrag node_timeout =
-  if goalfrag then node_timeout else NONE
+fun effective_tactic_timeout proof_steps node_timeout =
+  if proof_steps then node_timeout else NONE
 
-fun checkpoint_policy_for_node ({skip_checkpoints, goalfrag, new_ir, node_tactic_timeouts, goalfrag_plan, goalfrag_trace, repl_on_failure, ...} : build_options) project node =
+fun checkpoint_policy_for_node ({skip_checkpoints, proof_steps, new_ir, node_tactic_timeouts, execution_plan, trace_steps, repl_on_failure, ...} : build_options) project node =
   CheckpointPolicy {checkpoint = not skip_checkpoints,
-                    goalfrag = goalfrag,
+                    proof_steps = proof_steps,
                     new_ir = new_ir,
-                    tactic_timeout = effective_tactic_timeout goalfrag
+                    tactic_timeout = effective_tactic_timeout proof_steps
                                       (assoc_timeout (HolbuildBuildPlan.key node) node_tactic_timeouts),
-                    goalfrag_plan = if goalfrag then goalfrag_plan else NONE,
-                    goalfrag_trace = goalfrag andalso goalfrag_trace,
+                    execution_plan = if proof_steps then execution_plan else NONE,
+                    trace_steps = proof_steps andalso trace_steps,
                     repl_on_failure = repl_on_failure}
 
-fun proof_engine (CheckpointPolicy {goalfrag = false, ...}) = "plain_v1"
+fun proof_engine (CheckpointPolicy {proof_steps = false, ...}) = "plain_v1"
   | proof_engine (CheckpointPolicy {new_ir = true, ...}) = "proof_ir_v3"
-  | proof_engine _ = "goalfrag_failed_fragment_span_v6"
+  | proof_engine _ = "proof_steps_failed_fragment_span_v6"
 
 fun build_config_lines_for_node options project node =
   case #kind (HolbuildBuildPlan.source_of node) of
@@ -2748,11 +2747,11 @@ fun source_boundaries_for_node node source_text =
   SOME (discover_theorem_boundaries_recovering (source_file node) source_text)
   handle Error msg =>
     (warn ("could not safely instrument theorem boundaries for " ^ logical_name node ^
-           "; building without goalfrag/checkpoints for this theory\n" ^ msg);
+           "; building without proof steps/checkpoints for this theory\n" ^ msg);
      NONE)
 
 fun theory_checkpoints_for_node policy project plan keys toolchain_key node source_text boundaries errors =
-  if not (goalfrag_enabled policy) andalso not (checkpoint_enabled policy) then []
+  if not (proof_steps_enabled policy) andalso not (checkpoint_enabled policy) then []
   else
     let
       val deps_key = dependency_context_key toolchain_key plan keys node
@@ -2770,11 +2769,11 @@ fun theory_checkpoints_for_node policy project plan keys toolchain_key node sour
       if proof_ir_enabled policy then raise Error msg
       else
         (warn ("could not safely instrument theorem boundaries for " ^ logical_name node ^
-               "; building without goalfrag/checkpoints for this theory\n" ^ msg);
+               "; building without proof steps/checkpoints for this theory\n" ^ msg);
          [])
 
 fun termination_diagnostics_for_node policy node source_text =
-  if not (goalfrag_enabled policy) then []
+  if not (proof_steps_enabled policy) then []
   else discover_termination_diagnostics_strict (source_file node) source_text
     handle Error msg =>
       (warn ("could not safely instrument termination diagnostics for " ^ logical_name node ^
@@ -2782,7 +2781,7 @@ fun termination_diagnostics_for_node policy node source_text =
        [])
 
 fun declaration_checkpoints_for_node policy project plan keys toolchain_key node source_text terminations =
-  if not (checkpoint_enabled policy) orelse not (goalfrag_enabled policy) then []
+  if not (checkpoint_enabled policy) orelse not (proof_steps_enabled policy) then []
   else
     let val deps_key = dependency_context_key toolchain_key plan keys node
     in declaration_checkpoint_specs (proof_engine policy) (tactic_timeout policy) project node deps_key source_text terminations end
@@ -2837,7 +2836,7 @@ fun build_theory_node (options : build_options) tc project base_context plan key
         in
           build_after_checkpoint_retries (length theorem_checkpoints + length declaration_checkpoints + 1)
         end
-        handle GoalfragPlanPrinted => HolbuildStatus.Inspected
+        handle ExecutionPlanPrinted => HolbuildStatus.Inspected
       end
   end
 
@@ -3223,15 +3222,19 @@ fun build_parallel status options tc project base_context plan keys toolchain_ke
     wait_workers ()
   end
 
+fun project_checkpoint_limit_gb project =
+  Option.getOpt(HolbuildProject.checkpoint_limit_gb project, default_max_checkpoints_gb)
+
 fun enforce_checkpoint_budget project =
   let
-    val max_bytes = gb_to_bytes default_max_checkpoints_gb
+    val checkpoint_limit_gb = project_checkpoint_limit_gb project
+    val max_bytes = gb_to_bytes checkpoint_limit_gb
     val eviction = evict_oldest_checkpoints_with_stats (project_state_dir project "checkpoints") max_bytes
     val {before_bytes, after_bytes, evicted, ...} = eviction
   in
     if before_bytes > max_bytes orelse evicted > 0 then
       warn ("checkpoint budget: " ^ checkpoint_eviction_text eviction ^
-            " checkpoint_limit_gb=" ^ Int.toString default_max_checkpoints_gb)
+            " checkpoint_limit_gb=" ^ Int.toString checkpoint_limit_gb)
     else ();
     if after_bytes > max_bytes then
       warn ("checkpoint budget still exceeds limit after eviction; check permissions or oversized live families")
