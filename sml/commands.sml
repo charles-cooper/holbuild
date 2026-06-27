@@ -756,6 +756,51 @@ fun build tc cli_jobs args =
     else build_once tc cli_jobs parsed
   end
 
+fun chomp text =
+  let
+    fun loop n =
+      if n > 0 andalso
+         (String.sub(text, n - 1) = #"\n" orelse String.sub(text, n - 1) = #"\r") then
+        loop (n - 1)
+      else String.substring(text, 0, n)
+  in
+    loop (size text)
+  end
+
+fun command_output command =
+  let
+    val output = OS.FileSys.tmpName ()
+    val status = OS.Process.system (command ^ " > " ^ HolbuildHash.quote output ^ " 2>/dev/null")
+    val text = if OS.Process.isSuccess status then chomp (read_text output) else ""
+    val _ = OS.FileSys.remove output handle OS.SysErr _ => ()
+  in
+    if text = "" then NONE else SOME text
+  end
+  handle _ => NONE
+
+fun git_output root args =
+  command_output ("git -C " ^ HolbuildHash.quote root ^ " " ^ args)
+
+fun current_utc_timestamp () =
+  Date.fmt "%Y-%m-%dT%H:%M:%SZ" (Date.fromTimeUniv (Time.now ()))
+
+fun hol_dependency_metadata project =
+  case HolbuildProject.resolved_hol_dependency project of
+      SOME (HolbuildProject.Dependency {source = HolbuildProject.GitSource {git, rev}, ...}) =>
+        {hol_repo = SOME git, hol_rev = SOME rev}
+    | _ => {hol_repo = NONE, hol_rev = NONE}
+
+fun hbx_export_metadata project =
+  let
+    val {hol_repo, hol_rev} = hol_dependency_metadata project
+  in
+    {created_at = SOME (current_utc_timestamp ()),
+     source_repo = git_output (#root project) "config --get remote.origin.url",
+     source_rev = git_output (#root project) "rev-parse HEAD",
+     hol_repo = hol_repo,
+     hol_rev = hol_rev} : HolbuildCacheArchive.metadata
+  end
+
 datatype export_args = ExportArgs of {build_first : bool, output : string, targets : string list}
 
 fun parse_export_args args =
@@ -875,11 +920,13 @@ fun export_archive tc jobs args =
     val keys = HolbuildBuildPlan.input_keys (HolbuildBuildExec.build_config_lines_for_node options project) toolchain_key plan
     val entries = export_entries project plan keys
     val cache = HolbuildFSCacheBackend.default () handle HolbuildFSCacheBackend.Error msg => raise Error msg
+    val metadata = hbx_export_metadata project
   in
     HolbuildCacheArchive.create_export {archive_path = output,
                                         source = fs_cache_source cache,
                                         entries = entries,
-                                        targets = targets};
+                                        targets = targets,
+                                        metadata = metadata};
     print ("exported " ^ Int.toString (length entries) ^ " cache action(s) to " ^ output ^ "\n")
   end
 

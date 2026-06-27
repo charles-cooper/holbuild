@@ -9,6 +9,20 @@ exception Error of string
 val format = "holbuild-hbx-v1"
 val payload_dir = "holbuild-cache"
 
+type metadata =
+  {created_at : string option,
+   source_repo : string option,
+   source_rev : string option,
+   hol_repo : string option,
+   hol_rev : string option}
+
+val empty_metadata : metadata =
+  {created_at = NONE,
+   source_repo = NONE,
+   source_rev = NONE,
+   hol_repo = NONE,
+   hol_rev = NONE}
+
 fun quote s = HolbuildHash.quote s
 
 fun path_exists path = FS.access(path, []) handle OS.SysErr _ => false
@@ -72,11 +86,28 @@ fun fs_destination cache : HolbuildCacheTransfer.destination =
   {put_action = HolbuildFSCacheBackend.put_action cache,
    publish_blob = HolbuildFSCacheBackend.publish_blob cache}
 
-fun manifest_text {keys, targets} =
+fun manifest_value text =
+  String.translate (fn #"\n" => " " | #"\r" => " " | c => str c) text
+
+fun optional_manifest_line name value =
+  case value of
+      SOME text => [name ^ "=" ^ manifest_value text]
+    | NONE => []
+
+fun metadata_manifest_lines ({created_at, source_repo, source_rev, hol_repo, hol_rev} : metadata) =
+  ["holbuild_version=" ^ HolbuildVersion.version] @
+  optional_manifest_line "created_at" created_at @
+  optional_manifest_line "source_repo" source_repo @
+  optional_manifest_line "source_rev" source_rev @
+  optional_manifest_line "hol_repo" hol_repo @
+  optional_manifest_line "hol_rev" hol_rev
+
+fun manifest_text {keys, targets, metadata} =
   String.concatWith "\n"
     ([format,
-      "created_by=holbuild " ^ HolbuildVersion.version,
-      "target_count=" ^ Int.toString (length targets),
+      "created_by=holbuild " ^ HolbuildVersion.version] @
+     metadata_manifest_lines metadata @
+     ["target_count=" ^ Int.toString (length targets),
       "action_count=" ^ Int.toString (length keys)] @
      map (fn target => "target " ^ target) targets @
      map (fn key => "action " ^ key) keys) ^ "\n"
@@ -188,7 +219,7 @@ fun require_manifest payload =
     else raise Error ("unsupported cache archive format in " ^ path)
   end
 
-fun create_export {archive_path, source, entries, targets} =
+fun create_export {archive_path, source, entries, targets, metadata} =
   if path_exists archive_path then
     raise Error ("cache archive already exists: " ^ archive_path)
   else
@@ -208,7 +239,7 @@ fun create_export {archive_path, source, entries, targets} =
                   tmp_dir = HolbuildFSCacheBackend.tmp_dir cache}
                  keys);
        write_package_index payload entries;
-       write_text (manifest_path payload) (manifest_text {keys = keys, targets = targets});
+       write_text (manifest_path payload) (manifest_text {keys = keys, targets = targets, metadata = metadata});
        tar_create {stage_dir = stage_dir, archive_tmp = archive_tmp};
        rename_new {old = archive_tmp, new = archive_path};
        remove_tree stage_dir)
@@ -219,7 +250,8 @@ fun create_with_targets {archive_path, source, keys, targets} =
   create_export {archive_path = archive_path,
                  source = source,
                  entries = map (fn key => {key = key, package = "", logical = "", source_path = "", root = true}) keys,
-                 targets = targets}
+                 targets = targets,
+                 metadata = empty_metadata}
 
 fun create {archive_path, source, keys} =
   create_with_targets {archive_path = archive_path, source = source, keys = keys, targets = []}
