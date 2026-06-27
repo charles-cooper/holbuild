@@ -72,12 +72,109 @@ fun fs_destination cache : HolbuildCacheTransfer.destination =
   {put_action = HolbuildFSCacheBackend.put_action cache,
    publish_blob = HolbuildFSCacheBackend.publish_blob cache}
 
-fun manifest_text keys =
+fun manifest_text {keys, targets} =
   String.concatWith "\n"
     ([format,
       "created_by=holbuild " ^ HolbuildVersion.version,
+      "target_count=" ^ Int.toString (length targets),
       "action_count=" ^ Int.toString (length keys)] @
+     map (fn target => "target " ^ target) targets @
      map (fn key => "action " ^ key) keys) ^ "\n"
+
+fun action_key_line line =
+  case String.tokens Char.isSpace line of
+      ["action", key] => SOME key
+    | _ => NONE
+
+fun action_keys_from_manifest text =
+  List.mapPartial action_key_line (String.tokens (fn c => c = #"\n") text)
+
+type export_entry =
+  {key : string,
+   package : string,
+   logical : string,
+   source_path : string,
+   root : bool}
+
+fun safe_package_dir package =
+  let
+    fun safe_char c = if Char.isAlphaNum c orelse c = #"_" orelse c = #"-" then str c else "_"
+    val readable = String.translate safe_char package
+    val base = if readable = "" then "package" else readable
+    val hash = HolbuildHash.string_sha1 package
+  in
+    base ^ "-" ^ String.substring(hash, 0, 12)
+  end
+
+fun package_dir payload {root, package} =
+  if root then Path.concat(payload, "project")
+  else Path.concat(Path.concat(payload, "deps"), safe_package_dir package)
+
+fun unique_strings values =
+  let
+    fun member value = List.exists (fn existing => existing = value)
+    fun add (value, kept) = if member value kept then kept else value :: kept
+  in
+    rev (List.foldl add [] values)
+  end
+
+fun entry_key ({key, ...} : export_entry) = key
+fun entry_package ({package, ...} : export_entry) = package
+fun entry_root ({root, ...} : export_entry) = root
+
+fun same_package left right =
+  entry_package left = entry_package right andalso entry_root left = entry_root right
+
+fun group_entries entries =
+  let
+    fun add (entry, groups) =
+      let
+        fun loop acc rest =
+          case rest of
+              [] => rev ((entry, [entry]) :: acc)
+            | (representative, members) :: more =>
+                if same_package representative entry then
+                  rev acc @ ((representative, entry :: members) :: more)
+                else loop ((representative, members) :: acc) more
+      in
+        loop [] groups
+      end
+  in
+    map (fn (representative, members) => (representative, rev members))
+        (List.foldl add [] entries)
+  end
+
+fun package_manifest_text representative entries =
+  String.concatWith "\n"
+    (["holbuild-hbx-package-v1",
+      "role=" ^ (if entry_root representative then "project" else "dependency"),
+      "package=" ^ entry_package representative,
+      "action_count=" ^ Int.toString (length entries)] @
+     List.concat
+       (map (fn {key, logical, source_path, ...} =>
+               ["action " ^ key,
+                "logical " ^ key ^ " " ^ logical,
+                "source " ^ key ^ " " ^ source_path])
+            entries)) ^ "\n"
+
+fun write_package_action_ref payload package_path key =
+  let
+    val source_manifest = Path.concat(Path.concat(Path.concat(payload, "actions"), key), "manifest")
+    val destination_manifest = Path.concat(Path.concat(Path.concat(package_path, "actions"), key), "manifest")
+  in
+    write_text destination_manifest (read_text source_manifest)
+  end
+
+fun write_package_group payload (representative, entries) =
+  let
+    val dir = package_dir payload {root = entry_root representative, package = entry_package representative}
+    val _ = write_text (Path.concat(dir, "manifest")) (package_manifest_text representative entries)
+  in
+    List.app (write_package_action_ref payload dir o entry_key) entries
+  end
+
+fun write_package_index payload entries =
+  List.app (write_package_group payload) (group_entries entries)
 
 fun manifest_path payload = Path.concat(payload, "manifest")
 
@@ -87,15 +184,16 @@ fun require_manifest payload =
     val text = read_text path
       handle e => raise Error ("could not read cache archive manifest: " ^ General.exnMessage e)
   in
-    if String.isPrefix (format ^ "\n") text then ()
+    if String.isPrefix (format ^ "\n") text then text
     else raise Error ("unsupported cache archive format in " ^ path)
   end
 
-fun create {archive_path, source, keys} =
+fun create_export {archive_path, source, entries, targets} =
   if path_exists archive_path then
     raise Error ("cache archive already exists: " ^ archive_path)
   else
     let
+      val keys = unique_strings (map entry_key entries)
       val stage_dir = temp_dir_near archive_path
       val archive_tmp = temp_file_near archive_path
       val payload = Path.concat(stage_dir, payload_dir)
@@ -109,14 +207,24 @@ fun create {archive_path, source, keys} =
                   destination = fs_destination cache,
                   tmp_dir = HolbuildFSCacheBackend.tmp_dir cache}
                  keys);
-       write_text (manifest_path payload) (manifest_text keys);
+       write_package_index payload entries;
+       write_text (manifest_path payload) (manifest_text {keys = keys, targets = targets});
        tar_create {stage_dir = stage_dir, archive_tmp = archive_tmp};
        rename_new {old = archive_tmp, new = archive_path};
        remove_tree stage_dir)
       handle e => (cleanup (); raise e)
     end
 
-fun with_reader {archive_path, f} =
+fun create_with_targets {archive_path, source, keys, targets} =
+  create_export {archive_path = archive_path,
+                 source = source,
+                 entries = map (fn key => {key = key, package = "", logical = "", source_path = "", root = true}) keys,
+                 targets = targets}
+
+fun create {archive_path, source, keys} =
+  create_with_targets {archive_path = archive_path, source = source, keys = keys, targets = []}
+
+fun with_entries {archive_path, f} =
   let
     val stage_dir = temp_dir_near archive_path
     val payload = Path.concat(stage_dir, payload_dir)
@@ -125,9 +233,16 @@ fun with_reader {archive_path, f} =
   in
     (ensure_dir stage_dir;
      tar_extract {archive_path = archive_path, stage_dir = stage_dir};
-     require_manifest payload;
-     f (fs_source cache) before cleanup ())
+     let
+       val manifest = require_manifest payload
+       val keys = action_keys_from_manifest manifest
+     in
+       f {source = fs_source cache, keys = keys} before cleanup ()
+     end)
     handle e => (cleanup (); raise e)
   end
+
+fun with_reader {archive_path, f} =
+  with_entries {archive_path = archive_path, f = fn {source, ...} => f source}
 
 end
