@@ -90,6 +90,14 @@ require_grep '^holbuild-cache/project/manifest$' "$tmpdir/archive.list"
 require_grep '^holbuild-cache/deps/dep-' "$tmpdir/archive.list"
 require_grep '^holbuild-cache/actions/.*/manifest$' "$tmpdir/archive.list"
 
+tar -xOf "$archive" holbuild-cache/manifest > "$tmpdir/archive.manifest"
+require_grep '^holbuild-hbx-v1$' "$tmpdir/archive.manifest"
+require_grep '^holbuild_version=' "$tmpdir/archive.manifest"
+require_grep '^created_at=' "$tmpdir/archive.manifest"
+require_grep '^hol_repo=https://github.com/HOL-Theorem-Prover/HOL.git$' "$tmpdir/archive.manifest"
+require_grep "^hol_rev=$(holbuild_pinned_hol_rev)$" "$tmpdir/archive.manifest"
+require_grep '^target ATheory$' "$tmpdir/archive.manifest"
+
 import_log=$tmpdir/import.log
 HOLBUILD_CACHE="$import_cache" "$HOLBUILD_BIN" import "$archive" > "$import_log" 2>&1
 require_grep "imported 2 cache action" "$import_log"
