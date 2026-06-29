@@ -13,7 +13,7 @@ trap cleanup EXIT
 use_case_cache "$tmpdir/cache"
 
 project=$tmpdir/project
-mkdir -p "$project/src/a" "$project/src/b"
+mkdir -p "$project/src/a" "$project/src/b" "$project/deprecated/src/a"
 cat > "$project/holproject.toml" <<TOML
 [holbuild]
 schema = 2
@@ -27,7 +27,8 @@ name = "exclude"
 
 [build]
 members = ["src"]
-exclude = ["*/selftest.sml", "src/generated/*"]
+exclude = ["src/generated"]
+exclude_globs = ["*/selftest.sml"]
 TOML
 cat > "$project/src/a/selftest.sml" <<'SML'
 val x = 1;
@@ -48,14 +49,40 @@ val machine_only = 1;
 SML
 cat > "$project/.holconfig.toml" <<'TOML'
 [build]
-exclude = ["src/local/*"]
+exclude = ["src/local"]
 TOML
 
 (cd "$project" && "$HOLBUILD_BIN" context) > "$tmpdir/context.log"
-require_grep "exclude: \*/selftest.sml, src/generated/\*, src/local/\*" "$tmpdir/context.log"
+require_grep "exclude: src/generated, src/local" "$tmpdir/context.log"
+require_grep "exclude_globs: \*/selftest.sml" "$tmpdir/context.log"
 (cd "$project" && "$HOLBUILD_BIN" build --dry-run) > "$tmpdir/dry.log"
 require_grep "Keep (sml, package exclude)" "$tmpdir/dry.log"
 if grep -q "selftest\|Generated\|MachineOnly" "$tmpdir/dry.log"; then
   echo "excluded source appeared in dry-run plan" >&2
   exit 1
 fi
+
+cat > "$project/deprecated/holproject.toml" <<TOML
+[holbuild]
+schema = 2
+
+[dependencies.hol]
+git = "https://github.com/HOL-Theorem-Prover/HOL.git"
+rev = "$(holbuild_pinned_hol_rev)"
+
+[project]
+name = "deprecated-exclude"
+
+[build]
+members = ["src"]
+exclude = ["*/selftest.sml"]
+TOML
+cat > "$project/deprecated/src/a/selftest.sml" <<'SML'
+val old = 1;
+SML
+cat > "$project/deprecated/src/Keep.sml" <<'SML'
+val keep = 1;
+SML
+(cd "$project/deprecated" && "$HOLBUILD_BIN" context) > "$tmpdir/deprecated-context.log" 2> "$tmpdir/deprecated-context.err"
+require_grep "exclude_globs: \*/selftest.sml" "$tmpdir/deprecated-context.log"
+require_grep "build.exclude glob pattern \"\*/selftest.sml\" is deprecated; use build.exclude_globs instead" "$tmpdir/deprecated-context.err"

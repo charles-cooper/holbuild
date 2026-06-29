@@ -130,7 +130,12 @@ fun glob_match pattern text =
     match 0 0
   end
 
-fun excluded excludes rel = List.exists (fn pattern => glob_match pattern rel) excludes
+fun glob_excluded exclude_globs rel = List.exists (fn pattern => glob_match pattern rel) exclude_globs
+
+fun path_excluded excludes rel =
+  List.exists (fn path => rel = path orelse String.isPrefix (path ^ "/") rel) excludes
+
+fun excluded excludes exclude_globs rel = path_excluded excludes rel orelse glob_excluded exclude_globs rel
 
 fun skip_dir name = String.isPrefix "." name orelse name = "_build"
 
@@ -152,13 +157,13 @@ fun has_source_path path sources =
   let val path = normalize_path path
   in List.exists (fn source : source => normalize_path (#source_path source) = path) sources end
 
-fun scan_file package source_root artifact_root policies excludes path acc =
-  if excluded excludes (relative_path source_root path) then acc
+fun scan_file package source_root artifact_root policies excludes exclude_globs path acc =
+  if excluded excludes exclude_globs (relative_path source_root path) then acc
   else case classify package source_root artifact_root policies path of
       NONE => acc
     | SOME source => if has_source_path path acc then acc else source :: acc
 
-fun scan_dir package source_root artifact_root policies excludes path acc =
+fun scan_dir package source_root artifact_root policies excludes exclude_globs path acc =
   let
     fun scan_name (name, acc) =
       let val path' = join path name
@@ -166,10 +171,10 @@ fun scan_dir package source_root artifact_root policies excludes path acc =
         if is_link path' then acc
         else if is_dir path' then
           if skip_dir name orelse not (is_readable path') orelse
-             excluded excludes (relative_path source_root path' ^ "/") then acc
-          else scan_dir package source_root artifact_root policies excludes path' acc
+             excluded excludes exclude_globs (relative_path source_root path') then acc
+          else scan_dir package source_root artifact_root policies excludes exclude_globs path' acc
         else if String.isPrefix "." name then acc
-        else if is_readable path' then scan_file package source_root artifact_root policies excludes path' acc
+        else if is_readable path' then scan_file package source_root artifact_root policies excludes exclude_globs path' acc
         else acc
       end
   in
@@ -231,9 +236,9 @@ fun validate_action_policies package_name policies sources =
     List.app validate policies
   end
 
-fun scan_member name source_root artifact_root policies excludes (member, acc) =
-  if is_dir member then scan_dir name source_root artifact_root policies excludes member acc
-  else if is_readable member then scan_file name source_root artifact_root policies excludes member acc
+fun scan_member name source_root artifact_root policies excludes exclude_globs (member, acc) =
+  if is_dir member then scan_dir name source_root artifact_root policies excludes exclude_globs member acc
+  else if is_readable member then scan_file name source_root artifact_root policies excludes exclude_globs member acc
   else raise Error ("member does not exist: " ^ member)
 
 fun discover_package package acc =
@@ -247,6 +252,7 @@ fun discover_package package acc =
         val artifact_root = HolbuildProject.package_artifact_root package
         val policies = HolbuildProject.package_action_policies package
         val excludes = HolbuildProject.package_excludes package
+        val exclude_globs = HolbuildProject.package_exclude_globs package
         val _ = HolbuildGenerators.run_package package
                 handle HolbuildGenerators.Error msg => raise Error msg
                      | HolbuildGenerators.ErrorWithDebugArtifacts (msg, artifacts) =>
@@ -256,7 +262,7 @@ fun discover_package package acc =
             (HolbuildProject.package_members package)
         val sources =
           List.foldl
-            (scan_member name source_root artifact_root policies excludes)
+            (scan_member name source_root artifact_root policies excludes exclude_globs)
             acc
             members
         val _ = validate_action_policies name policies sources
