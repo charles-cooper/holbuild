@@ -84,7 +84,7 @@ val holdir_manifest_text =
      "  \"src/unwind\",",
      "  \"src/update\",",
      "]",
-     "exclude = [",
+     "exclude_globs = [",
      "  \"*/selftest.sml\",",
      "  \"*/test.sml\",",
      "  \"*/tests/*\",",

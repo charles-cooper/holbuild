@@ -4,8 +4,9 @@ Uncommitted per-user build settings. Lives at the project root. Schema-checked â
 
 ```toml
 [build]
-exclude = ["worktrees/*"]   # appends to manifest excludes
-jobs = 16                   # default -j when not specified on CLI
+exclude = ["worktrees"]       # appends to manifest path/subtree excludes
+exclude_globs = ["scratch/*"] # appends to manifest glob excludes
+jobs = 16                     # default -j when not specified on CLI
 tactic_timeout = 30.0       # root-package per-step timeout (overrides manifest [build].tactic_timeout)
 ```
 
@@ -13,7 +14,7 @@ Dependency overrides are no longer supported. Project/dependency locations are p
 
 ## Build excludes
 
-`[build].exclude` in `.holconfig.toml` is **appended** to the manifest `[build].exclude`, not a replacement. Use it for workstation-specific paths (worktrees, local scratch) that shouldn't affect the committed manifest.
+`[build].exclude` in `.holconfig.toml` is **appended** to the manifest `[build].exclude`, not a replacement. Use it for workstation-specific concrete paths/subtrees (worktrees, local scratch) that shouldn't affect the committed manifest. `[build].exclude_globs` similarly appends glob filters; deprecated glob patterns in local `[build].exclude` are still accepted with a warning.
 
 ## Build jobs and timeout
 

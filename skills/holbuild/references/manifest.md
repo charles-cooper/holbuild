@@ -19,7 +19,8 @@ rev = "<exact-40-character-commit>"
 
 [build]
 members = ["src", "lib"]   # source dirs/files relative to package root. Default: ["."]
-exclude = ["*/selftest.sml", "*/examples/*"]  # glob patterns, package-root-relative
+exclude = ["src/generated", "src/OneOff.sml"]  # concrete package-relative paths/subtrees
+exclude_globs = ["*/selftest.sml", "*/examples/*"]  # glob patterns, package-root-relative
 roots = ["src/MainScript.sml"]  # default build roots when no CLI target given; use build --warn-unreachable to audit omitted scripts
 tactic_timeout = 60.0            # root-package per-step timeout; CLI/local config override
 
@@ -94,7 +95,7 @@ Unsupported: schema 1, `[dependencies.HOLDIR]`, path dependencies, local depende
 
 ## Path rules
 
-- `build.members`, `build.exclude`, `build.roots`, `actions.*.extra_deps`, `generate.*.inputs`, `generate.*.outputs` — **package-root-relative**
+- `build.members`, `build.exclude`, `build.exclude_globs`, `build.roots`, `actions.*.extra_deps`, `generate.*.inputs`, `generate.*.outputs` — **package-root-relative**
 - Absolute paths and `..` components are rejected in those package-relative fields
 - `dependencies.*.path` and `dependencies.*.manifest` are allowed only in `from/path/manifest` dependencies
 - `from` dependency `path` and `manifest` fields must be relative and contain no `..`
@@ -106,7 +107,7 @@ Members can be files or directories. Directories are walked recursively, skippin
 - Names starting with `.`
 - Names equal to `_build`
 - Symlinked directories/files
-- Files/folders matching `build.exclude` globs
+- Files/folders excluded by `build.exclude` concrete paths/subtrees or matching `build.exclude_globs`
 - Files matching `*Theory.sml` or `*Theory.sig` (generated artifacts)
 
 Recognized source files:

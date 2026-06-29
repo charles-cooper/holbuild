@@ -270,7 +270,8 @@ Current dependency limits:
 ```toml
 [build]
 members = ["src", "lib"]
-exclude = ["*/selftest.sml", "*/examples/*"]
+exclude = ["src/generated", "src/OneOff.sml"]
+exclude_globs = ["*/selftest.sml", "*/examples/*"]
 roots = ["src/MainScript.sml"]
 tactic_timeout = 10.0
 
@@ -279,7 +280,10 @@ tactic_timeout = 10.0
 ```
 
 - `members` tells `holbuild` where to discover source files.
-- `exclude` removes package-root-relative glob matches from discovery.
+- `exclude` removes concrete package-root-relative paths from discovery; a
+  directory entry excludes its subtree, and a file entry excludes just that file.
+- `exclude_globs` removes package-root-relative glob matches from discovery.
+  Deprecated glob patterns in `exclude` are still accepted with a warning.
 - `roots` are the default entry points when `holbuild build` is run with no
   target. Use `holbuild build --warn-unreachable` to report discoverable theory
   scripts that are outside the root dependency closure.
@@ -446,7 +450,8 @@ Local machine settings may go in `.holconfig.toml`:
 [build]
 jobs = 16
 checkpoint_limit_gb = 20
-exclude = ["worktrees/*"]
+exclude = ["worktrees"]
+exclude_globs = ["scratch/*"]
 tactic_timeout = 10.0
 ```
 

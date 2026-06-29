@@ -36,7 +36,7 @@ datatype dependency = Dependency of {name : string, source : dependency_source}
 
 datatype override = Override of {name : string, path : string}
 
-datatype local_config = LocalConfig of {overrides : override list, build_excludes : string list, build_jobs : int option, build_tactic_timeout : real option, checkpoint_limit_gb : int option}
+datatype local_config = LocalConfig of {overrides : override list, build_excludes : string list, build_exclude_globs : string list, build_jobs : int option, build_tactic_timeout : real option, checkpoint_limit_gb : int option}
 
 datatype package =
   Package of
@@ -45,6 +45,7 @@ datatype package =
       manifest : string,
       members : string list,
       excludes : string list,
+      exclude_globs : string list,
       roots : string list,
       artifact_root : string,
       action_policies : action_policy list,
@@ -60,11 +61,13 @@ type t =
     version : string option,
     members : string list,
     excludes : string list,
+    exclude_globs : string list,
     roots : string list,
     root_tactic_timeouts : root_tactic_timeout list,
     dependencies : dependency list,
     overrides : override list,
     local_build_excludes : string list,
+    local_build_exclude_globs : string list,
     local_build_jobs : int option,
     build_tactic_timeout : real option,
     checkpoint_limit_gb : int option,
@@ -77,6 +80,8 @@ type t =
 exception Error of string
 
 fun die msg = raise Error msg
+
+fun warn msg = TextIO.output(TextIO.stdErr, "holbuild: warning: " ^ msg ^ "\n")
 
 val source_dir_ref : string option ref = ref NONE
 
@@ -280,11 +285,12 @@ fun required_string_array_field context table name =
             SOME xs => xs
           | NONE => die (context ^ "." ^ name ^ " must be a string array")
 
+fun path_components path = String.tokens (fn c => c = #"/" orelse c = #"\\") path
+
 fun package_relative_path field path =
   let
     val has_parent_component =
-      List.exists (fn component => component = "..")
-        (String.tokens (fn c => c = #"/" orelse c = #"\\") path)
+      List.exists (fn component => component = "..") (path_components path)
   in
     if Path.isAbsolute path orelse has_parent_component then
       die (field ^ " must be package-root-relative: " ^ path)
@@ -292,6 +298,41 @@ fun package_relative_path field path =
   end
 
 fun package_relative_paths field paths = map (package_relative_path field) paths
+
+fun has_suffix suffix s =
+  let val n = size s val m = size suffix
+  in n >= m andalso String.substring(s, n - m, m) = suffix end
+
+fun concrete_package_relative_path field path =
+  let
+    val components = path_components path
+    val path = package_relative_path field path
+  in
+    if path = "" then die (field ^ " must not be empty")
+    else if has_suffix "/" path orelse has_suffix "\\" path then
+      die (field ^ " must not have a trailing slash: " ^ path)
+    else if List.exists (fn component => component = ".") components then
+      die (field ^ " must not contain . components: " ^ path)
+    else path
+  end
+
+fun glob_like path =
+  CharVector.exists (fn c => c = #"*" orelse c = #"?") path
+
+fun split_deprecated_excludes context paths =
+  let
+    fun one (path, (excludes, globs)) =
+      if glob_like path then
+        let val path = package_relative_path context path
+        in
+          warn (context ^ " glob pattern \"" ^ path ^ "\" is deprecated; use " ^ context ^ "_globs instead");
+          (excludes, path :: globs)
+        end
+      else (concrete_package_relative_path context path :: excludes, globs)
+    val (excludes, globs) = List.foldl one ([], []) paths
+  in
+    (rev excludes, rev globs)
+  end
 
 fun safe_materialized_dependency_name name =
   size name > 0 andalso name <> "." andalso name <> ".." andalso
@@ -446,7 +487,7 @@ fun validate_manifest_table table =
               ["holbuild", "project", "build", "dependencies", "run", "heap", "actions", "generate"] table
     val _ = Option.app (require_known_fields "project" ["name", "version"])
               (table_field table ["project"])
-    val _ = Option.app (require_known_fields "build" ["members", "exclude", "roots", "tactic_timeout", "root_tactic_timeouts"])
+    val _ = Option.app (require_known_fields "build" ["members", "exclude", "exclude_globs", "roots", "tactic_timeout", "root_tactic_timeouts"])
               (table_field table ["build"])
     val _ = Option.app (require_known_fields "run" ["heap", "loads"])
               (table_field table ["run"])
@@ -475,7 +516,7 @@ fun validate_override_table (name, table) =
   require_known_fields ("overrides." ^ name) ["path"] table
 
 fun validate_local_build_table table =
-  require_known_fields ".holconfig.toml build" ["exclude", "jobs", "tactic_timeout", "checkpoint_limit_gb"] table
+  require_known_fields ".holconfig.toml build" ["exclude", "exclude_globs", "jobs", "tactic_timeout", "checkpoint_limit_gb"] table
 
 fun validate_local_config_table table =
   (require_known_fields ".holconfig.toml" ["overrides", "build"] table;
@@ -546,8 +587,15 @@ fun overrides_at table = map parse_override (named_table_entries table ["overrid
 
 fun local_build_excludes table =
   case table_field table ["build"] of
-      NONE => []
-    | SOME build => package_relative_paths ".holconfig.toml build.exclude" (string_array_field build "exclude")
+      NONE => ([], [])
+    | SOME build =>
+        let
+          val (excludes, deprecated_globs) =
+            split_deprecated_excludes ".holconfig.toml build.exclude" (string_array_field build "exclude")
+          val globs = package_relative_paths ".holconfig.toml build.exclude_globs" (string_array_field build "exclude_globs")
+        in
+          (excludes, deprecated_globs @ globs)
+        end
 
 fun local_build_jobs table =
   case table_field table ["build"] of
@@ -592,16 +640,19 @@ fun parse_local_config root =
   let val config = Path.concat(root, ".holconfig.toml")
   in
     if readable config then
-      let val table = TOML.fromFile config
+      let
+        val table = TOML.fromFile config
+        val _ = validate_local_config_table table
+        val (build_excludes, build_exclude_globs) = local_build_excludes table
       in
-        validate_local_config_table table;
         LocalConfig {overrides = overrides_at table,
-                     build_excludes = local_build_excludes table,
+                     build_excludes = build_excludes,
+                     build_exclude_globs = build_exclude_globs,
                      build_jobs = local_build_jobs table,
                      build_tactic_timeout = local_build_tactic_timeout table,
                      checkpoint_limit_gb = local_checkpoint_limit_gb table}
       end
-    else LocalConfig {overrides = [], build_excludes = [], build_jobs = NONE, build_tactic_timeout = NONE, checkpoint_limit_gb = NONE}
+    else LocalConfig {overrides = [], build_excludes = [], build_exclude_globs = [], build_jobs = NONE, build_tactic_timeout = NONE, checkpoint_limit_gb = NONE}
   end
 
 fun parse_table_at table {manifest, root, artifact_root, graph_artifact_root, local_config} =
@@ -615,9 +666,12 @@ fun parse_table_at table {manifest, root, artifact_root, graph_artifact_root, lo
       case build of
           NONE => default
         | SOME t => Option.getOpt(string_array_field_opt t name, default)
-    val LocalConfig {overrides, build_excludes, build_jobs, build_tactic_timeout, checkpoint_limit_gb} = local_config
+    val LocalConfig {overrides, build_excludes, build_exclude_globs, build_jobs, build_tactic_timeout, checkpoint_limit_gb} = local_config
     val members = package_relative_paths "build.members" (build_strings "members" ["."])
-    val excludes = package_relative_paths "build.exclude" (build_strings "exclude" []) @ build_excludes
+    val (manifest_excludes, deprecated_exclude_globs) =
+      split_deprecated_excludes "build.exclude" (build_strings "exclude" [])
+    val excludes = manifest_excludes @ build_excludes
+    val exclude_globs = deprecated_exclude_globs @ package_relative_paths "build.exclude_globs" (build_strings "exclude_globs" []) @ build_exclude_globs
     val roots = package_relative_paths "build.roots" (build_strings "roots" [])
     val root_tactic_timeouts = root_tactic_timeouts_from_manifest build
     val _ = validate_root_tactic_timeouts roots root_tactic_timeouts
@@ -642,11 +696,13 @@ fun parse_table_at table {manifest, root, artifact_root, graph_artifact_root, lo
       version = Option.mapPartial (fn t => string_field t "version") project,
       members = members,
       excludes = excludes,
+      exclude_globs = exclude_globs,
       roots = roots,
       root_tactic_timeouts = root_tactic_timeouts,
       dependencies = dependencies,
       overrides = overrides,
       local_build_excludes = build_excludes,
+      local_build_exclude_globs = build_exclude_globs,
       local_build_jobs = build_jobs,
       build_tactic_timeout = case build_tactic_timeout of NONE => manifest_timeout | some => some,
       checkpoint_limit_gb = checkpoint_limit_gb,
@@ -707,6 +763,7 @@ fun package_root (Package {root, ...}) = root
 fun package_manifest (Package {manifest, ...}) = manifest
 fun package_members (Package {members, ...}) = members
 fun package_excludes (Package {excludes, ...}) = excludes
+fun package_exclude_globs (Package {exclude_globs, ...}) = exclude_globs
 fun package_roots (Package {roots, ...}) = roots
 fun package_artifact_root (Package {artifact_root, ...}) = artifact_root
 fun root_tactic_timeouts ({root_tactic_timeouts, ...} : t) = root_tactic_timeouts
@@ -800,9 +857,9 @@ fun dependency_to_string project (dep as Dependency {name, source}) =
 
 fun override_to_string (Override {name, path}) = name ^ " -> " ^ path
 
-fun project_package ({root, artifact_root, graph_artifact_root, manifest, name, members, excludes, roots, action_policies, generators, ...} : t) =
+fun project_package ({root, artifact_root, graph_artifact_root, manifest, name, members, excludes, exclude_globs, roots, action_policies, generators, ...} : t) =
   Package {name = Option.getOpt(name, "root"), root = root, manifest = manifest,
-           members = members, excludes = excludes, roots = roots,
+           members = members, excludes = excludes, exclude_globs = exclude_globs, roots = roots,
            artifact_root = if artifact_root = graph_artifact_root then Path.concat(artifact_root, ".holbuild") else artifact_root,
            action_policies = action_policies,
            generators = generators}
@@ -835,7 +892,8 @@ fun dependency_project (project : t) (dep as Dependency {name, source}) =
     val dep_project = parse_dep {manifest = dep_manifest, root = dep_root, artifact_root = dep_artifact_root,
                                  graph_artifact_root = #graph_artifact_root project,
                                  local_config = LocalConfig {overrides = #overrides project,
-                                                                build_excludes = #local_build_excludes project,
+                                                             build_excludes = #local_build_excludes project,
+                                                             build_exclude_globs = #local_build_exclude_globs project,
                                                              build_jobs = #local_build_jobs project,
                                                              build_tactic_timeout = #build_tactic_timeout project,
                                                              checkpoint_limit_gb = #checkpoint_limit_gb project}}
@@ -880,6 +938,7 @@ fun dependency_package artifact_parent project (dep as Dependency {name, ...}) =
   in
     (Package {name = name, root = dep_root, manifest = dep_manifest,
               members = #members dep_project, excludes = #excludes dep_project,
+              exclude_globs = #exclude_globs dep_project,
               roots = #roots dep_project, artifact_root = artifact_root,
               action_policies = #action_policies dep_project,
               generators = #generators dep_project},
@@ -924,8 +983,8 @@ fun packages (project : t) =
 
 fun describe (project : t) =
   let
-    val {root, artifact_root, manifest, name, version, members, excludes, roots, root_tactic_timeouts, dependencies,
-         overrides, local_build_excludes, local_build_jobs, build_tactic_timeout, run_heap, run_loads, heaps, action_policies, generators, ...} = project
+    val {root, artifact_root, manifest, name, version, members, excludes, exclude_globs, roots, root_tactic_timeouts, dependencies,
+         overrides, local_build_excludes, local_build_exclude_globs, local_build_jobs, build_tactic_timeout, run_heap, run_loads, heaps, action_policies, generators, ...} = project
     fun opt label value =
       case value of NONE => () | SOME s => print (label ^ s ^ "\n")
     fun describe_package (Package {name, root, manifest, artifact_root, ...}) =
@@ -939,6 +998,7 @@ fun describe (project : t) =
     opt "version: " version;
     print ("members: " ^ String.concatWith ", " members ^ "\n");
     print ("exclude: " ^ String.concatWith ", " excludes ^ "\n");
+    print ("exclude_globs: " ^ String.concatWith ", " exclude_globs ^ "\n");
     print ("roots: " ^ String.concatWith ", " roots ^ "\n");
     List.app (fn {root, timeout} =>
                 print ("root tactic_timeout: " ^ root ^ " = " ^
