@@ -98,14 +98,14 @@ name = "remote-cache-test"
 members = ["src"]
 TOML
   cat > "$project/src/AScript.sml" <<'SML'
-open HolKernel Parse boolLib bossLib;
-val _ = new_theory "A";
+Theory A
+Ancestors bool
+
 Theorem a_thm:
   T
 Proof
-  ACCEPT_TAC TRUTH
+  simp[]
 QED
-val _ = export_theory();
 SML
 }
 
