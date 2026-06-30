@@ -113,6 +113,8 @@ fun curl_get {url, dst} =
   let
     val code = temp_path "code"
     val display_url = redact_userinfo url
+    (* --compressed advertises curl-supported response encodings, including zstd
+       when this curl build has zstd support, and writes decompressed bytes to dst. *)
     val command = "curl -q -sS -L --compressed --max-time " ^ curl_max_time_seconds ^ curl_config_arg () ^ " -o " ^ quote dst ^
                   " -w '%{http_code}' " ^ quote url ^ " > " ^ quote code
     val status = OS.Process.system command
