@@ -152,6 +152,7 @@ holbuild repl
 holbuild run script.sml
 holbuild context
 holbuild execution-plan MyTheory:my_theorem
+holbuild cache-key MyTheory
 holbuild buildhol
 holbuild heap main
 holbuild export -o build-output.hbx MyTheory
@@ -507,6 +508,11 @@ A project CI job should normally install or build `holbuild`, then run:
 holbuild buildhol   # optional warm-up
 holbuild build
 ```
+
+Use `holbuild --json cache-key [TARGET ...]` when CI needs a deterministic cache
+key derived from holbuild's project model rather than hand-rolled hashing. The
+JSON output includes `toolchain_key`, `build_key`, and the versioned component
+lines used to derive the build key.
 
 Do not pass `HOLDIR` to choose the project HOL. The project HOL is selected by
 `[dependencies.hol]`.

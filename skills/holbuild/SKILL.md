@@ -15,6 +15,7 @@ holbuild build Foo BarTheory             # multiple targets
 holbuild build                           # all, or [build].roots closure if configured
 holbuild build --dry-run FooTheory       # show plan without building
 holbuild context                         # show manifest info
+holbuild cache-key [TARGET ...]          # deterministic CI cache keys
 holbuild execution-plan FooTheory:thm    # static proof-IR plan for one theorem
 holbuild build --force --trace-steps FooTheory
 holbuild gc                              # clean project residue + global cache
