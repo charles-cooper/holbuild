@@ -27,6 +27,7 @@ fun global_help () = print
   \Inspection and advanced commands:\n\
   \  execution-plan T:THM        Inspect proof-step execution plan\n\
   \  buildhol                    Build/reuse declared HOL and print its path\n\
+  \  cache-key [TARGET ...]      Print CI cache keys for targets\n\
   \  heap NAME                   Build a configured heap\n\
   \  clean THEORY...             Remove local build outputs\n\
   \  export -o FILE [TARGET ...]  Export cached build outputs\n\
@@ -96,6 +97,13 @@ fun heap_help () = print
   \Build a configured heap.\n\n\
   \Global options: see `holbuild --help`.\n"
 
+fun cache_key_help () = print
+  "Usage:\n\
+  \  holbuild [GLOBAL OPTIONS] cache-key [TARGET ...]\n\n\
+  \Print deterministic CI cache keys for targets without building. With --json,\n\
+  \emit the key components as JSON.\n\n\
+  \Global options: see `holbuild --help`.\n"
+
 fun clean_help () = print
   "Usage:\n\
   \  holbuild [GLOBAL OPTIONS] clean THEORY...\n\n\
@@ -135,7 +143,7 @@ fun has_help_arg args = List.exists help_arg args
 fun known_command command =
   command = "build" orelse command = "context" orelse command = "repl" orelse
   command = "run" orelse command = "execution-plan" orelse command = "buildhol" orelse
-  command = "heap" orelse command = "clean" orelse command = "export" orelse
+  command = "heap" orelse command = "cache-key" orelse command = "clean" orelse command = "export" orelse
   command = "import" orelse command = "gc" orelse command = "cache" orelse
   command = "goalfrag-plan"
 
@@ -148,6 +156,7 @@ fun command_help command =
     | "execution-plan" => execution_plan_help ()
     | "buildhol" => buildhol_help ()
     | "heap" => heap_help ()
+    | "cache-key" => cache_key_help ()
     | "clean" => clean_help ()
     | "export" => export_help ()
     | "import" => import_help ()
@@ -950,6 +959,17 @@ fun optional_json_string_field name value =
       SOME text => [json_string_field name text]
     | NONE => []
 
+fun cache_key_json {format, toolchain_key, build_key, components} =
+  let
+    val fields =
+      [json_string_field "format" format,
+       json_string_field "toolchain_key" toolchain_key,
+       json_string_field "build_key" build_key,
+       json_array_field "components" components]
+  in
+    "{\n  " ^ String.concatWith ",\n  " fields ^ "\n}\n"
+  end
+
 fun export_metadata_json {archive_path, targets, action_count, metadata} =
   let
     val sha256 =
@@ -1217,6 +1237,18 @@ fun require_schema2 project =
   if HolbuildProject.schema project = 2 then ()
   else raise Error "only holproject schema 2 is supported"
 
+fun cache_key holdir targets =
+  let
+    val _ = reject_holdir holdir
+    val project = timed_phase "project.discover" load_project
+    val _ = require_schema2 project
+    val result = HolbuildCacheKey.result project targets
+  in
+    if HolbuildStatus.json_mode () then print (cache_key_json result)
+    else print (#build_key result ^ "\n")
+  end
+  handle HolbuildCacheKey.Error msg => raise Error msg
+
 fun project_hol_holdir project =
   (HolbuildProject.packages project;
    case HolbuildProject.resolved_hol_dependency project of
@@ -1270,6 +1302,7 @@ fun dispatch_with_options {holdir, source_dir, cache_dir, remote_cache, jobs, ma
        "gc" :: rest => (reject_json "gc"; gc rest)
      | "cache" :: rest => (reject_json "cache"; HolbuildCache.dispatch rest)
      | "import" :: rest => (reject_json "import"; import_archive rest)
+     | "cache-key" :: rest => cache_key holdir rest
      | "buildhol" :: [] => buildhol holdir maxheap
      | "buildhol" :: _ => raise Error "usage: holbuild buildhol"
      | "goalfrag-plan" :: _ => raise Error "goalfrag-plan has been removed; use execution-plan THEORY:THEOREM"

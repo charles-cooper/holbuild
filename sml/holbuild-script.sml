@@ -58,6 +58,7 @@ use "sml/toolchain.sml";
 use "sml/status.sml";
 use "sml/generators.sml";
 use "sml/source_index.sml";
+use "sml/cache_key.sml";
 use "sml/analyser/analysis_protocol.sml";
 use "sml/dependencies.sml";
 use "sml/build_plan.sml";
